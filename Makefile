@@ -1,0 +1,1 @@
+# Placeholder Makefile for Nordic SDK
