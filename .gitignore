@@ -1,0 +1,203 @@
+# Zephyr/NCS Build Artifacts
+build/
+build-*/
+*.elf
+*.bin
+*.hex
+*.uf2
+*.map
+*.lst
+*.o
+*.a
+*.so
+*.d
+*.d.ts
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+*.cmake
+!CMakeLists.txt
+
+# Ninja build files
+.ninja_deps
+.ninja_log
+build.ninja
+
+# West workspace
+.west/
+
+# Zephyr SDK and toolchain
+zephyr-sdk-*/
+toolchain/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.backup
+*.bak
+*.tmp
+*.temp
+
+# Log files
+*.log
+logs/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Node.js (if any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Zephyr specific
+zephyr/
+nrf/
+nrfxlib/
+modules/
+bootloader/
+tools/
+test/
+
+# SDK config backup
+sdk_config/sdk_config.h.backup
+
+# Generated headers
+include/generated/
+zephyr/include/generated/
+
+# Kconfig generated files
+Kconfig.dts
+Kconfig.modules
+
+# Device tree generated files
+*.dts.pre.tmp
+*.dts.pre.tmp.d
+*.dts.pre.tmp.d.tmp
+
+# Partition manager generated files
+pm_config.h
+pm_config.c
+
+# MCUboot generated files
+mcuboot_secondary.bin
+mcuboot_secondary.hex
+
+# Nordic specific
+nrf_connect_sdk_version.txt
+nrf_connect_sdk_version.h
+
+# Temporary files
+*.tmp
+*.temp
+*.orig
+*.rej
+
+# Archive files
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Documentation build
+docs/_build/
+docs/build/
+
+# Local configuration
+local.conf
+local.conf.backup
+
+# Flash scripts (keep these as they're custom)
+# scripts/flash.sh
+# scripts/flash-uf2.sh
+# scripts/flash-simple.sh
+# scripts/dfu.sh
+# scripts/monitor.sh
+# scripts/build.sh 
