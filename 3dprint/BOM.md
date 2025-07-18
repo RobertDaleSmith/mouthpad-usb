@@ -14,7 +14,7 @@
 ### Assemble
 
 Connect *USB-C to USB-A* adapter to *Seeed* module. Next place the two into the **bottom** enclosure shell. Parts should fit snuggly. 🤗
-![](mouthpad_usb_open.png)
+![](../images/mouthpad_usb_3d_open.png)
 
 Then finally snap on the **top** half of the 3d printed enclosure shell. ^👅
-![](mouthpad_usb.png)
+![](../images/mouthpad_usb_3d_full.png)
