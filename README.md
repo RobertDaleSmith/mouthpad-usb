@@ -1,4 +1,5 @@
-# MouthPad-USB
+# MouthPad^ USB 
+
 ### BLE-USB Bridge with MCUboot DFU Support
 
 A Zephyr RTOS application for the **Seeed XIAO nRF52840** that acts as a bridge between BLE HID devices and USB HID, with full Device Firmware Upgrade (DFU) support.
