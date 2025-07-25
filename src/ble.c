@@ -1,9 +1,8 @@
-/* ble.c - Application ble_central entry point */
-
 /*
- * Copyright (c) 2018 Nordic Semiconductor ASA
+ * Copyright (c) 2025 Robert Dale Smith
+ * Copyright (c) 2025 Augmental Tech
  *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/types.h>
@@ -26,6 +25,7 @@
 #include <zephyr/settings/settings.h>
 
 #include <zephyr/logging/log.h>
+#include "virtual_mouse.h"
 
 LOG_MODULE_REGISTER(ble_mouthpad, LOG_LEVEL_INF);
 
@@ -60,6 +60,9 @@ static uint8_t capslock_state;
 
 static void hids_on_ready(struct k_work *work);
 static K_WORK_DEFINE(hids_ready_work, hids_on_ready);
+
+static void hogp_map_read_cb(struct bt_hogp *hogp, uint8_t err,
+				const uint8_t *data, size_t size, size_t offset);
 
 
 static void scan_filter_match(struct bt_scan_device_info *device_info,
@@ -313,6 +316,83 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 		printk(" 0x%x", data[i]);
 	}
 	printk("\n");
+	
+	// Handle different report types based on Report ID
+	uint8_t report_id = bt_hogp_rep_id(rep);
+	
+	// Pass through the raw data directly - no translation needed
+	printk("Report %u raw data: size=%u, data:", report_id, size);
+	for (uint8_t i = 0; i < size; i++) {
+		printk(" 0x%02x", data[i]);
+	}
+	printk("\n");
+	
+	// Convert the raw data to the format expected by virtual_mouse_send_event
+	// This should match the USB HID mouse report format: [buttons, x, y, wheel]
+	if (size >= 1) {
+		uint8_t buttons = 0;
+		int8_t x = 0, y = 0, wheel = 0;
+		
+		if (report_id == 1) {
+			// Report 1: Button data
+			if (size >= 1) buttons = data[0];
+			if (size >= 2) wheel = (int8_t)data[1];
+		} else if (report_id == 2) {
+			// Report 2: Movement data - 12-bit X and Y packed into 3 bytes
+			if (size >= 3) {
+				// Try different parsing approaches to find the correct one
+				
+				// Approach 1: [X_low8, X_high4+Y_low4, Y_high8]
+				uint16_t x_12bit_1 = (data[0] << 4) | ((data[1] >> 4) & 0x0F);
+				uint16_t y_12bit_1 = ((data[1] & 0x0F) << 8) | data[2];
+				
+				// Approach 2: [Y_low8, Y_high4+X_low4, X_high8] (swapped)
+				uint16_t x_12bit_2 = ((data[1] & 0x0F) << 8) | data[2];
+				uint16_t y_12bit_2 = (data[0] << 4) | ((data[1] >> 4) & 0x0F);
+				
+				// Approach 3: [X_high8, X_low4+Y_high4, Y_low8] (different bit order)
+				uint16_t x_12bit_3 = (data[0] << 4) | ((data[1] >> 4) & 0x0F);
+				uint16_t y_12bit_3 = ((data[1] & 0x0F) << 8) | data[2];
+				
+				// Convert to signed values for all approaches
+				int16_t x_signed_1 = (int16_t)(x_12bit_1 & 0x7FF);
+				if (x_12bit_1 & 0x800) x_signed_1 -= 2048;
+				int16_t y_signed_1 = (int16_t)(y_12bit_1 & 0x7FF);
+				if (y_12bit_1 & 0x800) y_signed_1 -= 2048;
+				
+				int16_t x_signed_2 = (int16_t)(x_12bit_2 & 0x7FF);
+				if (x_12bit_2 & 0x800) x_signed_2 -= 2048;
+				int16_t y_signed_2 = (int16_t)(y_12bit_2 & 0x7FF);
+				if (y_12bit_2 & 0x800) y_signed_2 -= 2048;
+
+				int16_t x_signed_3 = (int16_t)(x_12bit_3 & 0x7FF);
+				if (x_12bit_3 & 0x800) x_signed_3 -= 2048;
+				int16_t y_signed_3 = (int16_t)(y_12bit_3 & 0x7FF);
+				if (y_12bit_3 & 0x800) y_signed_3 -= 2048;
+				
+				printk("Report 2 parsing attempts:\n");
+				printk("  Approach 1: X=%d, Y=%d (raw: 0x%03x, 0x%03x)\n", 
+				       x_signed_1, y_signed_1, x_12bit_1, y_12bit_1);
+				printk("  Approach 2: X=%d, Y=%d (raw: 0x%03x, 0x%03x)\n", 
+				       x_signed_2, y_signed_2, x_12bit_2, y_12bit_2);
+				printk("  Approach 3: X=%d, Y=%d (raw: 0x%03x, 0x%03x)\n", 
+				       x_signed_3, y_signed_3, x_12bit_3, y_12bit_3);
+				
+				// For now, use approach 1 but let's see which one makes sense
+				int16_t x_signed = x_signed_1;
+				int16_t y_signed = y_signed_1;
+				
+				// Scale down to 8-bit for USB HID mouse
+				x = (int8_t)(x_signed / 16);
+				y = (int8_t)(y_signed / 16);
+				wheel = 0;
+			}
+		}
+		
+		printk("Sending to USB: buttons=0x%02x, x=%d, y=%d, wheel=%d\n", buttons, x, y, wheel);
+		virtual_mouse_send_event(buttons, x, y, wheel);
+	}
+	
 	return BT_GATT_ITER_CONTINUE;
 }
 
@@ -332,6 +412,48 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 		printk(" 0x%x", data[i]);
 	}
 	printk("\n");
+	
+	// Forward mouse events to virtual mouse device
+	// Try different mouse report formats based on size
+	if (size >= 4) {
+		// 4-byte format: [buttons, x, y, wheel]
+		uint8_t buttons = data[0];
+		int8_t x = (int8_t)data[1];
+		int8_t y = (int8_t)data[2];
+		int8_t wheel = (int8_t)data[3];
+		
+		printk("Mouse boot report (4-byte): buttons=0x%02x, x=%d, y=%d, wheel=%d\n", buttons, x, y, wheel);
+		virtual_mouse_send_event(buttons, x, y, wheel);
+	} else if (size >= 3) {
+		// 3-byte format: try different interpretations
+		uint8_t b0 = data[0];
+		uint8_t b1 = data[1];
+		uint8_t b2 = data[2];
+		
+		// Interpretation 1: [buttons, x, y]
+		uint8_t buttons1 = b0;
+		int8_t x1 = (int8_t)b1;
+		int8_t y1 = (int8_t)b2;
+		
+		// Interpretation 2: [x, y, buttons]
+		int8_t x2 = (int8_t)b0;
+		int8_t y2 = (int8_t)b1;
+		uint8_t buttons2 = b2;
+		
+		// Interpretation 3: [x, buttons, y]
+		int8_t x3 = (int8_t)b0;
+		uint8_t buttons3 = b1;
+		int8_t y3 = (int8_t)b2;
+		
+		printk("Mouse boot report (3-byte): [0x%02x, %d, %d] or [%d, %d, 0x%02x] or [%d, 0x%02x, %d]\n", 
+		       buttons1, x1, y1, x2, y2, buttons2, x3, buttons3, y3);
+		
+		// Use interpretation 2: [x, y, buttons] since that's more common
+		virtual_mouse_send_event(buttons2, x2, y2, 0);
+	} else {
+		printk("Mouse boot report too small: size=%d\n", size);
+	}
+	
 	return BT_GATT_ITER_CONTINUE;
 }
 
@@ -366,35 +488,83 @@ static void hids_on_ready(struct k_work *work)
 
 	printk("HIDS is ready to work\n");
 
+	// Print HID descriptor information
+	printk("HID Descriptor Information:\n");
+	printk("  Protocol Mode: %s\n", 
+	       bt_hogp_pm_get(&hogp) == BT_HIDS_PM_BOOT ? "BOOT" : "REPORT");
+	
+	// List all available reports
 	while (NULL != (rep = bt_hogp_rep_next(&hogp, rep))) {
-		if (bt_hogp_rep_type(rep) ==
-		    BT_HIDS_REPORT_TYPE_INPUT) {
-			printk("Subscribe to report id: %u\n",
-			       bt_hogp_rep_id(rep));
-			err = bt_hogp_rep_subscribe(&hogp, rep,
-							   hogp_notify_cb);
+		printk("  Report ID: %u, Type: %u, Size: %u\n",
+		       bt_hogp_rep_id(rep),
+		       bt_hogp_rep_type(rep),
+		       bt_hogp_rep_size(rep));
+		
+		if (bt_hogp_rep_type(rep) == BT_HIDS_REPORT_TYPE_INPUT) {
+			printk("    -> Subscribing to input report\n");
+			err = bt_hogp_rep_subscribe(&hogp, rep, hogp_notify_cb);
+			if (err) {
+				printk("    -> Subscribe error (%d)\n", err);
+			}
+		}
+	}
+	
+	// Try to read the full HID descriptor
+	// printk("Attempting to read full HID descriptor...\n");
+	
+	// // First, try to read a larger chunk to see if we can get more data
+	// printk("Reading large chunk (0-255 bytes)...\n");
+	// err = bt_hogp_map_read(&hogp, hogp_map_read_cb, 0, K_SECONDS(5));
+	// if (err) {
+	// 	printk("Failed to read large HID descriptor chunk: %d\n", err);
+	// }
+	
+	// k_sleep(K_MSEC(500));  // Wait for callback
+	
+	// // Then try reading from offset 64 to get the rest
+	// printk("Reading remaining chunk (64+ bytes)...\n");
+	// err = bt_hogp_map_read(&hogp, hogp_map_read_cb, 64, K_SECONDS(5));
+	// if (err) {
+	// 	printk("Failed to read remaining HID descriptor chunk: %d\n", err);
+	// }
+	
+	// k_sleep(K_MSEC(500));  // Wait for callback
+	
+	// // Try a few more offsets in case the descriptor is larger
+	// for (size_t offset = 128; offset <= 256; offset += 64) {
+	// 	printk("Trying offset %zu...\n", offset);
+	// 	err = bt_hogp_map_read(&hogp, hogp_map_read_cb, offset, K_SECONDS(2));
+	// 	if (err) {
+	// 		printk("No more data at offset %zu (error: %d)\n", offset, err);
+	// 		break;
+	// 	}
+	// 	k_sleep(K_MSEC(200));
+	// }
+	
+	// printk("Finished attempting to read full HID descriptor\n");
+	
+	// Only subscribe to boot reports if we're in boot mode
+	if (bt_hogp_pm_get(&hogp) == BT_HIDS_PM_BOOT) {
+		if (hogp.rep_boot.kbd_inp) {
+			printk("Subscribe to boot keyboard report\n");
+			err = bt_hogp_rep_subscribe(&hogp,
+							   hogp.rep_boot.kbd_inp,
+							   hogp_boot_kbd_report);
 			if (err) {
 				printk("Subscribe error (%d)\n", err);
 			}
 		}
-	}
-	if (hogp.rep_boot.kbd_inp) {
-		printk("Subscribe to boot keyboard report\n");
-		err = bt_hogp_rep_subscribe(&hogp,
-						   hogp.rep_boot.kbd_inp,
-						   hogp_boot_kbd_report);
-		if (err) {
-			printk("Subscribe error (%d)\n", err);
+		if (hogp.rep_boot.mouse_inp) {
+			printk("Subscribe to boot mouse report\n");
+			err = bt_hogp_rep_subscribe(&hogp,
+							   hogp.rep_boot.mouse_inp,
+							   hogp_boot_mouse_report);
+			if (err) {
+				printk("Subscribe error (%d)\n", err);
+			}
 		}
-	}
-	if (hogp.rep_boot.mouse_inp) {
-		printk("Subscribe to boot mouse report\n");
-		err = bt_hogp_rep_subscribe(&hogp,
-						   hogp.rep_boot.mouse_inp,
-						   hogp_boot_mouse_report);
-		if (err) {
-			printk("Subscribe error (%d)\n", err);
-		}
+	} else {
+		printk("In REPORT mode - using report protocol reports only\n");
 	}
 }
 
@@ -408,6 +578,128 @@ static void hogp_pm_update_cb(struct bt_hogp *hogp)
 	printk("Protocol mode updated: %s\n",
 	      bt_hogp_pm_get(hogp) == BT_HIDS_PM_BOOT ?
 	      "BOOT" : "REPORT");
+}
+
+static void hogp_map_read_cb(struct bt_hogp *hogp, uint8_t err,
+				const uint8_t *data, size_t size, size_t offset)
+{
+	static size_t total_size = 0;
+	
+	if (err) {
+		printk("HID descriptor read error: %d\n", err);
+		return;
+	}
+	
+	if (!data || size == 0) {
+		printk("HID descriptor read complete - total size: %zu bytes\n", total_size);
+		total_size = 0;  // Reset for next read
+		return;
+	}
+	
+	total_size += size;
+	printk("HID Descriptor chunk (offset=%zu, size=%zu bytes, total=%zu):\n", offset, size, total_size);
+	for (size_t i = 0; i < size; i++) {
+		if (i % 16 == 0) {
+			printk("  %04zx:", offset + i);
+		}
+		printk(" %02x", data[i]);
+		if (i % 16 == 15 || i == size - 1) {
+			printk("\n");
+		}
+	}
+	
+	// Try to parse the descriptor to understand the report format
+	printk("Parsing HID descriptor chunk...\n");
+	
+	// Track the current report structure
+	static uint8_t current_report_id = 0;
+	static uint8_t total_bits = 0;
+	static uint8_t report_count = 0;
+	static uint8_t current_usage = 0;
+	static uint8_t current_logical_min = 0;
+	static uint8_t current_logical_max = 0;
+	
+	for (size_t i = 0; i < size; i++) {
+		uint8_t item = data[i];
+		
+		if (item == 0x85) {  // Report ID
+			if (i + 1 < size) {
+				current_report_id = data[i + 1];
+				total_bits = 0;  // Reset for new report
+				printk("  Report ID: %u (starting new report)\n", current_report_id);
+			}
+		} else if (item == 0x95) {  // Report Count
+			if (i + 1 < size) {
+				report_count = data[i + 1];
+				printk("  Report Count: %u\n", report_count);
+			}
+		} else if (item == 0x75) {  // Report Size
+			if (i + 1 < size) {
+				uint8_t bits = data[i + 1];
+				total_bits += bits * report_count;
+				printk("  Report Size: %u bits (total bits so far: %u)\n", bits, total_bits);
+			}
+		} else if (item == 0x09) {  // Usage
+			if (i + 1 < size) {
+				current_usage = data[i + 1];
+				if (current_usage == 0x01) {
+					printk("  Usage: Pointer (0x%02x)\n", current_usage);
+				} else if (current_usage == 0x30) {
+					printk("  Usage: X (0x%02x)\n", current_usage);
+				} else if (current_usage == 0x31) {
+					printk("  Usage: Y (0x%02x)\n", current_usage);
+				} else if (current_usage == 0x38) {
+					printk("  Usage: Wheel (0x%02x)\n", current_usage);
+				} else {
+					printk("  Usage: 0x%02x\n", current_usage);
+				}
+			}
+		} else if (item == 0x19) {  // Usage Minimum
+			if (i + 1 < size) {
+				printk("  Usage Minimum: 0x%02x\n", data[i + 1]);
+			}
+		} else if (item == 0x29) {  // Usage Maximum
+			if (i + 1 < size) {
+				printk("  Usage Maximum: 0x%02x\n", data[i + 1]);
+			}
+		} else if (item == 0x15) {  // Logical Minimum
+			if (i + 1 < size) {
+				current_logical_min = data[i + 1];
+				printk("  Logical Minimum: %d\n", (int8_t)current_logical_min);
+			}
+		} else if (item == 0x25) {  // Logical Maximum
+			if (i + 1 < size) {
+				current_logical_max = data[i + 1];
+				printk("  Logical Maximum: %d\n", (int8_t)current_logical_max);
+			}
+		} else if (item == 0x81) {  // Input
+			if (i + 1 < size) {
+				uint8_t flags = data[i + 1];
+				printk("  Input flags: 0x%02x (", flags);
+				if (flags & 0x01) printk("Constant ");
+				if (flags & 0x02) printk("Variable ");
+				if (flags & 0x04) printk("Relative ");
+				if (flags & 0x08) printk("Wrap ");
+				if (flags & 0x10) printk("NonLinear ");
+				if (flags & 0x20) printk("NoPreferred ");
+				if (flags & 0x40) printk("NullState ");
+				if (flags & 0x80) printk("Volatile ");
+				printk(")\n");
+				
+				// Show detailed field information for Report 2
+				if (current_report_id == 2) {
+					printk("    -> Report 2 field: Usage=0x%02x, Size=%u bits, Count=%u, Range=[%d,%d]\n",
+					       current_usage, total_bits, report_count, 
+					       (int8_t)current_logical_min, (int8_t)current_logical_max);
+				}
+			}
+		} else if (item == 0xC0) {  // End Collection
+			printk("  End Collection\n");
+			printk("  *** Report %u total size: %u bits (%u bytes)\n", 
+			       current_report_id, total_bits, (total_bits + 7) / 8);
+			total_bits = 0;  // Reset for next report
+		}
+	}
 }
 
 /* HIDS client initialization parameters */

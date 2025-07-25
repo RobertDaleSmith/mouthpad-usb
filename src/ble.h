@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2025 Robert Dale Smith
+ * Copyright (c) 2025 Augmental Tech
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #ifndef BLE_H
 #define BLE_H
 
