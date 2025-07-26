@@ -6,5 +6,4 @@ target_sources(app PRIVATE
   src/ble.c
   src/usb.c
   src/main.c
-  src/virtual_mouse.c
 )

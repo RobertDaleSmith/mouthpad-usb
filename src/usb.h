@@ -21,7 +21,4 @@
  */
 int usb_init(void);
 
-// Mouse events are now handled through the Zephyr input subsystem
-// Use virtual_mouse_send_event() from virtual_mouse.h instead
-
 #endif /* USB_H */
