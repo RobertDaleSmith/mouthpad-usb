@@ -10,6 +10,7 @@ config SETTINGS
 	default y
 
 config ZMS
+	bool
 	default y if (SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
 
 config NVS

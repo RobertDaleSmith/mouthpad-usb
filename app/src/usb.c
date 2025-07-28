@@ -48,84 +48,18 @@ struct k_sem ep_write_sem;
  * This descriptor matches the MouthPad BLE device exactly to eliminate scaling
  */
 static const uint8_t hid_report_desc[] = {
-    0x05, 0x01,             /* UsagePage (Generic Desktop)           */
-    0x09, 0x02,             /* Usage     (Mouse)                     */
-    0xA1, 0x01,             /* Collection (Application)              */
-      0x85, 0x01,           /*   Report ID (1)                       */
-      0x09, 0x01,           /*   Usage     (Pointer)                 */
-      0xA1, 0x00,           /*   Collection (Physical)               */
-
-      /* --- 5 button bits + 3 padding bits + 8 wheel bits --------------- */
-      0x95, 0x05,           /*   ReportCount 5                       */
-      0x75, 0x01,           /*   ReportSize 1                        */
-      0x05, 0x09,           /*   UsagePage (Button)                  */
-      0x19, 0x01,           /*   Usage Minimum (Button 1)            */
-      0x29, 0x05,           /*   Usage Maximum (Button 5)            */
-      0x15, 0x00,           /*   Logical Minimum (0)                 */
-      0x25, 0x01,           /*   Logical Maximum (1)                 */
-      0x81, 0x02,           /*   Input (Data,Var,Abs)                */
-
-      0x95, 0x01,           /*   ReportCount 1                       */
-      0x75, 0x03,           /*   ReportSize 3                        */
-      0x81, 0x01,           /*   Input (Constant)                    */
-
-      0x75, 0x08,           /*   ReportSize 8                        */
-      0x95, 0x01,           /*   ReportCount 1                       */
-      0x05, 0x01,           /*   UsagePage (Generic Desktop)         */
-      0x09, 0x38,           /*   Usage     (Wheel)                   */
-      0x15, 0x81,           /*   Logical Minimum (-127)              */
-      0x25, 0x7F,           /*   Logical Maximum (127)               */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-
-      0x05, 0x0C,           /*   UsagePage (Consumer)                */
-      0x0A, 0x38, 0x02,     /*   Usage     (Volume)                  */
-      0x95, 0x01,           /*   ReportCount 1                       */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-
-      0xC0,                  /*   End Collection                      */
-      0x85, 0x02,           /*   Report ID (2)                       */
-
-      /* --- X and Y movement : 2 × 12-bit signed ------------------------ */
-      0x09, 0x01,           /*   Usage     (Pointer)                 */
-      0xA1, 0x00,           /*   Collection (Physical)               */
-      0x75, 0x0C,           /*   ReportSize 12                       */
-      0x95, 0x02,           /*   ReportCount 2                       */
-      0x05, 0x01,           /*   UsagePage (Generic Desktop)         */
-      0x09, 0x30,           /*   Usage     (X)                       */
-      0x09, 0x31,           /*   Usage     (Y)                       */
-      0x16, 0x01, 0xF8,     /*   Logical Minimum (-2047)             */
-      0x26, 0xFF, 0x07,     /*   Logical Maximum (2047)              */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-
-      0xC0,                  /*   End Collection                      */
-      0xC0,                  /*   End Collection                      */
-
-      /* --- Consumer controls : Media keys and volume ------------------- */
-      0x05, 0x0C,           /*   UsagePage (Consumer)                */
-      0x09, 0x01,           /*   Usage     (Consumer Control)        */
-      0xA1, 0x01,           /*   Collection (Application)            */
-      0x85, 0x03,           /*   Report ID (3)                       */
-      0x15, 0x00,           /*   Logical Minimum (0)                 */
-      0x25, 0x01,           /*   Logical Maximum (1)                 */
-      0x75, 0x01,           /*   ReportSize 1                        */
-      0x95, 0x01,           /*   ReportCount 1                       */
-
-      0x09, 0xCD,           /*   Usage     (Play/Pause)              */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-      0x09, 0xB5,           /*   Usage     (Scan Next Track)         */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-      0x09, 0xB6,           /*   Usage     (Scan Previous Track)     */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-      0x09, 0xEA,           /*   Usage     (Volume Up)               */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-      0x09, 0xE9,           /*   Usage     (Volume Down)             */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-      0x0A, 0x25, 0x02,     /*   Usage     (Mute)                    */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-      0x0A, 0x24, 0x02,     /*   Usage     (Power)                   */
-      0x81, 0x06,           /*   Input (Data,Var,Rel,NoPref)         */
-
-      0xC0                   /* End Collection                        */
+    0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x85, 0x01, 0x09, 0x01, 0xA1, 0x00,
+    0x95, 0x05, 0x75, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29, 0x05, 0x15, 0x00,
+    0x25, 0x01, 0x81, 0x02, 0x95, 0x01, 0x75, 0x03, 0x81, 0x01, 0x75, 0x08,
+    0x95, 0x01, 0x05, 0x01, 0x09, 0x38, 0x15, 0x81, 0x25, 0x7F, 0x81, 0x06,
+    0x05, 0x0C, 0x0A, 0x38, 0x02, 0x95, 0x01, 0x81, 0x06, 0xC0, 0x85, 0x02,
+    0x09, 0x01, 0xA1, 0x00, 0x75, 0x0C, 0x95, 0x02, 0x05, 0x01, 0x09, 0x30,
+    0x09, 0x31, 0x16, 0x01, 0xF8, 0x26, 0xFF, 0x07, 0x81, 0x06, 0xC0, 0xC0,
+    0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x03, 0x15, 0x00, 0x25, 0x01,
+    0x75, 0x01, 0x95, 0x01, 0x09, 0xCD, 0x81, 0x06, 0x0A, 0x83, 0x01, 0x81,
+    0x06, 0x09, 0xB5, 0x81, 0x06, 0x09, 0xB6, 0x81, 0x06, 0x09, 0xEA, 0x81,
+    0x06, 0x09, 0xE9, 0x81, 0x06, 0x0A, 0x25, 0x02, 0x81, 0x06, 0x0A, 0x24,
+    0x02, 0x81, 0x06, 0xC0
 };
 static enum usb_dc_status_code usb_status;
 

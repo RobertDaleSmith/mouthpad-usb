@@ -3,7 +3,7 @@
 A Zephyr RTOS application for the **Seeed XIAO nRF52840** that acts as a bridge between BLE HID devices and USB HID, with full Device Firmware Upgrade (DFU) support.
 
 <div style="text-align: center;">
-   <img src="images/mouthpad_usb.png" style="max-width: 420px">
+   <img src="docs/images/mouthpad_usb.png" style="max-width: 420px">
 </div>
 
 ## 🎯 Features
@@ -24,44 +24,57 @@ A Zephyr RTOS application for the **Seeed XIAO nRF52840** that acts as a bridge 
 
 ### 1. Build the Project
 
+This project includes a convenient Makefile that wraps `west` commands for easy building, flashing, and monitoring.
+
 ```bash
-# Build with MCUboot bootloader
+# Show all available commands
+make help
+
+# Build the project
 make build
+
+# Build for a specific board
+make BOARD=xiao_ble build
+make BOARD=nrf52840dongle build
 ```
 
-### 2. Flash the Device
+### 2. Available Make Commands
 
-You have three options for flashing:
-
-#### Option A: MCUboot DFU (Recommended)
 ```bash
-# Flash the initial firmware
+# Core commands
+make build              # Build the project
+make flash              # Flash to device
+make monitor-nordic     # Open serial monitor (Nordic boards)
+make clean              # Clean build directory
+
+# Convenience commands
+make build-flash        # Build and flash in one command
+make build-flash-monitor # Build, flash, and monitor
+make pristine           # Clean and rebuild from scratch
+
+# Configuration
+make menuconfig         # Open configuration menu
+make config             # Show build configuration
+```
+
+### 3. Flash the Device
+
+```bash
+# Flash to device
 make flash
 
-# To update firmware later:
-# 1. Connect to device via serial
-make monitor
-# 2. Type 'dfu' in the shell
-# 3. Run 'make flash' again
+# Build and flash in one command
+make build-flash
+
+# Build, flash, and monitor in one command
+make build-flash-monitor
 ```
 
-#### Option B: UF2 Bootloader
-```bash
-# Get UF2 flashing instructions
-make flash-uf2
-
-# Then follow the instructions to copy the UF2 file
-```
-
-#### Option C: Manual UF2
-1. Double-tap the reset button to enter UF2 mode
-2. Copy `build/zephyr/app.uf2` to the `XIAO-SENSE` volume
-
-### 3. Monitor Output
+### 4. Monitor Output
 
 ```bash
 # Monitor serial output for debugging
-make monitor
+make monitor-nordic
 ```
 
 ## 🔧 DFU (Device Firmware Upgrade)

@@ -8,8 +8,7 @@ This guide walks through setting up an nRF Connect SDK (Zephyr) workspace and ad
 
 ```bash
 # Clone manifest repo
-west init -m https://github.com/nrfconnect/sdk-nrf --mr v2.6.0 zephyr_workspace
-cd zephyr_workspace
+west init -m https://github.com/nrfconnect/sdk-nrf --mr main
 
 # Pull in all modules
 west update

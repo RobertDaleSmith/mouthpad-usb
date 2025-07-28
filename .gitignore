@@ -193,11 +193,3 @@ docs/build/
 # Local configuration
 local.conf
 local.conf.backup
-
-# Flash scripts (keep these as they're custom)
-# scripts/flash.sh
-# scripts/flash-uf2.sh
-# scripts/flash-simple.sh
-# scripts/dfu.sh
-# scripts/monitor.sh
-# scripts/build.sh 
