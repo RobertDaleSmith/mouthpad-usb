@@ -79,18 +79,7 @@ west build -b xiao_ble projects/mouthpad_usb --pristine=always
 
 ## 🔧 DFU (Device Firmware Upgrade)
 
-This project includes full DFU support with two methods:
-
-### Method 1: MCUboot DFU (Over-the-Air)
-
-1. **Initial Setup**: Flash the device with `make flash` (includes MCUboot bootloader)
-2. **Enter DFU Mode**: 
-   - Connect via serial: `make monitor`
-   - Type `dfu` in the shell
-   - Device reboots into bootloader mode
-3. **Update Firmware**: Run `make flash` again
-
-### Method 2: UF2 Bootloader
+### UF2 Bootloader
 
 1. **Enter UF2 Mode**: Double-tap the reset button
 2. **Copy Firmware**: Copy `build/zephyr/app.uf2` to the `XIAO-SENSE` volume
