@@ -45,6 +45,10 @@ jobs:
           west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
           west update --narrow -o=--depth=1
 
+      - name: 📁 Copy App to Workspace
+        run: |
+          cp -r app /zephyr_workspace/app
+
       - name: 💾 Cache ~/.cache/ccache
         uses: actions/cache@v3
         with:
