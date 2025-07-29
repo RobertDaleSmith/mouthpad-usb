@@ -1,0 +1,93 @@
+name: Build MouthPad USB
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      # Zephyr toolchain from here:
+      # https://github.com/zephyrproject-rtos/docker-image/pkgs/container/ci
+      image: ghcr.io/zephyrproject-rtos/ci:v0.26.6
+    env:
+      # Tell cmake where to find the zephyr sdk
+      CMAKE_PREFIX_PATH: /opt/toolchains
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ♻️ Initialize Zephyr Workspace
+        # Set up the Zephyr workspace exactly as specified
+        run: |
+          mkdir -p /zephyr_workspace
+          cd /zephyr_workspace
+          west init -m https://github.com/nordicsemi/sdk-nrf.git --mr main
+          west update --narrow -o=--depth=1
+
+      - name: 💾 Cache ~/.cache/ccache
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ccache
+          key: ccache-v1-${{ runner.os }}-${{ hashFiles('west.yml') }}
+          restore-keys: |
+            ccache-v1-${{ runner.os }}-
+
+      - name: 🔨 Build xiao_ble
+        run: |
+          cd /zephyr_workspace
+          ccache -z
+          west build \
+              --board xiao_ble \
+              --pristine=always app
+          ccache -sv
+
+      - name: 🔨 Build nrf52840dongle
+        run: |
+          cd /zephyr_workspace
+          ccache -z
+          west build \
+              --board nrf52840dongle \
+              --pristine=always app
+          ccache -sv
+
+      - name: 🔨 Build nrf52840dk/nrf52840
+        run: |
+          cd /zephyr_workspace
+          ccache -z
+          west build \
+              --board nrf52840dk/nrf52840 \
+              --pristine=always app
+          ccache -sv
+
+      - name: 📦 Rename and Upload UF2 Artifacts
+        run: |
+          cd /zephyr_workspace
+          BUILD_DATE=$(date +%Y%m%d)
+          
+          # Copy xiao_ble UF2
+          cp build/app/zephyr/zephyr.uf2 mouthpad_usb_xiao_ble_${BUILD_DATE}.uf2
+          echo "✅ xiao_ble UF2: mouthpad_usb_xiao_ble_${BUILD_DATE}.uf2"
+          
+          # Copy nrf52840dongle UF2
+          cp build/app/zephyr/zephyr.uf2 mouthpad_usb_nrf52840dongle_${BUILD_DATE}.uf2
+          echo "✅ nrf52840dongle UF2: mouthpad_usb_nrf52840dongle_${BUILD_DATE}.uf2"
+          
+          # Copy nrf52840dk UF2
+          cp build/app/zephyr/zephyr.uf2 mouthpad_usb_nrf52840dk_${BUILD_DATE}.uf2
+          echo "✅ nrf52840dk UF2: mouthpad_usb_nrf52840dk_${BUILD_DATE}.uf2"
+
+      - name: 📦 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mouthpad-usb-firmware
+          path: |
+            /zephyr_workspace/mouthpad_usb_xiao_ble_*.uf2
+            /zephyr_workspace/mouthpad_usb_nrf52840dongle_*.uf2
+            /zephyr_workspace/mouthpad_usb_nrf52840dk_*.uf2
+          retention-days: 30 

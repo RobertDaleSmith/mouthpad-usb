@@ -1,0 +1,46 @@
+# Build artifacts
+build/
+build-*/
+
+# Git
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Documentation build
+docs/_build/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# GitHub Actions
+.github/
+
+# Node modules (if any)
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Backup files
+*.bak
+*.backup 

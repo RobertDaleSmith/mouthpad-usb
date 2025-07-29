@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  mouthpad-build:
+    image: ghcr.io/zephyrproject-rtos/ci:v0.26.6
+    container_name: mouthpad-usb-build
+    volumes:
+      - ./app:/zephyr_workspace/app
+      - zephyr_workspace_data:/zephyr_workspace
+      - ccache_data:/root/.cache/ccache
+      - ~/.gitconfig:/root/.gitconfig:ro
+      - ~/.ssh:/root/.ssh:ro
+      - ./build:/zephyr_workspace/build-output
+    working_dir: /zephyr_workspace
+    environment:
+      - CMAKE_PREFIX_PATH=/opt/toolchains
+    command: >
+      bash -c "
+        echo 'Creating /zephyr_workspace directory...'
+        mkdir -p /zephyr_workspace
+        cd /zephyr_workspace
+        
+        # Only initialize if workspace doesn't exist or is corrupted
+        if [ ! -d '.west' ] || [ ! -f '.west/config' ]; then
+          echo 'Initializing workspace (first time or corrupted)...'
+          rm -rf .west nrf zephyr nrfxlib bootloader build
+          west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
+          west update --narrow -o=--depth=1
+        else
+          echo 'Workspace already exists, skipping initialization...'
+        fi
+        
+        echo 'Building for multiple boards...'
+        
+        # Build xiao_ble
+        echo 'Building xiao_ble...'
+        ccache -z
+        west build -b xiao_ble app --pristine=always
+        cp build/app/zephyr/zephyr.uf2 build-output/mouthpad_usb_xiao_ble_\$(date +%Y%m%d).uf2
+        echo '✅ xiao_ble build completed!'
+        
+        # Build raytac_mdbt50q_cx_40_dongle/nrf52840
+        # echo 'Building raytac_mdbt50q_cx_40_dongle/nrf52840...'
+        # ccache -z
+        # west build -b raytac_mdbt50q_cx_40_dongle/nrf52840 app --pristine=always
+        # cp build/app/zephyr/zephyr.uf2 build-output/mouthpad_usb_raytac_mdbt50q_cx_40_dongle_\$(date +%Y%m%d).uf2
+        # echo '✅ nrf52840dongle build completed!'
+        
+        # Build nrf52_adafruit_feather
+        # echo 'Building nrf52_adafruit_feather...'
+        # ccache -z
+        # west build -b nrf52_adafruit_feather app --pristine=always
+        # cp build/app/zephyr/zephyr.uf2 build-output/mouthpad_usb_nrf52_adafruit_feather_\$(date +%Y%m%d).uf2
+        # echo '✅ nrf52_adafruit_feather build completed!'
+        
+        echo 'All builds completed!'
+        echo 'Generated files:'
+        ls -la build-output/
+      "
+
+  # Alternative service for interactive development
+  mouthpad-dev:
+    image: ghcr.io/zephyrproject-rtos/ci:v0.26.6
+    container_name: mouthpad-usb-dev
+    volumes:
+      - ./app:/zephyr_workspace/app
+      - zephyr_workspace_data:/zephyr_workspace
+      - ccache_data:/root/.cache/ccache
+      - ~/.gitconfig:/root/.gitconfig:ro
+      - ~/.ssh:/root/.ssh:ro
+    working_dir: /zephyr_workspace
+    environment:
+      - CMAKE_PREFIX_PATH=/opt/toolchains
+    stdin_open: true
+    tty: true
+    command: bash
+
+volumes:
+  zephyr_workspace_data:
+    driver: local
+  ccache_data:
+    driver: local 

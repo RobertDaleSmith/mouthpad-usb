@@ -22,59 +22,59 @@ A Zephyr RTOS application for the **Seeed XIAO nRF52840** that acts as a bridge 
 
 ## 🚀 Quick Start
 
-### 1. Build the Project
+This project supports **four different build methods**. For detailed instructions on each method, see [docs/BUILD_METHODS.md](docs/BUILD_METHODS.md).
 
-This project includes a convenient Makefile that wraps `west` commands for easy building, flashing, and monitoring.
+### Method 1: Docker (Recommended)
+
+The easiest way to build this project is using Docker, which provides a consistent environment and avoids local setup issues.
 
 ```bash
-# Show all available commands
-make help
+# Build all supported boards
+docker-compose run --rm mouthpad-build
 
+# Or start interactive development environment
+docker-compose run --rm mouthpad-dev
+```
+
+### Method 2: Make Commands
+
+For quick local builds using the included Makefile:
+
+```bash
 # Build the project
 make build
 
-# Build for a specific board
-make BOARD=xiao_ble build
-make BOARD=nrf52840dongle build
-```
-
-### 2. Available Make Commands
-
-```bash
-# Core commands
-make build              # Build the project
-make flash              # Flash to device
-make monitor-nordic     # Open serial monitor (Nordic boards)
-make clean              # Clean build directory
-
-# Convenience commands
-make build-flash        # Build and flash in one command
-make build-flash-monitor # Build, flash, and monitor
-make pristine           # Clean and rebuild from scratch
-
-# Configuration
-make menuconfig         # Open configuration menu
-make config             # Show build configuration
-```
-
-### 3. Flash the Device
-
-```bash
 # Flash to device
 make flash
 
-# Build and flash in one command
-make build-flash
-
-# Build, flash, and monitor in one command
-make build-flash-monitor
+# Monitor serial output
+make monitor
 ```
 
-### 4. Monitor Output
+### Method 3: VS Code Extension
+
+For visual development with integrated debugging:
+
+1. Install "NRF Connect for VS Code" extension
+2. Open project in VS Code
+3. Use Command Palette: `NRF Connect: Add Existing Project`
+4. Select the `/app` directory
+5. Build using the VS Code interface
+
+### Method 4: Traditional Zephyr Workspace
+
+For full NCS workspace access:
 
 ```bash
-# Monitor serial output for debugging
-make monitor-nordic
+# Create workspace
+mkdir ~/zephyr_workspace
+cd ~/zephyr_workspace
+west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
+west update
+
+# Copy app and build
+cp -r /path/to/mouthpad_usb/app projects/mouthpad_usb
+west build -b xiao_ble projects/mouthpad_usb --pristine=always
 ```
 
 ## 🔧 DFU (Device Firmware Upgrade)
@@ -99,18 +99,16 @@ This project includes full DFU support with two methods:
 ## 📁 Project Structure
 
 ```
-├── src/                  # Application source code
-│   ├── main.c            # Main application logic
-│   ├── ble_hid_c.c       # BLE HID client
-│   └── ble_uart_c.c      # BLE UART client
-├── scripts/
-│   ├── build.sh          # Build script with MCUboot
-│   ├── flash.sh          # Flash script
-│   ├── flash-uf2.sh      # UF2 flash instructions
-│   ├── monitor.sh        # Serial monitor
-│   └── 
-├── prj.conf               # Zephyr configuration
-└── Makefile               # Build system
+├── app/                  # Application source code
+│   ├── src/              # Source files
+│   ├── prj.conf          # Zephyr configuration
+│   └── CMakeLists.txt    # Build configuration
+├── docs/                 # Documentation
+│   ├── BUILD_METHODS.md  # Detailed build instructions
+│   └── images/           # Project images
+├── .github/workflows/    # CI/CD configuration
+├── docker-compose.yml    # Docker build configuration
+└── Makefile              # Local build commands
 ```
 
 ## ⚙️ Configuration
@@ -134,58 +132,56 @@ The device uses the following flash layout:
 
 ## 🔍 Troubleshooting
 
-### DFU Issues
+For detailed troubleshooting information, see [docs/BUILD_METHODS.md](docs/BUILD_METHODS.md).
 
-**Problem**: Device reboots but doesn't enter DFU mode
-**Solution**: 
-1. Ensure MCUboot is properly flashed: `make flash`
-2. Check that the device tree overlay is correct
-3. Verify flash partitions are properly configured
+### Common Issues
 
-**Problem**: UF2 volume doesn't appear
-**Solution**:
-1. Double-tap the reset button quickly
-2. Or hold reset while plugging in USB cable
-3. Check that `CONFIG_BUILD_OUTPUT_UF2=y` is set
+**Problem**: Build fails with environment issues
+**Solution**: Use Docker method for consistent environment
 
-### Build Issues
-
-**Problem**: Build fails with MCUboot errors
-**Solution**:
-1. Clean build: `make clean`
-2. Rebuild: `make build`
-3. Check that all required configurations are set in `prj.conf`
-
-### Connection Issues
+**Problem**: USB device not accessible
+**Solution**: Ensure proper permissions and device access
 
 **Problem**: BLE device not connecting
-**Solution**:
-1. Check device is in range and advertising
-2. Verify device has HID service
-3. Monitor serial output: `make monitor`
+**Solution**: Check device advertising and HID service availability
 
 ## 📚 Available Commands
 
 ```bash
+# Docker commands
+docker-compose run --rm mouthpad-build  # Build all boards
+docker-compose run --rm mouthpad-dev     # Interactive development
+
+# Make commands
 make build      # Build with MCUboot bootloader
 make clean      # Clean build directory
-make flash      # Flash via west (requires bootloader mode)
-make flash-uf2  # Get UF2 flashing instructions
+make flash      # Flash via west
 make monitor    # Monitor serial output
-make dfu        # Trigger DFU mode via serial
 make help       # Show all available commands
 ```
 
 ## 🔄 Development Workflow
 
-1. **Make Changes**: Edit source files in `src/`
-2. **Build**: `make build`
-3. **Test**: `make monitor` to see output
-4. **Flash**: `make flash` or use UF2 method
+### Local Development
+
+1. **Make Changes**: Edit source files in `app/src/`
+2. **Build**: Use any of the four build methods
+3. **Test**: Monitor output and test functionality
+4. **Flash**: Flash to device for testing
 5. **Iterate**: Repeat as needed
+
+### CI/CD Pipeline
+
+This project includes GitHub Actions that automatically build and test your code:
+
+- **Automatic Builds**: Every push to `main` triggers a build
+- **Multi-board Support**: Builds for supported boards
+- **Artifact Storage**: Build artifacts are automatically uploaded
+- **Caching**: Uses ccache for faster builds
 
 ## 📖 Additional Resources
 
+- [Build Methods Documentation](docs/BUILD_METHODS.md)
 - [Seeed XIAO nRF52840 Documentation](https://wiki.seeedstudio.com/XIAO-BLE/)
 - [MCUboot Documentation](https://docs.mcuboot.com/)
 - [Zephyr RTOS Documentation](https://docs.zephyrproject.org/)
@@ -196,7 +192,7 @@ make help       # Show all available commands
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Test thoroughly
+4. Test thoroughly using one of the build methods
 5. Submit a pull request
 
 ## 📄 License

@@ -1,0 +1,32 @@
+manifest:
+  remotes:
+    - name: nordic
+      url-base: https://github.com/nordicsemi
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: sdk-nrf
+      remote: nordic
+      revision: main
+      path: nrf
+      west-commands: scripts/west-commands.yml
+
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      path: zephyr
+
+    - name: nrfxlib
+      remote: nordic
+      revision: main
+      path: nrfxlib
+
+    - name: bootloader
+      remote: nordic
+      revision: main
+      path: bootloader
+
+    - name: mouthpad_usb
+      path: app
+      revision: main 
