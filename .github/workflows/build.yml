@@ -63,7 +63,7 @@ jobs:
       - name: 📦 Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mouthpad_usb_seeed_xiao_ble
+          name: mouthpad_usb_seeed_xiao_ble.uf2
           path: |
             /zephyr_workspace/mouthpad_usb_xiao_ble_*.uf2
           retention-days: 30 
