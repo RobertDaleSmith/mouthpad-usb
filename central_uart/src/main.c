@@ -31,12 +31,13 @@
 #include <zephyr/drivers/uart.h>
 
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
 
 #define LOG_MODULE_NAME central_uart
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 /* UART payload buffer element size. */
-#define UART_BUF_SIZE 20
+#define UART_BUF_SIZE 128
 
 #define KEY_PASSKEY_ACCEPT DK_BTN1_MSK
 #define KEY_PASSKEY_REJECT DK_BTN2_MSK
@@ -91,7 +92,7 @@ static void parse_mouthpad_sensor_data(const uint8_t *data, uint16_t len)
 	uint8_t packet_type = data[0];
 	uint8_t sequence = data[1];
 	uint8_t flags = data[2];
-	uint8_t reserved = data[3];
+	// uint8_t reserved = data[3]; // Unused for now
 	
 	printk("*** PARSED PACKET: Type=0x%02x, Seq=%d, Flags=0x%02x ***\n", 
 		packet_type, sequence, flags);
@@ -124,31 +125,39 @@ static uint8_t ble_data_received(struct bt_nus_client *nus,
 {
 	ARG_UNUSED(nus);
 
-	printk("*** RECEIVED BINARY DATA FROM MOUTHPAD: %d bytes ***\n", len);
+	// Bridge NUS data directly to USB CDC
+	printk("*** NUS→CDC: Received %d bytes, sending to CDC ***\n", len);
 	
-	// Log first 32 bytes in hex to see the data structure
-	printk("*** FIRST 32 BYTES: ");
-	for (int i = 0; i < len; i++) {
+	// Log the first few bytes to see what we're getting
+	printk("*** NUS DATA: ");
+	for (int i = 0; i < len && i < 16; i++) {
 		printk("%02x ", data[i]);
 	}
 	printk("***\n");
 	
-	// Parse the binary sensor data
-	parse_mouthpad_sensor_data(data, len);
+	// Filter out 2-byte echo responses (73 XX format)
+	if (len == 2 && data[0] == 0x73) {
+		printk("*** SKIPPING 2-BYTE ECHO: 73 %02x ***\n", data[1]);
+		return BT_GATT_ITER_CONTINUE;
+	}
 	
-	// Also print as string if it's printable
-	// printk("*** AS STRING: ");
-	// for (int i = 0; i < len && i < 64; i++) {
-	// 	if (data[i] >= 32 && data[i] <= 126) {
-	// 		printk("%c", data[i]);
-	// 	} else {d
-	// 		printk("\\x%02x", data[i]);
-	// 	}
-	// }
-	// printk(" ***\n");
-
-	// Don't try to send this data to UART since it's binary
-	// Just log it and return to avoid overwhelming the system
+	// Don't echo back single characters (likely echo from our input)
+	if (len == 1) {
+		printk("*** SKIPPING SINGLE CHARACTER ECHO ***\n");
+		return BT_GATT_ITER_CONTINUE;
+	}
+	
+	// For larger packets, try to identify the structure
+	if (len >= 4) {
+		printk("*** PACKET STRUCTURE: Type=0x%02x, Length=%d ***\n", data[0], len);
+	}
+	
+	// Send data directly to USB CDC
+	printk("*** FORWARDING %d BYTES TO CDC ***\n", len);
+	for (uint16_t i = 0; i < len; i++) {
+		uart_poll_out(uart, data[i]);
+	}
+	
 	return BT_GATT_ITER_CONTINUE;
 }
 
@@ -197,6 +206,13 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		LOG_DBG("UART_RX_RDY");
 		buf = CONTAINER_OF(evt->data.rx.buf, struct uart_data_t, data[0]);
 		buf->len += evt->data.rx.len;
+
+		// Debug: Print received UART data
+		printk("*** UART RX: Received %d bytes ***\n", evt->data.rx.len);
+		for (int i = 0; i < evt->data.rx.len; i++) {
+			printk("%c", evt->data.rx.buf[i]);
+		}
+		printk("***\n");
 
 		if (disable_req) {
 			return;
@@ -295,6 +311,7 @@ static int uart_init(void)
 	struct uart_data_t *rx;
 
 	printk("uart_init: Starting UART initialization\n");
+	printk("uart_init: Using UART device: %s\n", uart->name);
 
 	if (!device_is_ready(uart)) {
 		printk("uart_init: UART device not ready\n");
@@ -315,22 +332,7 @@ static int uart_init(void)
 	printk("uart_init: Initializing UART work handler\n");
 	k_work_init_delayable(&uart_work, uart_work_handler);
 
-	printk("uart_init: Setting UART callback\n");
-	err = uart_callback_set(uart, uart_cb, NULL);
-	if (err) {
-		printk("uart_init: Failed to set UART callback (err %d) - this is normal for some drivers\n", err);
-		printk("uart_init: UART will be used for serial monitor only\n");
-		// Continue without UART callbacks - this is normal for some drivers
-		return 0;
-	}
-
-	printk("uart_init: Enabling UART RX\n");
-	err = uart_rx_enable(uart, rx->data, sizeof(rx->data), UART_RX_TIMEOUT);
-	if (err) {
-		printk("uart_init: Failed to enable UART RX (err %d)\n", err);
-		return err;
-	}
-
+	printk("uart_init: Skipping UART callback setup - using polling instead\n");
 	printk("uart_init: UART initialization successful\n");
 	return 0;
 }
@@ -359,11 +361,29 @@ static void data_check_work_handler(struct k_work *item)
 	k_work_schedule(&data_check_work, K_SECONDS(5));
 }
 
+static void send_command_to_mouthpad(const char *command)
+{
+	if (!default_conn) {
+		printk("*** NOT CONNECTED - CANNOT SEND COMMAND ***\n");
+		return;
+	}
+	
+	printk("*** SENDING COMMAND TO MOUTHPAD: %s ***\n", command);
+	
+	int err = bt_nus_client_send(&nus_client, (const uint8_t*)command, strlen(command));
+	if (err) {
+		printk("*** FAILED TO SEND COMMAND (err %d) ***\n", err);
+	} else {
+		printk("*** COMMAND SENT SUCCESSFULLY ***\n");
+	}
+}
+
 static void send_command_work_handler(struct k_work *item)
 {
 	ARG_UNUSED(item);
 	
-	printk("*** CONNECTED TO MOUTHPAD - SENDING FULL COMMAND ***\n");
+	printk("*** CONNECTED TO MOUTHPAD - READY FOR MANUAL COMMANDS ***\n");
+	printk("*** USE SCREEN TO SEND COMMANDS LIKE 'StartStream jcp' ***\n");
 	
 	// Start periodic status checks
 	k_work_init_delayable(&status_check_work, status_check_work_handler);
@@ -372,25 +392,6 @@ static void send_command_work_handler(struct k_work *item)
 	// Start periodic data checks
 	k_work_init_delayable(&data_check_work, data_check_work_handler);
 	k_work_schedule(&data_check_work, K_SECONDS(5));
-	
-	// Wait before sending command - reduced to 500ms for fast response
-	// printk("*** WAITING 500ms BEFORE SENDING FULL COMMAND ***\n");
-	// k_sleep(K_MSEC(500));
-	
-	// Send the full command that the team specified
-	const char *full_cmd = "StartStream jcp";
-	printk("*** SENDING FULL COMMAND: '%s' ***\n", full_cmd);
-	
-	int err = bt_nus_client_send(&nus_client, (uint8_t*)full_cmd, strlen(full_cmd));
-	if (err) {
-		printk("*** FULL COMMAND SEND FAILED: %d ***\n", err);
-	} else {
-		printk("*** FULL COMMAND SENT SUCCESSFULLY ***\n");
-		printk("*** MOUTHPAD SHOULD START STREAMING BINARY DATA ***\n");
-		printk("*** MONITORING FOR BINARY DATA STREAM WITH HEADERS ***\n");
-		printk("*** EXPECTING LENGTH HEADERS + BINARY SENSOR DATA ***\n");
-		printk("*** READY TO HANDLE BINARY RESPONSE PROPERLY ***\n");
-	}
 }
 
 static void discovery_complete(struct bt_gatt_dm *dm,
@@ -792,37 +793,35 @@ int main(void)
 	};
 
 	for (;;) {
-		/* Wait indefinitely for data to be sent over Bluetooth */
-		struct uart_data_t *buf = k_fifo_get(&fifo_uart_rx_data,
-						     K_FOREVER);
-
-		int plen = MIN(sizeof(nus_data.data) - nus_data.len, buf->len);
-		int loc = 0;
-
-		while (plen > 0) {
-			memcpy(&nus_data.data[nus_data.len], &buf->data[loc], plen);
-			nus_data.len += plen;
-			loc += plen;
-			if (nus_data.len >= sizeof(nus_data.data) ||
-			   (nus_data.data[nus_data.len - 1] == '\n') ||
-			   (nus_data.data[nus_data.len - 1] == '\r')) {
-				err = bt_nus_client_send(&nus_client, nus_data.data, nus_data.len);
-				if (err) {
-					LOG_WRN("Failed to send data over BLE connection"
-						"(err %d)", err);
+		/* True UART bridge: NUS ↔ USB CDC */
+		
+		// Check for data from USB CDC (screen input) and send to NUS
+		static uint8_t cdc_buffer[UART_BUF_SIZE];
+		static int cdc_pos = 0;
+		
+		unsigned char c;
+		int bytes_read = uart_poll_in(uart, &c);
+		
+		if (bytes_read == 0) { // Data received from CDC
+			cdc_buffer[cdc_pos] = c;
+			cdc_pos++;
+			
+			// Send complete command when we get newline
+			if (c == '\n' || c == '\r' || cdc_pos >= UART_BUF_SIZE) {
+				if (cdc_pos > 1) { // Don't send empty commands
+					printk("*** SENDING COMPLETE COMMAND (%d bytes) ***\n", cdc_pos);
+					err = bt_nus_client_send(&nus_client, cdc_buffer, cdc_pos);
+					if (err) {
+						printk("*** CDC→NUS FAILED (err %d) ***\n", err);
+					} else {
+						printk("*** COMMAND SENT SUCCESSFULLY ***\n");
+					}
 				}
-
-				err = k_sem_take(&nus_write_sem, NUS_WRITE_TIMEOUT);
-				if (err) {
-					LOG_WRN("NUS send timeout");
-				}
-
-				nus_data.len = 0;
+				cdc_pos = 0; // Reset buffer
 			}
-
-			plen = MIN(sizeof(nus_data.data), buf->len - loc);
 		}
-
-		k_free(buf);
+		
+		// Small delay to prevent busy waiting
+		k_sleep(K_MSEC(1));
 	}
 }
