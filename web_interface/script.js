@@ -653,10 +653,10 @@ class MouthPadController {
             this.log(`*** Updating ${streamType.toLowerCase()} toggle: ${isActive} ***`, 'info');
             if (isActive) {
                 button.classList.add('active');
-                button.textContent = `StopStream ${streamType.toLowerCase()}`;
+                button.textContent = `⏹ StopStream ${streamType.toLowerCase()}`;
             } else {
                 button.classList.remove('active');
-                button.textContent = `StartStream ${streamType.toLowerCase()}`;
+                button.textContent = `▶ StartStream ${streamType.toLowerCase()}`;
             }
         } else {
             this.log(`*** Button not found for ${streamType} ***`, 'error');
