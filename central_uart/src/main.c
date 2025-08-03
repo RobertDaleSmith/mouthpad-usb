@@ -67,6 +67,25 @@ static K_FIFO_DEFINE(fifo_uart_rx_data);
 static struct bt_conn *default_conn;
 static struct bt_nus_client nus_client;
 
+// Calculate CRC-16 (CCITT) for data integrity checking
+static uint16_t calculate_crc16(const uint8_t *data, uint16_t len)
+{
+	uint16_t crc = 0xFFFF; // Initial value
+	
+	for (uint16_t i = 0; i < len; i++) {
+		crc ^= (uint16_t)data[i] << 8;
+		for (int j = 0; j < 8; j++) {
+			if (crc & 0x8000) {
+				crc = (crc << 1) ^ 0x1021; // CCITT polynomial
+			} else {
+				crc = crc << 1;
+			}
+		}
+	}
+	
+	return crc & 0xFFFF;
+}
+
 static void ble_data_sent(struct bt_nus_client *nus, uint8_t err,
 					const uint8_t *const data, uint16_t len)
 {
@@ -152,11 +171,29 @@ static uint8_t ble_data_received(struct bt_nus_client *nus,
 		printk("*** PACKET STRUCTURE: Type=0x%02x, Length=%d ***\n", data[0], len);
 	}
 	
-	// Send data directly to USB CDC
-	printk("*** FORWARDING %d BYTES TO CDC ***\n", len);
+	// Send data directly to USB CDC with robust packet framing
+	// New format: [0xAA][0x55][LEN_H][LEN_L][DATA...][CRC_H][CRC_L]
+	printk("*** FORWARDING %d BYTES TO CDC WITH NEW FRAMING ***\n", len);
+	
+	// Calculate CRC-16 for the payload
+	uint16_t crc = calculate_crc16(data, len);
+	
+	// Send dual start markers
+	uart_poll_out(uart, 0xAA); // First start marker
+	uart_poll_out(uart, 0x55); // Second start marker
+	
+	// Send packet length (2 bytes, big-endian)
+	uart_poll_out(uart, (len >> 8) & 0xFF); // High byte
+	uart_poll_out(uart, len & 0xFF);        // Low byte
+	
+	// Send packet data
 	for (uint16_t i = 0; i < len; i++) {
 		uart_poll_out(uart, data[i]);
 	}
+	
+	// Send CRC (2 bytes, big-endian)
+	uart_poll_out(uart, (crc >> 8) & 0xFF); // CRC high byte
+	uart_poll_out(uart, crc & 0xFF);        // CRC low byte
 	
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -453,8 +490,11 @@ static void gatt_discover(struct bt_conn *conn)
 static void exchange_func(struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params)
 {
 	if (!err) {
-		LOG_INF("MTU exchange done");
+		uint16_t mtu = bt_gatt_get_mtu(conn);
+		printk("*** MTU EXCHANGE SUCCESSFUL: MTU = %d bytes ***\n", mtu);
+		LOG_INF("MTU exchange done, MTU: %d", mtu);
 	} else {
+		printk("*** MTU EXCHANGE FAILED: error = %d ***\n", err);
 		LOG_WRN("MTU exchange failed (err %" PRIu8 ")", err);
 	}
 }
@@ -487,6 +527,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	static struct bt_gatt_exchange_params exchange_params;
 
 	exchange_params.func = exchange_func;
+	// Request maximum MTU (247 bytes) to handle bigger packets
 	err = bt_gatt_exchange_mtu(conn, &exchange_params);
 	if (err) {
 		LOG_WRN("MTU exchange failed (err %d)", err);
