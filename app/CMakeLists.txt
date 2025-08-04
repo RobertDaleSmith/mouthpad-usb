@@ -5,6 +5,7 @@ project(mouthpad_usb)
 target_sources(app PRIVATE
   src/ble.c
   src/ble_hid.c
+  src/ble_central.c
   src/usb.c
   src/main.c
 )
