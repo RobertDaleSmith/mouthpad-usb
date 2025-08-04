@@ -95,6 +95,26 @@ int ble_central_init_auth_callbacks(void);
  */
 void ble_central_handle_buttons(uint32_t button_state, uint32_t has_changed);
 
+/* Callback function types */
+typedef void (*ble_connected_cb_t)(struct bt_conn *conn);
+typedef void (*ble_disconnected_cb_t)(struct bt_conn *conn, uint8_t reason);
+
+/**
+ * @brief Register connection callback
+ *
+ * @param cb Callback function for connection events
+ * @return 0 on success, negative error code on failure
+ */
+int ble_central_register_connected_cb(ble_connected_cb_t cb);
+
+/**
+ * @brief Register disconnection callback
+ *
+ * @param cb Callback function for disconnection events
+ * @return 0 on success, negative error code on failure
+ */
+int ble_central_register_disconnected_cb(ble_disconnected_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif

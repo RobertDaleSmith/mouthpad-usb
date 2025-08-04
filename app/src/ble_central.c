@@ -36,6 +36,10 @@ LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_INF);
 static struct bt_conn *default_conn;
 static struct bt_conn *auth_conn;
 
+/* Callback registration */
+static ble_connected_cb_t connected_callback = NULL;
+static ble_disconnected_cb_t disconnected_callback = NULL;
+
 /* Forward declarations */
 static void gatt_discover(struct bt_conn *conn);
 
@@ -207,8 +211,13 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	if (err) {
 		printk("Failed to set security: %d\n", err);
 
-			/* Trigger GATT discovery */
-	gatt_discover(conn);
+		/* Trigger GATT discovery */
+		gatt_discover(conn);
+	}
+
+	/* Call transport layer callback if registered */
+	if (connected_callback) {
+		connected_callback(conn);
 	}
 }
 
@@ -248,6 +257,11 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	err = ble_central_start_scan();
 	if (err) {
 		printk("Scanning failed to start (err %d)\n", err);
+	}
+
+	/* Call transport layer callback if registered */
+	if (disconnected_callback) {
+		disconnected_callback(conn, reason);
 	}
 }
 
@@ -459,5 +473,17 @@ void ble_central_handle_buttons(uint32_t button_state, uint32_t has_changed)
 int ble_central_init_callbacks(void)
 {
 	LOG_INF("BLE Central callbacks initialized");
+	return 0;
+}
+
+int ble_central_register_connected_cb(ble_connected_cb_t cb)
+{
+	connected_callback = cb;
+	return 0;
+}
+
+int ble_central_register_disconnected_cb(ble_disconnected_cb_t cb)
+{
+	disconnected_callback = cb;
 	return 0;
 } 

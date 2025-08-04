@@ -3,7 +3,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(mouthpad_usb)
 
 target_sources(app PRIVATE
-  src/ble.c
+  src/ble_transport.c
   src/ble_hid.c
   src/ble_central.c
   src/usb.c

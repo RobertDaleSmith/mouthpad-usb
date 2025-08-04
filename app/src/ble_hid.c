@@ -27,11 +27,17 @@
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/usb/class/usb_hid.h>
 
+#include "ble_hid.h"
+
 /* Forward declarations for direct USB access */
 extern const struct device *hid_dev;
 extern struct k_sem ep_write_sem;
 
 LOG_MODULE_REGISTER(ble_hid, LOG_LEVEL_INF);
+
+/* Callback registration */
+static ble_hid_data_received_cb_t data_received_callback = NULL;
+static ble_hid_ready_cb_t ready_callback = NULL;
 
 /**
  * Switch between boot protocol and report protocol mode.
@@ -446,6 +452,18 @@ void ble_hid_handle_buttons(uint32_t button_state, uint32_t has_changed)
 	if (button & KEY_CAPSLOCK_RSP_MASK) {
 		button_capslock_rsp();
 	}
+}
+
+int ble_hid_register_data_received_cb(ble_hid_data_received_cb_t cb)
+{
+	data_received_callback = cb;
+	return 0;
+}
+
+int ble_hid_register_ready_cb(ble_hid_ready_cb_t cb)
+{
+	ready_callback = cb;
+	return 0;
 }
 
 /* Discovery callback implementations */

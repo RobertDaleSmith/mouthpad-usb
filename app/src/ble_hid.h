@@ -85,6 +85,26 @@ uint8_t (*ble_hid_get_boot_kbd_cb(void))(struct bt_hogp *, struct bt_hogp_rep_in
  */
 void ble_hid_handle_buttons(uint32_t button_state, uint32_t has_changed);
 
+/* Callback function types */
+typedef void (*ble_hid_data_received_cb_t)(const uint8_t *data, uint16_t len);
+typedef void (*ble_hid_ready_cb_t)(void);
+
+/**
+ * @brief Register data received callback
+ *
+ * @param cb Callback function for data received events
+ * @return 0 on success, negative error code on failure
+ */
+int ble_hid_register_data_received_cb(ble_hid_data_received_cb_t cb);
+
+/**
+ * @brief Register ready callback
+ *
+ * @param cb Callback function for ready events
+ * @return 0 on success, negative error code on failure
+ */
+int ble_hid_register_ready_cb(ble_hid_ready_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif
