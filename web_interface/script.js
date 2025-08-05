@@ -10,6 +10,9 @@ class MouthPadController {
         this.packetFragmentationCount = 0; // Track packet fragmentation
         this.lastFragmentationTime = null; // Track when fragmentation occurred
         
+        // Log view mode (raw vs details)
+        this.logViewMode = 'details'; // 'details' or 'raw'
+        
         // Pressure data storage for charting (like Mac app)
         this.pressureHistory = [];
         this.maxPressureHistoryLength = 100; // Keep last 100 readings
@@ -64,6 +67,7 @@ class MouthPadController {
         this.sendCustomBtn = document.getElementById('sendCustomBtn');
         this.clearLogBtn = document.getElementById('clearLogBtn');
         this.exportLogBtn = document.getElementById('exportLogBtn');
+        this.logViewToggleBtn = document.getElementById('logViewToggleBtn');
         this.touchpadGrid = document.getElementById('touchpadGrid');
         this.minPressure = document.getElementById('minPressure');
         this.maxPressure = document.getElementById('maxPressure');
@@ -82,6 +86,7 @@ class MouthPadController {
         this.sendCustomBtn.addEventListener('click', () => this.sendCustomCommand());
         this.clearLogBtn.addEventListener('click', () => this.clearLog());
         this.exportLogBtn.addEventListener('click', () => this.exportLog());
+        this.logViewToggleBtn.addEventListener('click', () => this.toggleLogView());
         
         // Command buttons
         document.querySelectorAll('.btn-command').forEach(btn => {
@@ -196,7 +201,12 @@ class MouthPadController {
     }
 
     processReceivedData(data) {
-        this.log(`Received ${data.length} bytes of binary data`, 'data');
+        // Log raw hex data if in raw mode
+        if (this.logViewMode === 'raw') {
+            this.logRaw(data);
+        } else {
+            this.log(`Received ${data.length} bytes of binary data`, 'data');
+        }
         
         // Update last packet time
         this.lastPacketTime = Date.now();
@@ -532,6 +542,12 @@ class MouthPadController {
     }
     
     processPacket(packet) {
+        // Log complete packet in raw mode
+        if (this.logViewMode === 'raw') {
+            this.logRaw(packet);
+            return; // Skip detailed processing in raw mode
+        }
+        
         this.log(`*** PACKET SIZE: ${packet.length} bytes ***`, 'info');
         
         // Parse header for variable-size BLE NUS packets
@@ -874,6 +890,11 @@ class MouthPadController {
     }
 
     log(message, type = 'info') {
+        // Don't log anything in raw mode except raw hex data
+        if (this.logViewMode === 'raw') {
+            return;
+        }
+        
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = document.createElement('div');
         logEntry.className = `log-entry log-${type}`;
@@ -889,6 +910,49 @@ class MouthPadController {
         const logEntries = this.terminal.querySelectorAll('.log-entry');
         if (logEntries.length > maxLogEntries) {
             // Remove oldest entries (keep the last maxLogEntries)
+            const entriesToRemove = logEntries.length - maxLogEntries;
+            for (let i = 0; i < entriesToRemove; i++) {
+                logEntries[i].remove();
+            }
+        }
+        
+        // Also clear console to prevent memory issues
+        if (this.terminal.children.length > 2000) {
+            this.terminal.innerHTML = '';
+            const clearMessage = document.createElement('div');
+            clearMessage.className = 'log-entry log-info';
+            clearMessage.innerHTML = `<span class="timestamp">[${timestamp}]</span> *** LOGS AUTO-CLEARED TO PREVENT BROWSER LOCKUP ***`;
+            this.terminal.appendChild(clearMessage);
+        }
+    }
+
+    logRaw(data) {
+        if (this.logViewMode !== 'raw') {
+            return; // Only log raw data in raw mode
+        }
+        
+        const timestamp = new Date().toLocaleTimeString();
+        const logEntry = document.createElement('div');
+        logEntry.className = 'log-entry raw';
+        
+        // Convert data to hex string with spaces
+        const hexString = Array.from(data).map(byte => byte.toString(16).padStart(2, '0')).join(' ');
+        
+        // Add packet size indicator
+        const packetSize = data.length;
+        const sizeIndicator = packetSize > 64 ? '📦' : packetSize > 32 ? '📄' : '📝';
+        
+        logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> <span class="hex-data">${sizeIndicator} ${hexString}</span>`;
+        
+        this.terminal.appendChild(logEntry);
+        
+        // Auto-scroll to bottom
+        this.terminal.scrollTop = this.terminal.scrollHeight;
+        
+        // Auto-clear old entries to prevent browser lockup
+        const maxLogEntries = 1000;
+        const logEntries = this.terminal.querySelectorAll('.log-entry');
+        if (logEntries.length > maxLogEntries) {
             const entriesToRemove = logEntries.length - maxLogEntries;
             for (let i = 0; i < entriesToRemove; i++) {
                 logEntries[i].remove();
@@ -1911,6 +1975,22 @@ class MouthPadController {
         const status = powerData[4];        // Status byte
         
         this.log(`*** POWER: Battery=${batteryLevel}%, Voltage=${voltage}mV, Temp=${temperature}°C, Status=0x${status.toString(16)} ***`, 'info');
+    }
+
+    toggleLogView() {
+        this.logViewMode = this.logViewMode === 'details' ? 'raw' : 'details';
+        
+        // Update button text and styling
+        if (this.logViewMode === 'raw') {
+            this.logViewToggleBtn.textContent = '🔍 Raw';
+            this.logViewToggleBtn.classList.add('raw-mode');
+            // Clear terminal for clean raw view
+            this.terminal.innerHTML = '<div class="terminal-line">Raw HEX view - waiting for data...</div>';
+        } else {
+            this.logViewToggleBtn.textContent = '📊 Details';
+            this.logViewToggleBtn.classList.remove('raw-mode');
+            this.log('Switched to DETAILED view - showing parsed data', 'info');
+        }
     }
 }
 

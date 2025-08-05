@@ -375,7 +375,45 @@ body {
 .terminal-controls {
     display: flex;
     gap: 10px;
-    margin-top: 4px;
+    align-items: center;
+    margin-top: 10px;
+}
+
+/* Log View Toggle Button */
+#logViewToggleBtn {
+    min-width: 100px;
+    transition: all 0.3s ease;
+}
+
+#logViewToggleBtn.raw-mode {
+    background-color: var(--accent-secondary);
+    color: white;
+}
+
+#logViewToggleBtn.raw-mode:hover {
+    background-color: #ff5252;
+}
+
+/* Raw Log Entry Styling */
+.log-entry.raw {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background-color: var(--bg-tertiary);
+    padding: 2px 8px;
+    margin: 1px 0;
+    border-radius: 3px;
+    word-break: break-all;
+}
+
+.log-entry.raw .timestamp {
+    color: var(--text-primary);
+    font-weight: bold;
+}
+
+.log-entry.raw .hex-data {
+    color: var(--accent-primary);
+    font-weight: bold;
 }
 
 /* Responsive Design */

@@ -1,103 +1,81 @@
-# MouthPad Web Controller
+# MouthPad^USB Web Interface
 
-A dark-themed web interface for controlling and monitoring the MouthPad device through a USB serial connection.
+A real-time web interface for monitoring and controlling the MouthPad^USB device.
 
 ## Features
 
-- **Dark Theme**: Modern dark interface with blue accents
-- **Serial Communication**: Direct connection to USB CDC serial port
-- **Command Buttons**: Quick access to common MouthPad commands
-- **Custom Commands**: Send any custom command via text input
-- **Real-time Grid Display**: Visual 8x6 pressure grid for JCP data
-- **Terminal Log**: Real-time data logging with export functionality
-- **Responsive Design**: Works on desktop and mobile devices
+### Real-time Monitoring
+- **Touch Grid Display**: Visual representation of the 8x6 capacitive touch grid
+- **Pressure Chart**: Real-time pressure data visualization
+- **Serial Communication**: Direct USB serial connection to the device
 
-## Commands
+### Log View Modes
+- **📊 Details View**: Parsed and formatted log messages with packet analysis
+- **🔍 Raw View**: Raw hexadecimal packet data for debugging
 
-### Predefined Commands
-- **StartStream jcp**: Start Joint Capsule Pressure streaming (8x6 grid data)
-- **StartStream imu**: Start IMU sensor streaming
-- **StartStream click**: Start click detection streaming
-- **StopStream**: Stop all streaming
-
-### Custom Commands
-- Type any command in the custom command input
-- Press Enter or click Send to execute
+### Stream Control
+- **JCP Stream**: Capacitive touch data streaming
+- **IMU Stream**: Inertial measurement unit data
+- **Click Stream**: Button click events
+- **Power Stream**: Battery and power management data
 
 ## Usage
 
-1. **Connect to Serial Port**:
-   - Click "Connect to Serial Port"
-   - Select your MouthPad USB CDC device
-   - The status indicator will turn green when connected
+### Connection
+1. Click "Connect Serial" to establish USB connection
+2. Select the MouthPad^USB device when prompted
+3. The status indicator will turn green when connected
 
-2. **Send Commands**:
-   - Use the predefined command buttons for common operations
-   - Or type custom commands in the input field
+### Log View Toggle
+- Click the "📊 Details" / "🔍 Raw" button to switch between log modes
+- **Details Mode**: Shows parsed packet information and sensor data
+- **Raw Mode**: Shows raw hexadecimal data with packet size indicators
+  - 📝 Small packets (< 32 bytes)
+  - 📄 Medium packets (32-64 bytes)  
+  - 📦 Large packets (> 64 bytes)
 
-3. **View Data**:
-   - **JCP Data**: Visual 8x6 grid shows pressure values
-   - **Terminal Log**: Real-time data logging
-   - **Statistics**: Min/Max pressure and active cell count
+### Stream Control
+- Use the "▶ StartStream" buttons to control data streams
+- Active streams are highlighted in blue
+- Streams automatically timeout after 15 seconds of inactivity
 
-4. **Export Data**:
-   - Click "Export Log" to download the terminal log as a text file
+### Custom Commands
+- Enter custom commands in the text field
+- Press Enter or click "Send" to execute
 
-## Data Format
+### Log Management
+- **Clear Log**: Clear the current log display
+- **Export Log**: Download log as text file
 
-### JCP (Joint Capsule Pressure) Data
-- **Packet Header**: 0x64 (4 bytes)
-- **Sensor Data**: 48 bytes (8x6 grid)
-- **Grid Layout**: 8 columns × 6 rows
-- **Pressure Values**: 0-255 range
+## Technical Details
 
-### Grid Display
-- **Low Pressure** (1-100): Green
-- **Medium Pressure** (101-200): Orange
-- **High Pressure** (201-255): Red
-- **Inactive** (0): Dark gray
+### Packet Format
+The device sends framed packets with the following format:
+- **New Format**: `[0xAA][0x55][LEN_H][LEN_L][DATA...][CRC_H][CRC_L]`
+- **Old Format**: `[0xAA][LEN_L][LEN_H][DATA...][0x55]`
 
-## Browser Requirements
+### Data Interpretation
+- **JCP Packets**: 138+ bytes, capacitive touch sensor data
+- **Power Packets**: 9 bytes, battery and power information
+- **IMU Packets**: Inertial measurement data
+- **Click Packets**: Button press events
 
-- **Chrome/Edge**: Full Web Serial API support
-- **Firefox**: Limited support (may need flags)
-- **Safari**: No Web Serial API support
-
-## Troubleshooting
-
-1. **Connection Issues**:
-   - Ensure MouthPad is connected via USB
-   - Check that the device appears as a serial port
-   - Try refreshing the page
-
-2. **No Data Display**:
-   - Verify you've sent "StartStream jcp" command
-   - Check the terminal log for received data
-   - Ensure the MouthPad is streaming data
-
-3. **Grid Not Updating**:
-   - Check that JCP packets are being received
-   - Verify the data format matches expected structure
-   - Look for error messages in the terminal log
+### Browser Compatibility
+- Requires Web Serial API support (Chrome, Edge, Opera)
+- HTTPS required for Web Serial API access
+- Local development server supported
 
 ## Development
 
-The web interface uses:
-- **HTML5**: Structure and layout
-- **CSS3**: Dark theme and responsive design
-- **JavaScript**: Serial communication and data parsing
-- **Web Serial API**: Browser-based serial port access
-
-## File Structure
-
-```
-web_interface/
-├── index.html      # Main HTML file
-├── styles.css      # Dark theme CSS
-├── script.js       # JavaScript controller
-└── README.md       # This file
+### Local Testing
+```bash
+cd web_interface
+python3 -m http.server 8000
+# Open http://localhost:8000
 ```
 
-## License
-
-This project is part of the MouthPad USB bridge development. 
+### File Structure
+- `index.html`: Main interface layout
+- `script.js`: Core functionality and data processing
+- `styles.css`: Dark theme styling
+- `README.md`: This documentation 
