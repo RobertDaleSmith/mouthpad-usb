@@ -223,6 +223,79 @@ static void hogp_ready_cb(struct bt_hogp *hogp)
 	k_work_submit(&hids_ready_work);
 }
 
+/* Auto-detect and switch to optimal protocol mode */
+/**
+ * @brief Auto-detect and switch to optimal HID protocol mode
+ * 
+ * This function implements automatic protocol mode detection and switching,
+ * similar to how operating systems handle HID protocol mode optimization.
+ * 
+ * Behavior:
+ * 1. Detects current protocol mode (BOOT or REPORT)
+ * 2. Analyzes device capabilities (BOOT support, REPORT support)
+ * 3. Automatically switches to optimal mode:
+ *    - If in BOOT mode and REPORT supported → switch to REPORT
+ *    - If in REPORT mode but no REPORT support → fallback to BOOT
+ *    - If only BOOT supported → stay in BOOT mode
+ * 
+ * This is called automatically when HID device is ready, and can also
+ * be triggered manually via ble_hid_auto_detect_mode().
+ */
+static void auto_detect_and_switch_mode(void)
+{
+	enum bt_hids_pm current_mode = bt_hogp_pm_get(&hogp);
+	
+	printk("Auto-detecting optimal protocol mode...\n");
+	printk("Current mode: %s\n", 
+	       (current_mode == BT_HIDS_PM_BOOT) ? "BOOT" : "REPORT");
+	
+	/* Check if device supports REPORT mode */
+	bool has_report_support = false;
+	struct bt_hogp_rep_info *rep = NULL;
+	
+	/* Check for any report protocol reports */
+	do {
+		rep = bt_hogp_rep_next(&hogp, rep);
+		if (rep) {
+			/* If we have any report protocol reports, device supports REPORT mode */
+			has_report_support = true;
+			break;
+		}
+	} while (rep);
+	
+	/* Also check for boot protocol reports as fallback */
+	bool has_boot_support = (hogp.rep_boot.kbd_inp != NULL || 
+	                        hogp.rep_boot.mouse_inp != NULL);
+	
+	printk("Device capabilities: BOOT=%s, REPORT=%s\n",
+	       has_boot_support ? "YES" : "NO",
+	       has_report_support ? "YES" : "NO");
+	
+	/* Auto-switch logic (similar to OS behavior) */
+	if (current_mode == BT_HIDS_PM_BOOT) {
+		if (has_report_support) {
+			/* Device supports REPORT mode - switch for better features */
+			printk("Switching to REPORT mode for enhanced functionality\n");
+			bt_hogp_pm_update(&hogp, K_SECONDS(5));
+		} else if (has_boot_support) {
+			/* Device only supports BOOT mode */
+			printk("Device only supports BOOT mode - staying in BOOT mode\n");
+		} else {
+			/* No HID reports found */
+			printk("Warning: No HID reports found on device\n");
+		}
+	} else if (current_mode == BT_HIDS_PM_REPORT) {
+		if (has_report_support) {
+			/* Already in optimal mode */
+			printk("Already in optimal REPORT mode\n");
+		} else {
+			/* REPORT mode but no report support - fallback to BOOT */
+			printk("REPORT mode but no report support - switching to BOOT mode\n");
+			bt_hogp_pm_update(&hogp, K_SECONDS(5));
+		}
+	}
+}
+
 static void hids_on_ready(struct k_work *work)
 {
 	int err;
@@ -231,6 +304,9 @@ static void hids_on_ready(struct k_work *work)
 	ARG_UNUSED(work);
 
 	printk("HIDS is ready\n");
+
+	/* Auto-detect and switch to optimal protocol mode */
+	auto_detect_and_switch_mode();
 
 	/* Subscribe to all reports */
 	do {
@@ -452,6 +528,10 @@ void ble_hid_handle_buttons(uint32_t button_state, uint32_t has_changed)
 	if (button & KEY_CAPSLOCK_RSP_MASK) {
 		button_capslock_rsp();
 	}
+
+	/* Auto-detection trigger (if we had a button) */
+	/* This would be triggered by a physical button if available */
+	/* For now, we can call this manually via ble_hid_auto_detect_mode() */
 }
 
 int ble_hid_register_data_received_cb(ble_hid_data_received_cb_t cb)
@@ -463,6 +543,19 @@ int ble_hid_register_data_received_cb(ble_hid_data_received_cb_t cb)
 int ble_hid_register_ready_cb(ble_hid_ready_cb_t cb)
 {
 	ready_callback = cb;
+	return 0;
+}
+
+/* Manual trigger for auto-detection (for testing) */
+int ble_hid_auto_detect_mode(void)
+{
+	if (!hid_ready) {
+		printk("HID device not ready for mode detection\n");
+		return -EAGAIN;
+	}
+	
+	printk("Manual trigger: Auto-detecting protocol mode\n");
+	auto_detect_and_switch_mode();
 	return 0;
 }
 
@@ -493,4 +586,4 @@ static void discovery_service_not_found_cb(struct bt_conn *conn, void *context)
 static void discovery_error_found_cb(struct bt_conn *conn, int err, void *context)
 {
 	printk("The discovery procedure failed with %d\n", err);
-} 
+}

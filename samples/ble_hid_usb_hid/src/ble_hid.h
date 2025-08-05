@@ -105,6 +105,17 @@ int ble_hid_register_data_received_cb(ble_hid_data_received_cb_t cb);
  */
 int ble_hid_register_ready_cb(ble_hid_ready_cb_t cb);
 
+/**
+ * @brief Manually trigger auto-detection and mode switching
+ *
+ * This function manually triggers the automatic protocol mode detection
+ * and switching logic, similar to how operating systems handle HID
+ * protocol mode optimization.
+ *
+ * @return 0 on success, negative error code on failure
+ */
+int ble_hid_auto_detect_mode(void);
+
 #ifdef __cplusplus
 }
 #endif
