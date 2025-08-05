@@ -8,7 +8,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include "ble_transport.h"
-#include "usb.h"
+#include "usb_hid.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 

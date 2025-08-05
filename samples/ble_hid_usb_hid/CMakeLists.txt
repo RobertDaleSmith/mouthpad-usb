@@ -6,6 +6,6 @@ target_sources(app PRIVATE
   src/ble_transport.c
   src/ble_hid.c
   src/ble_central.c
-  src/usb.c
+  src/usb_hid.c
   src/main.c
 )
