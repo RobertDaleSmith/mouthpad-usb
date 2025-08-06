@@ -545,7 +545,7 @@ class MouthPadController {
         // Log complete packet in raw mode
         if (this.logViewMode === 'raw') {
             this.logRaw(packet);
-            return; // Skip detailed processing in raw mode
+            // Don't return early - continue to process for grid updates
         }
         
         this.log(`*** PACKET SIZE: ${packet.length} bytes ***`, 'info');
