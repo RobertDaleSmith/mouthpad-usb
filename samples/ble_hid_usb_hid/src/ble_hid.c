@@ -463,6 +463,14 @@ int ble_hid_init(void)
 	return 0;
 }
 
+void ble_hid_discovery_complete(void)
+{
+	LOG_INF("HID discovery completed - calling ready callback");
+	if (ready_callback) {
+		ready_callback();
+	}
+}
+
 int ble_hid_discover(struct bt_conn *conn)
 {
 	int err;

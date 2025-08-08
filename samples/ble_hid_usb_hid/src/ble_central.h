@@ -98,6 +98,7 @@ void ble_central_handle_buttons(uint32_t button_state, uint32_t has_changed);
 /* Callback function types */
 typedef void (*ble_connected_cb_t)(struct bt_conn *conn);
 typedef void (*ble_disconnected_cb_t)(struct bt_conn *conn, uint8_t reason);
+typedef void (*ble_security_changed_cb_t)(struct bt_conn *conn, bt_security_t level, enum bt_security_err err);
 
 /**
  * @brief Register connection callback
@@ -114,6 +115,14 @@ int ble_central_register_connected_cb(ble_connected_cb_t cb);
  * @return 0 on success, negative error code on failure
  */
 int ble_central_register_disconnected_cb(ble_disconnected_cb_t cb);
+
+/**
+ * @brief Register security changed callback
+ *
+ * @param cb Callback function for security change events
+ * @return 0 on success, negative error code on failure
+ */
+int ble_central_register_security_changed_cb(ble_security_changed_cb_t cb);
 
 #ifdef __cplusplus
 }

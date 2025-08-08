@@ -44,6 +44,7 @@ static usb_hid_send_cb_t usb_hid_send_callback = NULL;
 /* HID Bridge state */
 static bool hid_client_ready = false;
 static bool bridging_started = false;
+static bool security_established = false;
 
 /* Future NUS Bridge state */
 static ble_data_callback_t nus_data_callback = NULL;
@@ -55,6 +56,7 @@ static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len);
 static void ble_hid_ready_cb(void);
 static void ble_central_connected_cb(struct bt_conn *conn);
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason);
+static void ble_central_security_changed_cb(struct bt_conn *conn, bt_security_t level, enum bt_security_err err);
 static void button_handler(uint32_t button_state, uint32_t has_changed);
 
 /* BLE Transport initialization */
@@ -67,6 +69,7 @@ int ble_transport_init(void)
 	/* Register BLE Central callbacks */
 	ble_central_register_connected_cb(ble_central_connected_cb);
 	ble_central_register_disconnected_cb(ble_central_disconnected_cb);
+	ble_central_register_security_changed_cb(ble_central_security_changed_cb);
 
 	/* Initialize BLE Central */
 	err = ble_central_init();
@@ -100,13 +103,7 @@ int ble_transport_init(void)
 		return err;
 	}
 
-	err = bt_enable(NULL);
-	if (err) {
-		LOG_ERR("Bluetooth init failed (err %d)", err);
-		return err;
-	}
-
-	LOG_INF("Bluetooth initialized");
+	/* Bluetooth initialization is now handled in ble_central_init() */
 
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		settings_load();
@@ -214,14 +211,23 @@ static void ble_hid_ready_cb(void)
 
 static void ble_central_connected_cb(struct bt_conn *conn)
 {
+	int err;
+
 	LOG_INF("BLE Central connected - starting setup");
 
-	int err = bt_conn_set_security(conn, BT_SECURITY_L2);
+	/* Reset security state (like NUS sample) */
+	security_established = false;
+
+	/* Request L3; regardless of result, proceed to discovery */
+	LOG_INF("Attempting to set security to level 3 (authentication)");
+	err = bt_conn_set_security(conn, BT_SECURITY_L3);
 	if (err) {
 		LOG_WRN("Failed to set security: %d", err);
+		/* Try discovery anyway */
 		ble_central_gatt_discover(conn);
 	} else {
-		LOG_INF("Security setup successful");
+		LOG_INF("Security setup initiated");
+		/* Start discovery immediately (same as NUS sample) */
 		ble_central_gatt_discover(conn);
 	}
 }
@@ -236,6 +242,17 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	nus_client_ready = false;
 
 	LOG_INF("BLE Central disconnected - resetting bridge states");
+}
+
+static void ble_central_security_changed_cb(struct bt_conn *conn, bt_security_t level, enum bt_security_err err)
+{
+	if (!err) {
+		LOG_INF("Security changed: level %u", level);
+		security_established = true;
+	} else {
+		LOG_WRN("Security failed: level %u err %d", level, err);
+		/* Do not alter discovery flow here, mirror NUS behavior */
+	}
 }
 
 /* Button handler for transport layer */

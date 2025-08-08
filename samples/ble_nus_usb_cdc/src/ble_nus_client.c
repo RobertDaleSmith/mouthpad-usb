@@ -85,14 +85,43 @@ static void nus_data_sent(struct bt_nus_client *nus, uint8_t err, const uint8_t 
 static void discovery_complete(struct bt_gatt_dm *dm, void *context)
 {
 	struct bt_nus_client *nus = context;
+	int err;
+	
 	LOG_INF("Service discovery completed");
 
+	// Print detailed discovery data to see what's actually available
+	LOG_INF("=== GATT DISCOVERY DATA ===");
 	bt_gatt_dm_data_print(dm);
+	LOG_INF("=== END GATT DISCOVERY DATA ===");
 
-	bt_nus_handles_assign(dm, nus);
-	bt_nus_subscribe_receive(nus);
+	// Check if we found any services at all
+	const struct bt_gatt_dm_attr *service_attr = bt_gatt_dm_service_get(dm);
+	if (!service_attr) {
+		LOG_ERR("No services found in discovery data - device may not have any services");
+		bt_gatt_dm_data_release(dm);
+		return;
+	}
 
-	bt_gatt_dm_data_release(dm);
+	LOG_INF("Found at least one service, attempting NUS handle assignment");
+
+	err = bt_nus_handles_assign(dm, nus);
+	if (err) {
+		LOG_ERR("Failed to assign NUS handles (err %d) - device may not have NUS TX/RX characteristics", err);
+		LOG_ERR("This suggests the remote device doesn't have a proper NUS service implementation");
+		LOG_ERR("The device might be advertising NUS UUID but not actually implementing the service");
+		bt_gatt_dm_data_release(dm);
+		return;
+	}
+	
+	LOG_INF("NUS handles assigned successfully");
+
+	// Don't attempt subscription immediately - follow HID pattern
+	// Subscription will be handled later when needed
+
+	err = bt_gatt_dm_data_release(dm);
+	if (err) {
+		LOG_ERR("Could not release the discovery data, error code: %d", err);
+	}
 
 	// Call external discovery complete callback if registered
 	if (discovery_complete_cb) {
@@ -159,6 +188,22 @@ int ble_nus_client_send_data(const uint8_t *data, uint16_t len)
 	}
 
 	return bt_nus_client_send(&nus_client, data, len);
+}
+
+int ble_nus_client_subscribe(void)
+{
+	int err;
+	
+	LOG_INF("Attempting to subscribe to NUS receive");
+	
+	err = bt_nus_subscribe_receive(&nus_client);
+	if (err) {
+		LOG_ERR("Failed to subscribe to NUS receive (err %d)", err);
+		return err;
+	}
+	
+	LOG_INF("NUS subscription successful");
+	return 0;
 }
 
 void ble_nus_client_discover(struct bt_conn *conn)

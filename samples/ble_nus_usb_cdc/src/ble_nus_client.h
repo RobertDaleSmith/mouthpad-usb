@@ -18,6 +18,7 @@
 /* NUS Client initialization and control functions */
 int ble_nus_client_init(void);
 int ble_nus_client_send_data(const uint8_t *data, uint16_t len);
+int ble_nus_client_subscribe(void);
 
 /* Service discovery */
 void ble_nus_client_discover(struct bt_conn *conn);

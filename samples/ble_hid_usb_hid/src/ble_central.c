@@ -20,9 +20,10 @@
 #include <zephyr/sys/byteorder.h>
 #include <bluetooth/scan.h>
 #include <bluetooth/services/hogp.h>
-
-#include <zephyr/logging/log.h>
 #include <dk_buttons_and_leds.h>
+
+#include <zephyr/settings/settings.h>
+#include <zephyr/logging/log.h>
 
 #include "ble_central.h"
 
@@ -39,9 +40,36 @@ static struct bt_conn *auth_conn;
 /* Callback registration */
 static ble_connected_cb_t connected_callback = NULL;
 static ble_disconnected_cb_t disconnected_callback = NULL;
+static ble_security_changed_cb_t security_changed_callback = NULL;
 
 /* Forward declarations */
 static void gatt_discover(struct bt_conn *conn);
+
+/* Address filter helper function */
+static void try_add_address_filter(const struct bt_bond_info *info, void *user_data)
+{
+	int err;
+	char addr[BT_ADDR_LE_STR_LEN];
+	uint8_t *filter_mode = user_data;
+
+	bt_addr_le_to_str(&info->addr, addr, sizeof(addr));
+
+	struct bt_conn *conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &info->addr);
+
+	if (conn) {
+		bt_conn_unref(conn);
+		return;
+	}
+
+	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_ADDR, &info->addr);
+	if (err) {
+		LOG_ERR("Address filter cannot be added (err %d): %s", err, addr);
+		return;
+	}
+
+	LOG_INF("Address filter added: %s", addr);
+	*filter_mode |= BT_SCAN_ADDR_FILTER;
+}
 
 /* Scan callback functions */
 static void scan_filter_match(struct bt_scan_device_info *device_info,
@@ -51,20 +79,30 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 	char addr[BT_ADDR_LE_STR_LEN];
 
 	if (!filter_match->uuid.match ||
-	    (filter_match->uuid.count != 1)) {
+	    (filter_match->uuid.count < 1)) {
 
 		printk("Invalid device connected\n");
 
 		return;
 	}
 
-	const struct bt_uuid *uuid = filter_match->uuid.uuid[0];
-
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
 
-	printk("Filters matched on UUID 0x%04x.\nAddress: %s connectable: %s\n",
-		BT_UUID_16(uuid)->val,
-		addr, connectable ? "yes" : "no");
+	/* Check if HID service is present */
+	bool has_hid = false;
+	for (int i = 0; i < filter_match->uuid.count; i++) {
+		const struct bt_uuid *uuid = filter_match->uuid.uuid[i];
+		if (uuid->type == BT_UUID_TYPE_16 && BT_UUID_16(uuid)->val == BT_UUID_HIDS_VAL) {
+			has_hid = true;
+			break;
+		}
+	}
+
+	printk("Filters matched on device %s.\n", addr);
+	if (has_hid) {
+		printk("  - HID service found\n");
+	}
+	printk("Connectable: %s\n", connectable ? "yes" : "no");
 }
 
 static void scan_connecting_error(struct bt_scan_device_info *device_info)
@@ -78,31 +116,7 @@ static void scan_connecting(struct bt_scan_device_info *device_info,
 	ble_central_set_default_conn(bt_conn_ref(conn));
 }
 
-static void scan_filter_no_match(struct bt_scan_device_info *device_info,
-				 bool connectable)
-{
-	int err;
-	struct bt_conn *conn = NULL;
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	if (device_info->recv_info->adv_type == BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
-		bt_addr_le_to_str(device_info->recv_info->addr, addr,
-				  sizeof(addr));
-		printk("Direct advertising received from %s\n", addr);
-		bt_scan_stop();
-
-		err = bt_conn_le_create(device_info->recv_info->addr,
-					BT_CONN_LE_CREATE_CONN,
-					device_info->conn_param, &conn);
-
-		if (!err) {
-			ble_central_set_default_conn(bt_conn_ref(conn));
-			bt_conn_unref(conn);
-		}
-	}
-}
-
-BT_SCAN_CB_INIT(scan_cb, scan_filter_match, scan_filter_no_match,
+BT_SCAN_CB_INIT(scan_cb, scan_filter_match, NULL,
 		scan_connecting_error, scan_connecting);
 
 static void scan_init(void)
@@ -110,30 +124,38 @@ static void scan_init(void)
 	int err;
 
 	struct bt_scan_init_param scan_init = {
-		.connect_if_match = 1,
+		.connect_if_match = true,
 		.scan_param = NULL,
 		.conn_param = BT_LE_CONN_PARAM_DEFAULT
 	};
 
 	bt_scan_init(&scan_init);
 	bt_scan_cb_register(&scan_cb);
-
-	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_HIDS);
-	if (err) {
-		printk("Scanning filters cannot be set (err %d)\n", err);
-
-		return;
-	}
-
-	err = bt_scan_filter_enable(BT_SCAN_UUID_FILTER, false);
-	if (err) {
-		printk("Filters cannot be turned on (err %d)\n", err);
-	}
 }
 
 int ble_central_init(void)
 {
+	int err;
+
 	LOG_INF("Initializing BLE Central...");
+	
+	printk("Starting Bluetooth initialization...\n");
+	err = bt_enable(NULL);
+	if (err) {
+		LOG_ERR("Bluetooth init failed (err %d)", err);
+		return err;
+	}
+	LOG_INF("Bluetooth initialized");
+	printk("Bluetooth initialized successfully\n");
+
+	/* Fixed passkey (if configured) is handled by Kconfig at build time */
+
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		printk("Loading settings...\n");
+		settings_load();
+		printk("Settings loaded\n");
+	}
+
 	scan_init();
 	LOG_INF("✓ BLE Central initialized");
 	return 0;
@@ -142,14 +164,39 @@ int ble_central_init(void)
 int ble_central_start_scan(void)
 {
 	int err;
+	uint8_t filter_mode = 0;
 
-	err = bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE);
+	err = bt_scan_stop();
 	if (err) {
-		printk("Scanning failed to start (err %d)\n", err);
+		LOG_ERR("Failed to stop scanning (err %d)", err);
 		return err;
 	}
 
-	printk("Scanning successfully started\n");
+	bt_scan_filter_remove_all();
+
+	/* Add HID service filter */
+	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_HIDS);
+	if (err) {
+		LOG_ERR("HID UUID filter cannot be added (err %d", err);
+		return err;
+	}
+	filter_mode |= BT_SCAN_UUID_FILTER;
+
+	bt_foreach_bond(BT_ID_DEFAULT, try_add_address_filter, &filter_mode);
+
+	err = bt_scan_filter_enable(filter_mode, false);
+	if (err) {
+		LOG_ERR("Filters cannot be turned on (err %d)", err);
+		return err;
+	}
+
+	err = bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE);
+	if (err) {
+		LOG_ERR("Scanning failed to start (err %d)", err);
+		return err;
+	}
+
+	LOG_INF("Scan started");
 	return 0;
 }
 
@@ -207,12 +254,10 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 
 	printk("Connected: %s\n", addr);
 
-	err = bt_conn_set_security(conn, BT_SECURITY_L2);
-	if (err) {
-		printk("Failed to set security: %d\n", err);
-
-		/* Trigger GATT discovery */
-		gatt_discover(conn);
+	/* Stop scanning once connected */
+	err = bt_scan_stop();
+	if ((!err) && (err != -EALREADY)) {
+		LOG_ERR("Stop LE scan failed (err %d)", err);
 	}
 
 	/* Call transport layer callback if registered */
@@ -279,8 +324,12 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 		       bt_security_err_to_str(err));
 	}
 
-	/* Trigger GATT discovery */
-	gatt_discover(conn);
+	/* Call external security changed callback if registered */
+	if (security_changed_callback) {
+		security_changed_callback(conn, level, err);
+	}
+
+	/* GATT discovery will be handled by the transport layer */
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
@@ -297,26 +346,45 @@ static void discovery_completed_cb(struct bt_gatt_dm *dm,
 
 	printk("The discovery procedure succeeded\n");
 
+	LOG_INF("=== GATT DISCOVERY DATA ===");
 	bt_gatt_dm_data_print(dm);
+	LOG_INF("=== END GATT DISCOVERY DATA ===");
 
 	extern struct bt_hogp *ble_hid_get_hogp(void);
 	struct bt_hogp *hogp = ble_hid_get_hogp();
 	err = bt_hogp_handles_assign(dm, hogp);
 	if (err) {
 		printk("Could not init HIDS client object, error: %d\n", err);
+		LOG_ERR("HOGP handles assignment failed (err %d)", err);
+		LOG_ERR("Device may not have a complete HID service");
+		
+		/* Release the discovery data even if HOGP assignment failed */
+		err = bt_gatt_dm_data_release(dm);
+		if (err) {
+			LOG_ERR("Failed to release discovery data (err %d)", err);
+		}
+		return;
 	}
 
 	err = bt_gatt_dm_data_release(dm);
 	if (err) {
 		printk("Could not release the discovery data, error "
 		       "code: %d\n", err);
+		LOG_ERR("Failed to release discovery data (err %d)", err);
 	}
+
+	/* Signal to transport layer that HID discovery is complete */
+	extern void ble_hid_discovery_complete(void);
+	LOG_INF("Calling HID discovery complete callback");
+	ble_hid_discovery_complete();
 }
 
 static void discovery_service_not_found_cb(struct bt_conn *conn,
 					   void *context)
 {
 	printk("The service could not be found during the discovery\n");
+	LOG_ERR("HID service not found on device");
+	LOG_ERR("This might indicate the device doesn't have HID services");
 }
 
 static void discovery_error_found_cb(struct bt_conn *conn,
@@ -324,6 +392,8 @@ static void discovery_error_found_cb(struct bt_conn *conn,
 				     void *context)
 {
 	printk("The discovery procedure failed with %d\n", err);
+	LOG_ERR("HID service discovery failed (err %d)", err);
+	LOG_ERR("This might indicate the device doesn't have HID services or connection issues");
 }
 
 static const struct bt_gatt_dm_cb discovery_cb = {
@@ -334,16 +404,38 @@ static const struct bt_gatt_dm_cb discovery_cb = {
 
 static void gatt_discover(struct bt_conn *conn)
 {
+	static int retry_count = 0;
 	int err;
 
 	if (conn != ble_central_get_default_conn()) {
 		return;
 	}
 
+	/* Check if connection is valid */
+	if (!conn) {
+		LOG_ERR("Invalid connection, cannot start discovery");
+		return;
+	}
+
+	LOG_INF("Starting HID service discovery... (attempt %d)", retry_count + 1);
 	err = bt_gatt_dm_start(conn, BT_UUID_HIDS, &discovery_cb, NULL);
 	if (err) {
-		printk("could not start the discovery procedure, error "
-			"code: %d\n", err);
+		LOG_ERR("Could not start HID discovery (err %d)", err);
+		LOG_ERR("This might be due to connection not being ready or security issues");
+		
+		/* Retry up to 2 times with shorter delays */
+		if (retry_count < 2) {
+			retry_count++;
+			LOG_INF("Retrying discovery in %d ms...", retry_count * 500);
+			k_sleep(K_MSEC(retry_count * 500));
+			gatt_discover(conn);
+		} else {
+			LOG_ERR("GATT discovery failed after %d attempts", retry_count);
+			retry_count = 0; // Reset for next connection
+		}
+	} else {
+		LOG_INF("HID service discovery started successfully");
+		retry_count = 0; // Reset on success
 	}
 }
 
@@ -361,6 +453,15 @@ static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	printk("Passkey for %s: %06u\n", addr, passkey);
+	/* Display only; confirmation is handled automatically in auth_passkey_confirm */
+}
+
+static void auth_pairing_confirm(struct bt_conn *conn)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	printk("Auto-confirming Just Works pairing for %s\n", addr);
+	bt_conn_auth_pairing_confirm(conn);
 }
 
 static void auth_passkey_confirm(struct bt_conn *conn, unsigned int passkey)
@@ -372,12 +473,8 @@ static void auth_passkey_confirm(struct bt_conn *conn, unsigned int passkey)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	printk("Passkey for %s: %06u\n", addr, passkey);
-
-	if (IS_ENABLED(CONFIG_SOC_SERIES_NRF54HX) || IS_ENABLED(CONFIG_SOC_SERIES_NRF54LX)) {
-		printk("Press Button 0 to confirm, Button 1 to reject.\n");
-	} else {
-		printk("Press Button 1 to confirm, Button 2 to reject.\n");
-	}
+	printk("Auto-confirming numeric comparison\n");
+	bt_conn_auth_passkey_confirm(conn);
 }
 
 static void auth_cancel(struct bt_conn *conn)
@@ -411,6 +508,7 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 static struct bt_conn_auth_cb conn_auth_callbacks = {
 	.passkey_display = auth_passkey_display,
 	.passkey_confirm = auth_passkey_confirm,
+	.pairing_confirm = auth_pairing_confirm,
 	.cancel = auth_cancel,
 };
 
@@ -485,5 +583,11 @@ int ble_central_register_connected_cb(ble_connected_cb_t cb)
 int ble_central_register_disconnected_cb(ble_disconnected_cb_t cb)
 {
 	disconnected_callback = cb;
+	return 0;
+}
+
+int ble_central_register_security_changed_cb(ble_security_changed_cb_t cb)
+{
+	security_changed_callback = cb;
 	return 0;
 } 

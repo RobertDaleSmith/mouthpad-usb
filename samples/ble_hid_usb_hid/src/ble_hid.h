@@ -26,6 +26,14 @@ extern "C" {
 int ble_hid_init(void);
 
 /**
+ * @brief Signal that HID discovery is complete
+ * 
+ * This function is called by the central module when HID service discovery
+ * is complete, and it triggers the ready callback.
+ */
+void ble_hid_discovery_complete(void);
+
+/**
  * @brief Discover HID services on a connected device
  * 
  * @param conn The BLE connection to discover services on
