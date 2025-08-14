@@ -115,6 +115,20 @@ int ble_central_register_connected_cb(ble_connected_cb_t cb);
  */
 int ble_central_register_disconnected_cb(ble_disconnected_cb_t cb);
 
+/**
+ * @brief Initialize BLE scan after Bluetooth is enabled
+ *
+ * @return 0 on success, negative error code on failure
+ */
+int ble_central_init_scan(void);
+
+/**
+ * @brief Setup scan filters for BLE devices
+ *
+ * @return 0 on success, negative error code on failure
+ */
+int ble_central_setup_scan_filters(void);
+
 #ifdef __cplusplus
 }
 #endif

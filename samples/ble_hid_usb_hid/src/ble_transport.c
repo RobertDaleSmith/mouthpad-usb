@@ -38,6 +38,9 @@ extern struct k_sem ep_write_sem;
 
 LOG_MODULE_REGISTER(ble_transport, LOG_LEVEL_INF);
 
+/* Give controller time to settle before starting scan */
+static const int SCAN_DELAY_MS = 1000;
+
 /* USB HID callback */
 static usb_hid_send_cb_t usb_hid_send_callback = NULL;
 
@@ -57,12 +60,55 @@ static void ble_central_connected_cb(struct bt_conn *conn);
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason);
 static void button_handler(uint32_t button_state, uint32_t has_changed);
 
+/* Forward declare the work item */
+static struct k_work_delayable delayed_scan_work;
+
+/* Delayed scan start work (following HID Remapper pattern) */
+static void delayed_scan_start_work_fn(struct k_work *work)
+{
+	int err;
+	
+	printk("=== STARTING DELAYED SCAN WORK ===\n");
+	LOG_INF("Starting delayed BLE scan work...");
+	
+	/* Setup scan filters like HID Remapper does */
+	printk("=== SETTING UP SCAN FILTERS ===\n");
+	err = ble_central_setup_scan_filters();
+	if (err) {
+		LOG_ERR("Scan filter setup failed (err %d)", err);
+		printk("=== SCAN FILTER SETUP FAILED ===\n");
+		return;
+	}
+	
+	/* Start scan like HID Remapper does */
+	printk("=== STARTING SCAN (HID REMAPPER STYLE) ===\n");
+	err = bt_scan_start(BT_SCAN_TYPE_SCAN_PASSIVE);
+	if (err == 0) {
+		LOG_INF("Scanning started successfully");
+		printk("=== SCAN STARTED SUCCESSFULLY ===\n");
+	} else if (err == -EALREADY) {
+		LOG_INF("Scan already in progress");
+		printk("=== SCAN ALREADY RUNNING ===\n");
+	} else {
+		LOG_ERR("bt_scan_start failed (err %d)", err);
+		printk("=== SCAN START FAILED: err=%d ===\n", err);
+		
+		/* Retry if busy */
+		if (err == -EAGAIN || err == -EBUSY) {
+			LOG_WRN("Scanner busy, will retry in 1 second");
+			k_work_reschedule(&delayed_scan_work, K_MSEC(1000));
+		}
+	}
+}
+
+static K_WORK_DELAYABLE_DEFINE(delayed_scan_work, delayed_scan_start_work_fn);
+
 /* BLE Transport initialization */
 int ble_transport_init(void)
 {
 	int err;
 
-	LOG_INF("Initializing BLE Transport...");
+	printk("=== BLE TRANSPORT INIT START ===\n");
 
 	/* Register BLE Central callbacks */
 	ble_central_register_connected_cb(ble_central_connected_cb);
@@ -86,31 +132,81 @@ int ble_transport_init(void)
 		return err;
 	}
 
+	/* Enable Bluetooth FIRST like HID Remapper does */
+	printk("=== ENABLING BLUETOOTH (HID REMAPPER ORDER) ===\n");
+	err = bt_enable(NULL);
+	if (err) {
+			LOG_ERR("Bluetooth init failed (err %d)", err);
+			printk("=== BLUETOOTH ENABLE FAILED ===\n");
+			return err;
+	}
+
+	printk("=== BLUETOOTH ENABLED SUCCESSFULLY ===\n");
+
+	/* Register auth callbacks AFTER bt_enable */
+	err = ble_central_init_auth_callbacks();
+	if (err != 0) {
+			LOG_ERR("ble_central_init_auth_callbacks failed (err %d)", err);
+			return err;
+	}
+
 	/* Initialize BLE Central callbacks */
 	err = ble_central_init_callbacks();
 	if (err != 0) {
-		LOG_ERR("ble_central_init_callbacks failed (err %d)", err);
-		return err;
+			LOG_ERR("ble_central_init_callbacks failed (err %d)", err);
+			return err;
 	}
 
-	/* Initialize BLE Central authentication callbacks */
-	err = ble_central_init_auth_callbacks();
-	if (err != 0) {
-		LOG_ERR("ble_central_init_auth_callbacks failed (err %d)", err);
-		return err;
-	}
-
-	err = bt_enable(NULL);
-	if (err) {
-		LOG_ERR("Bluetooth init failed (err %d)", err);
-		return err;
-	}
-
-	LOG_INF("Bluetooth initialized");
-
+	/* Initialize settings AFTER bt_enable - EXACTLY like HID Remapper */
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		settings_load();
+			printk("=== INITIALIZING SETTINGS AFTER BT_ENABLE ===\n");
+			err = settings_subsys_init();
+			if (err) {
+					LOG_ERR("Settings subsys init failed (err %d)", err);
+					printk("=== SETTINGS INIT FAILED ===\n");
+					return err;
+			}
+			
+			settings_load();
+			LOG_INF("Settings loaded AFTER BT init (HID Remapper order)");
+			printk("=== SETTINGS LOADED AFTER BT INIT ===\n");
 	}
+
+	/* HID Remapper doesn't enable bondable mode */
+	printk("=== BONDING DISABLED (LIKE HID REMAPPER) ===\n");
+
+	/* Check if we have an identity address, if not create one */
+	bt_addr_le_t addrs[CONFIG_BT_ID_MAX];
+	size_t count = CONFIG_BT_ID_MAX;
+	bt_id_get(addrs, &count);
+	printk("=== BT IDENTITY COUNT AFTER INIT: %d ===\n", count);
+
+	if (count == 0) {
+			printk("=== NO IDENTITY ADDRESS - CREATING ONE ===\n");
+			int identity_id = bt_id_create(NULL, NULL);
+			if (identity_id < 0) {
+					LOG_ERR("Failed to create BT identity (err %d)", identity_id);
+					printk("=== IDENTITY CREATION FAILED ===\n");
+					return identity_id;
+			}
+			printk("=== IDENTITY CREATED: ID %d ===\n", identity_id);
+			
+			/* Check count again */
+			count = CONFIG_BT_ID_MAX;
+			bt_id_get(addrs, &count);
+			printk("=== NEW BT IDENTITY COUNT: %d ===\n", count);
+	}
+
+	LOG_INF("BLE stack fully configured and ready");
+
+	/* Initialize scan after Bluetooth is enabled (following HID Remapper pattern) */
+	err = ble_central_init_scan();
+	if (err) {
+			LOG_ERR("BLE scan init failed (err %d)", err);
+			printk("=== SCAN INIT FAILED ===\n");
+			return err;
+	}
+	printk("=== SCAN INITIALIZED ===\n");
 
 	err = dk_buttons_init(button_handler);
 	if (err) {
@@ -118,14 +214,13 @@ int ble_transport_init(void)
 		return err;
 	}
 
-	/* Start scanning */
-	err = ble_central_start_scan();
-	if (err) {
-		LOG_ERR("Scan start failed (err %d)", err);
-		return err;
-	}
+	/* Schedule delayed scan start EXACTLY like HID Remapper does */
+	k_work_reschedule(&delayed_scan_work, K_MSEC(SCAN_DELAY_MS));
+	LOG_INF("Scheduled delayed scan start in %d ms (HID Remapper pattern)", SCAN_DELAY_MS);
+	printk("=== SCAN SCHEDULED FOR %d ms (HID REMAPPER PATTERN) ===\n", SCAN_DELAY_MS);
 
 	LOG_INF("BLE Transport initialized successfully");
+	printk("=== BLE TRANSPORT INIT COMPLETE ===\n");
 	return 0;
 }
 
@@ -215,15 +310,6 @@ static void ble_hid_ready_cb(void)
 static void ble_central_connected_cb(struct bt_conn *conn)
 {
 	LOG_INF("BLE Central connected - starting setup");
-
-	int err = bt_conn_set_security(conn, BT_SECURITY_L2);
-	if (err) {
-		LOG_WRN("Failed to set security: %d", err);
-		ble_central_gatt_discover(conn);
-	} else {
-		LOG_INF("Security setup successful");
-		ble_central_gatt_discover(conn);
-	}
 }
 
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
