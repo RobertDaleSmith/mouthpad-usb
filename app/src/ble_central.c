@@ -348,12 +348,25 @@ int ble_central_start_scan(void)
 
 	bt_scan_filter_remove_all();
 
-	/* Scan without UUID filters - we'll check for both services in the callback */
-	/* This allows us to detect devices that have both NUS and HID services */
+	/* Add UUID filter for HID service (like working sample) */
+	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_HIDS);
+	if (err) {
+		LOG_ERR("Cannot add HID UUID scan filter (err %d)", err);
+		return err;
+	}
 
 	bt_foreach_bond(BT_ID_DEFAULT, try_add_address_filter, &filter_mode);
 
-	err = bt_scan_filter_enable(filter_mode, false);
+	/* Always enable UUID filter, optionally add address filters */
+	uint8_t enable_filters = BT_SCAN_UUID_FILTER;
+	if (filter_mode != 0) {
+		enable_filters |= filter_mode;
+		LOG_INF("Enabling HID UUID filter + address filters for bonded devices");
+	} else {
+		LOG_INF("Enabling HID UUID filter (no bonded devices)");
+	}
+
+	err = bt_scan_filter_enable(enable_filters, false);
 	if (err) {
 		LOG_ERR("Filters cannot be turned on (err %d)", err);
 		return err;
