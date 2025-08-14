@@ -154,6 +154,15 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 		} else {
 			k_sem_take(&ep_write_sem, K_FOREVER);
 			// printk("Report %u sent directly to USB", report_id);
+			
+			/* Trigger data activity callback for LED indication */
+			if (data_received_callback) {
+				data_received_callback(data, size);
+			}
+			
+			/* Also directly trigger transport layer data activity */
+			extern void ble_transport_mark_data_activity(void);
+			ble_transport_mark_data_activity();
 		}
 	}
 	

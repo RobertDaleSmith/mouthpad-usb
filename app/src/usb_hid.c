@@ -25,8 +25,8 @@ LOG_MODULE_REGISTER(usb_mouse, LOG_LEVEL_INF);
  * GLOBAL VARIABLES
  * ============================================================================ */
 
-/* LED for status indication */
-static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+/* LED for status indication (blue LED) */
+static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
 
 /* USB HID device and semaphore - accessible to BLE module for direct sending */
 const struct device *hid_dev;
@@ -153,13 +153,13 @@ int usb_init(void)
 	/* Initialize USB endpoint semaphore */
 	k_sem_init(&ep_write_sem, 0, 1);
 
-	/* Configure status LED */
-	if (!gpio_is_ready_dt(&led0)) {
-		LOG_ERR("LED device %s is not ready", led0.port->name);
+	/* Configure status blue LED */
+	if (!gpio_is_ready_dt(&led2)) {
+		LOG_ERR("LED device %s is not ready", led2.port->name);
 		return -ENODEV;
 	}
 
-	ret = gpio_pin_configure_dt(&led0, GPIO_OUTPUT);
+	ret = gpio_pin_configure_dt(&led2, GPIO_OUTPUT);
 	if (ret < 0) {
 		LOG_ERR("Failed to configure the LED pin, error: %d", ret);
 		return ret;

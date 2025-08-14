@@ -30,6 +30,10 @@ int ble_transport_register_usb_hid_callback(ble_data_callback_t cb);
 int ble_transport_send_nus_data(const uint8_t *data, uint16_t len);
 bool ble_transport_is_nus_ready(void);
 
+/* Connection status */
+bool ble_transport_is_connected(void);
+bool ble_transport_has_data_activity(void);
+
 /* Future HID Transport functions (for later integration) */
 int ble_transport_register_hid_data_callback(ble_data_callback_t cb);
 int ble_transport_register_hid_ready_callback(ble_ready_callback_t cb);

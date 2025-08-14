@@ -33,6 +33,10 @@ static bool bridging_started = false;
 static bool hid_client_ready = false;
 static bool hid_discovery_complete = false;
 
+/* Data activity tracking for LED indication */
+static bool data_activity = false;
+static int64_t last_data_time = 0;
+
 /* HID Bridge callbacks */
 static ble_data_callback_t hid_data_callback = NULL;
 static ble_ready_callback_t hid_ready_callback = NULL;
@@ -154,6 +158,7 @@ int ble_transport_send_nus_data(const uint8_t *data, uint16_t len)
 		LOG_ERR("BLE Transport send failed: %d", err);
 	} else {
 		LOG_INF("BLE Transport send successful");
+		data_activity = true;  // Mark data activity for LED indication
 	}
 	return err;
 }
@@ -189,6 +194,7 @@ int ble_transport_send_hid_data(const uint8_t *data, uint16_t len)
 		LOG_ERR("BLE Transport HID send failed: %d", err);
 	} else {
 		LOG_INF("BLE Transport HID send successful");
+		data_activity = true;  // Mark data activity for LED indication
 	}
 	return err;
 }
@@ -231,6 +237,11 @@ static void ble_nus_data_received_cb(const uint8_t *data, uint16_t len)
 	if (len >= 4) {
 		LOG_INF("PACKET STRUCTURE: Type=0x%02x, Length=%d", data[0], len);
 	}
+	
+	// Mark data activity for LED indication
+	data_activity = true;
+	last_data_time = k_uptime_get();
+	LOG_INF("=== DATA ACTIVITY MARKED ===");
 	
 	// Bridge NUS data directly to USB CDC
 	if (usb_cdc_send_callback) {
@@ -288,6 +299,11 @@ static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len)
 	if (len >= 4) {
 		LOG_INF("HID PACKET STRUCTURE: Type=0x%02x, Length=%d", data[0], len);
 	}
+	
+	// Mark data activity for LED indication
+	data_activity = true;
+	last_data_time = k_uptime_get();
+	LOG_INF("=== DATA ACTIVITY MARKED ===");
 	
 	// Bridge HID data directly to USB HID
 	if (hid_data_callback) {
@@ -372,4 +388,33 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	mtu_exchange_complete = false;
 	
 	LOG_INF("BLE Central disconnected - resetting both NUS and HID bridge states");
+}
+
+bool ble_transport_is_connected(void)
+{
+	return nus_client_ready || hid_client_ready;
+}
+
+bool ble_transport_has_data_activity(void)
+{
+	// Check if we've had data activity within the last 100ms
+	int64_t current_time = k_uptime_get();
+	if (data_activity && (current_time - last_data_time) < 100) {
+		LOG_DBG("BLE data activity detected (time diff: %lld ms)", current_time - last_data_time);
+		return true;
+	}
+	
+	// Reset if it's been too long
+	if ((current_time - last_data_time) >= 100) {
+		data_activity = false;
+	}
+	
+	return false;
+}
+
+void ble_transport_mark_data_activity(void)
+{
+	data_activity = true;
+	last_data_time = k_uptime_get();
+	LOG_INF("=== DATA ACTIVITY MARKED (DIRECT) ===");
 }

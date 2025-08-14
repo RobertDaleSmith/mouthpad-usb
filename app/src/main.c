@@ -88,9 +88,22 @@ int main(void)
 
 	LOG_INF("Starting USB ↔ BLE bridge (NUS + HID)");
 
-	// LED for status indication
-	const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+	// LED status indication system
+	const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);   // Blue LED
+	const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);  // Green LED
 	static int led_counter = 0;
+	static bool data_activity = false;
+	
+	// Configure LEDs
+	if (!gpio_is_ready_dt(&led_blue) || !gpio_is_ready_dt(&led_green)) {
+		LOG_ERR("LED devices not ready");
+	} else {
+		gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT);
+		gpio_pin_configure_dt(&led_green, GPIO_OUTPUT);
+		// Start with blue LED on (scanning state)
+		gpio_pin_set_dt(&led_blue, 1);
+		gpio_pin_set_dt(&led_green, 0);
+	}
 
 	for (;;) {
 		/* USB CDC ↔ BLE NUS Bridge */
@@ -105,6 +118,7 @@ int main(void)
 		if (bytes_read > 0) { // Data received from CDC
 			cdc_buffer[cdc_pos] = c;
 			cdc_pos++;
+			data_activity = true;  // Mark data activity
 			
 			// Send complete command when we get newline
 			if (c == '\n' || c == '\r' || cdc_pos >= UART_BUF_SIZE) {
@@ -125,11 +139,43 @@ int main(void)
 			}
 		}
 		
-		// Toggle LED every 1000 iterations (roughly every second)
+		// LED status system
 		led_counter++;
-		if (led_counter >= 1000) {
-			(void)gpio_pin_toggle(led0.port, led0.pin);
-			led_counter = 0;
+		
+		// Check BLE connection status and data activity
+		bool is_connected = ble_transport_is_connected();
+		bool ble_data_activity = ble_transport_has_data_activity();
+		
+		// Debug logging every second
+		if (led_counter % 1000 == 0) {
+			LOG_INF("LED: connected=%d, usb_data=%d, ble_data=%d", is_connected, data_activity, ble_data_activity);
+		}
+		
+		if (is_connected && (data_activity || ble_data_activity)) {
+			// Connected with data activity: Green flicker
+			if (led_counter % 20 == 0) {  // Very fast flicker every 20ms
+				gpio_pin_toggle_dt(&led_green);
+			}
+			// Turn off blue LED
+			gpio_pin_set_dt(&led_blue, 0);
+			
+		} else if (is_connected) {
+			// Connected but no data: Solid green
+			gpio_pin_set_dt(&led_green, 1);
+			gpio_pin_set_dt(&led_blue, 0);
+			
+		} else {
+			// Not connected: Blue blink (scanning)
+			gpio_pin_set_dt(&led_green, 0);
+			if (led_counter >= 500) {  // Slow blink every 500ms
+				gpio_pin_toggle_dt(&led_blue);
+				led_counter = 0;
+			}
+		}
+		
+		// Reset data activity flag periodically
+		if (led_counter % 100 == 0) {
+			data_activity = false;
 		}
 		
 		// Small delay to prevent busy waiting
