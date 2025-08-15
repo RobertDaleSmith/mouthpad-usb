@@ -15,9 +15,9 @@
 #include "ble_central.h"
 #include "ble_nus_client.h"
 #include "ble_hid.h"
+#include "ble_bas.h"
 #include "usb_cdc.h"
 #include "usb_hid.h"
-#include <bluetooth/services/bas_client.h>
 
 #define LOG_MODULE_NAME ble_transport
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -33,9 +33,6 @@ static bool bridging_started = false;
 /* HID Bridge state */
 static bool hid_client_ready = false;
 static bool hid_discovery_complete = false;
-
-/* Battery Service state */
-static struct bt_bas_client bas;
 
 /* Data activity tracking for LED indication */
 static bool data_activity = false;
@@ -54,13 +51,6 @@ static void ble_hid_discovery_complete_cb(void);
 static void ble_central_connected_cb(struct bt_conn *conn);
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason);
 static void gatt_discover(struct bt_conn *conn);
-
-/* Battery Service callbacks following Nordic pattern */
-static void battery_notify_cb(struct bt_bas_client *bas, uint8_t battery_level);
-static void battery_discovery_completed_cb(struct bt_gatt_dm *dm, void *context);
-static void battery_discovery_service_not_found_cb(struct bt_conn *conn, void *context);
-static void battery_discovery_error_found_cb(struct bt_conn *conn, int err, void *context);
-static void battery_gatt_discover(struct bt_conn *conn);
 
 static bool nus_discovery_complete = false;
 
@@ -119,9 +109,12 @@ int ble_transport_init(void)
 	}
 	LOG_INF("BLE NUS client initialized successfully");
 
-	/* Initialize Battery Service client following Nordic pattern */
-	bt_bas_client_init(&bas);
-	LOG_INF("Battery Service client initialized successfully");
+	/* Initialize Battery Service client */
+	err = ble_bas_init();
+	if (err != 0) {
+		LOG_ERR("ble_bas_init failed (err %d)", err);
+		return err;
+	}
 
 	/* Initialize HID client */
 	err = ble_hid_init();
@@ -342,7 +335,7 @@ static void ble_hid_discovery_complete_cb(void)
 	LOG_INF("BLE HID discovery status: ready=%d, complete=%d", hid_client_ready, hid_discovery_complete);
 	
 	/* Start Battery Service discovery after HID is complete */
-	battery_gatt_discover(ble_central_get_default_conn());
+	ble_bas_discover(ble_central_get_default_conn());
 }
 
 static void gatt_discover(struct bt_conn *conn)
@@ -442,79 +435,4 @@ void ble_transport_mark_data_activity(void)
 	data_activity = true;
 	last_data_time = k_uptime_get();
 	LOG_DBG("=== DATA ACTIVITY MARKED (DIRECT) ===");
-}
-
-/* Battery Service implementation following Nordic central_bas pattern */
-static void battery_notify_cb(struct bt_bas_client *bas, uint8_t battery_level)
-{
-	if (battery_level == BT_BAS_VAL_INVALID) {
-		LOG_WRN("Battery notification aborted");
-	} else {
-		LOG_INF("=== BATTERY LEVEL: %d%% ===", battery_level);
-	}
-}
-
-static struct bt_gatt_dm_cb battery_discovery_cb = {
-	.completed = battery_discovery_completed_cb,
-	.service_not_found = battery_discovery_service_not_found_cb,
-	.error_found = battery_discovery_error_found_cb,
-};
-
-static void battery_discovery_completed_cb(struct bt_gatt_dm *dm, void *context)
-{
-	int err;
-
-	LOG_INF("Battery Service discovery completed");
-
-	bt_gatt_dm_data_print(dm);
-
-	err = bt_bas_handles_assign(dm, &bas);
-	if (err) {
-		LOG_ERR("Could not assign BAS handles: %d", err);
-	}
-
-	if (bt_bas_notify_supported(&bas)) {
-		LOG_INF("Battery notifications supported - subscribing");
-		err = bt_bas_subscribe_battery_level(&bas, battery_notify_cb);
-		if (err) {
-			LOG_WRN("Cannot subscribe to battery notifications (err: %d)", err);
-		}
-	} else {
-		LOG_INF("Battery notifications not supported - using periodic reads");
-		err = bt_bas_start_per_read_battery_level(&bas, 10000, battery_notify_cb);
-		if (err) {
-			LOG_WRN("Could not start periodic battery reads: %d", err);
-		}
-	}
-
-	err = bt_gatt_dm_data_release(dm);
-	if (err) {
-		LOG_ERR("Could not release battery discovery data: %d", err);
-	}
-}
-
-static void battery_discovery_service_not_found_cb(struct bt_conn *conn, void *context)
-{
-	LOG_INF("Battery Service not found during discovery");
-}
-
-static void battery_discovery_error_found_cb(struct bt_conn *conn, int err, void *context)
-{
-	LOG_ERR("Battery Service discovery failed: %d", err);
-}
-
-static void battery_gatt_discover(struct bt_conn *conn)
-{
-	int err;
-
-	if (!conn || conn != ble_central_get_default_conn()) {
-		return;
-	}
-
-	LOG_INF("Starting Battery Service discovery");
-
-	err = bt_gatt_dm_start(conn, BT_UUID_BAS, &battery_discovery_cb, NULL);
-	if (err) {
-		LOG_ERR("Could not start battery discovery: %d", err);
-	}
 }

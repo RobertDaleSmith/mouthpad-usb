@@ -14,6 +14,7 @@ project(mouthpad_usb)
     src/ble_central.c
     src/ble_nus_client.c
     src/ble_hid.c
+    src/ble_bas.c
     src/usb_cdc.c
     src/usb_hid.c
     src/main.c
