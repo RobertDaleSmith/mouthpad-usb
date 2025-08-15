@@ -241,7 +241,7 @@ static void ble_nus_data_received_cb(const uint8_t *data, uint16_t len)
 	// Mark data activity for LED indication
 	data_activity = true;
 	last_data_time = k_uptime_get();
-	LOG_INF("=== DATA ACTIVITY MARKED ===");
+	LOG_DBG("=== DATA ACTIVITY MARKED ===");
 	
 	// Bridge NUS data directly to USB CDC
 	if (usb_cdc_send_callback) {
@@ -267,9 +267,9 @@ static void ble_nus_discovery_complete_cb(void)
 
 static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len)
 {
-	LOG_INF("=== BLE HID DATA RECEIVED ===");
-	LOG_INF("HID data received: %d bytes", len);
-	LOG_INF("HID discovery status: ready=%d, complete=%d", hid_client_ready, hid_discovery_complete);
+	LOG_DBG("=== BLE HID DATA RECEIVED ===");
+	LOG_DBG("HID data received: %d bytes", len);
+	LOG_DBG("HID discovery status: ready=%d, complete=%d", hid_client_ready, hid_discovery_complete);
 	
 	// Only process data after HID discovery is complete
 	if (!hid_discovery_complete) {
@@ -303,7 +303,7 @@ static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len)
 	// Mark data activity for LED indication
 	data_activity = true;
 	last_data_time = k_uptime_get();
-	LOG_INF("=== DATA ACTIVITY MARKED ===");
+	LOG_DBG("=== DATA ACTIVITY MARKED ===");
 	
 	// Bridge HID data directly to USB HID
 	if (hid_data_callback) {
@@ -429,5 +429,5 @@ void ble_transport_mark_data_activity(void)
 {
 	data_activity = true;
 	last_data_time = k_uptime_get();
-	LOG_INF("=== DATA ACTIVITY MARKED (DIRECT) ===");
+	LOG_DBG("=== DATA ACTIVITY MARKED (DIRECT) ===");
 }

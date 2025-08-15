@@ -148,7 +148,7 @@ int main(void)
 		
 		// Debug logging every second
 		if (led_counter % 1000 == 0) {
-			LOG_INF("LED: connected=%d, usb_data=%d, ble_data=%d", is_connected, data_activity, ble_data_activity);
+			LOG_DBG("LED: connected=%d, usb_data=%d, ble_data=%d", is_connected, data_activity, ble_data_activity);
 		}
 		
 		if (is_connected && (data_activity || ble_data_activity)) {

@@ -128,13 +128,13 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 	if (!data) {
 		return BT_GATT_ITER_STOP;
 	}
-	printk("Notification, id: %u, size: %u, data:",
+	LOG_DBG("Notification, id: %u, size: %u, data:",
 	       bt_hogp_rep_id(rep),
 	       size);
 	for (i = 0; i < size; ++i) {
-		printk(" 0x%x", data[i]);
+		LOG_DBG(" 0x%x", data[i]);
 	}
-	printk("\n");
+	LOG_DBG("\n");
 	
 	// Handle different report types based on Report ID
 	uint8_t report_id = bt_hogp_rep_id(rep);
@@ -219,11 +219,11 @@ static uint8_t hogp_boot_kbd_report(struct bt_hogp *hogp,
 	if (!data) {
 		return BT_GATT_ITER_STOP;
 	}
-	printk("Notification, keyboard boot, size: %u, data:", size);
+	LOG_DBG("Notification, keyboard boot, size: %u, data:", size);
 	for (i = 0; i < size; ++i) {
-		printk(" 0x%x", data[i]);
+		LOG_DBG(" 0x%x", data[i]);
 	}
-	printk("\n");
+	LOG_DBG("\n");
 	return BT_GATT_ITER_CONTINUE;
 }
 
