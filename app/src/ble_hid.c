@@ -152,7 +152,11 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 		if (ret) {
 			printk("HID write error, %d", ret);
 		} else {
-			k_sem_take(&ep_write_sem, K_FOREVER);
+			// Wait for endpoint to be ready but with timeout to avoid blocking
+			ret = k_sem_take(&ep_write_sem, K_MSEC(50));
+			if (ret != 0) {
+				printk("USB HID endpoint timeout in BLE path");
+			}
 			// printk("Report %u sent directly to USB", report_id);
 			
 			/* Trigger data activity callback for LED indication */
@@ -201,8 +205,13 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	if (ret) {
 		printk("HID write error, %d", ret);
 	} else {
-		k_sem_take(&ep_write_sem, K_FOREVER);
-		printk("Boot mouse report sent directly to USB");
+		// Wait for endpoint to be ready but with timeout to avoid blocking
+		ret = k_sem_take(&ep_write_sem, K_MSEC(50));
+		if (ret != 0) {
+			printk("USB HID endpoint timeout in boot mouse path");
+		} else {
+			printk("Boot mouse report sent directly to USB");
+		}
 	}
 	
 	return BT_GATT_ITER_CONTINUE;
@@ -353,6 +362,11 @@ static void hids_on_ready(struct k_work *work)
 	}
 
 	hid_ready = true;
+	
+	/* Call the registered ready callback */
+	if (ready_callback) {
+		ready_callback();
+	}
 }
 
 static void hogp_prep_fail_cb(struct bt_hogp *hogp, int err)

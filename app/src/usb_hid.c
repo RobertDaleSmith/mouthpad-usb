@@ -252,15 +252,15 @@ int usb_hid_send_report(const uint8_t *data, uint16_t len)
 {
 	int ret;
 	
-	LOG_INF("=== USB HID SEND REPORT CALLED ===");
-	LOG_INF("Data length: %d bytes", len);
+	LOG_DBG("=== USB HID SEND REPORT CALLED ===");
+	LOG_DBG("Data length: %d bytes", len);
 	
 	if (hid_dev == NULL) {
 		LOG_ERR("USB HID device not initialized");
 		return -ENODEV;
 	}
 	
-	LOG_INF("Sending HID report: %d bytes", len);
+	LOG_DBG("Sending HID report: %d bytes", len);
 	
 	/* Wait for endpoint to be ready */
 	ret = k_sem_take(&ep_write_sem, K_MSEC(100));
@@ -269,7 +269,7 @@ int usb_hid_send_report(const uint8_t *data, uint16_t len)
 		return ret;
 	}
 	
-	LOG_INF("USB HID endpoint ready, sending report...");
+	LOG_DBG("USB HID endpoint ready, sending report...");
 	/* Send the HID report */
 	ret = hid_int_ep_write(hid_dev, data, len, NULL);
 	if (ret != 0) {

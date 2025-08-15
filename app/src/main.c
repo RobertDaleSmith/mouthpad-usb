@@ -23,22 +23,22 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 /* USB HID callback function */
 static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
 {
-	LOG_INF("USB HID data received: %d bytes", len);
+	LOG_DBG("USB HID data received: %d bytes", len);
 	
 	// Debug: Log the first few bytes
 	if (len > 0) {
-		LOG_INF("USB HID First bytes: %02x %02x %02x %02x", 
+		LOG_DBG("USB HID First bytes: %02x %02x %02x %02x", 
 			data[0], len > 1 ? data[1] : 0, len > 2 ? data[2] : 0, len > 3 ? data[3] : 0);
 	}
 	
 	// Bridge USB HID data to BLE HID
 	if (ble_transport_is_hid_ready()) {
-		LOG_INF("BLE HID is ready, sending %d bytes", len);
+		LOG_DBG("BLE HID is ready, sending %d bytes", len);
 		int err = ble_transport_send_hid_data(data, len);
 		if (err) {
 			LOG_ERR("USB HID→BLE HID FAILED (err %d)", err);
 		} else {
-			LOG_INF("USB HID data sent to BLE HID successfully");
+			LOG_DBG("USB HID data sent to BLE HID successfully");
 		}
 	} else {
 		LOG_DBG("HID client not ready - waiting for service discovery");
