@@ -16,9 +16,25 @@
 #include "usb_cdc.h"
 #include "usb_hid.h"
 #include "ble_transport.h"
+#include "ble_bas.h"
 
 #define LOG_MODULE_NAME mouthpad_usb
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
+
+/* Battery color indication mode - change this to test both modes */
+#define BATTERY_COLOR_MODE BAS_COLOR_MODE_GRADIENT  /* or BAS_COLOR_MODE_DISCRETE */
+
+/* RGB LED helper function */
+static void set_rgb_led(const struct gpio_dt_spec *led_red, 
+                       const struct gpio_dt_spec *led_green,
+                       const struct gpio_dt_spec *led_blue,
+                       ble_bas_rgb_color_t color)
+{
+	/* LEDs are active LOW, so invert the logic */
+	gpio_pin_set_dt(led_red, color.red == 0 ? 0 : 1);
+	gpio_pin_set_dt(led_green, color.green == 0 ? 0 : 1);
+	gpio_pin_set_dt(led_blue, color.blue == 0 ? 0 : 1);
+}
 
 /* USB HID callback function */
 static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
@@ -87,22 +103,27 @@ int main(void)
 	ble_transport_start_bridging();
 
 	LOG_INF("Starting USB ↔ BLE bridge (NUS + HID)");
+	LOG_INF("Battery LED color mode: %s", 
+	        (BATTERY_COLOR_MODE == BAS_COLOR_MODE_DISCRETE) ? "DISCRETE" : "GRADIENT");
 
-	// LED status indication system
+	// RGB LED status indication system
+	const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);    // Red LED
+	const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);  // Green LED  
 	const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);   // Blue LED
-	const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);  // Green LED
 	static int led_counter = 0;
 	static bool data_activity = false;
 	
-	// Configure LEDs
-	if (!gpio_is_ready_dt(&led_blue) || !gpio_is_ready_dt(&led_green)) {
-		LOG_ERR("LED devices not ready");
+	// Configure RGB LEDs
+	if (!gpio_is_ready_dt(&led_red) || !gpio_is_ready_dt(&led_green) || !gpio_is_ready_dt(&led_blue)) {
+		LOG_ERR("RGB LED devices not ready");
 	} else {
-		gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT);
+		gpio_pin_configure_dt(&led_red, GPIO_OUTPUT);
 		gpio_pin_configure_dt(&led_green, GPIO_OUTPUT);
+		gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT);
 		// Start with blue LED on (scanning state)
-		gpio_pin_set_dt(&led_blue, 1);
+		gpio_pin_set_dt(&led_red, 0);
 		gpio_pin_set_dt(&led_green, 0);
+		gpio_pin_set_dt(&led_blue, 1);
 	}
 
 	for (;;) {
@@ -139,36 +160,54 @@ int main(void)
 			}
 		}
 		
-		// LED status system
+		// RGB LED status system with battery-aware colors
 		led_counter++;
 		
 		// Check BLE connection status and data activity
 		bool is_connected = ble_transport_is_connected();
 		bool ble_data_activity = ble_transport_has_data_activity();
+		bool bas_ready = ble_bas_is_ready();
+		uint8_t battery_level = ble_bas_get_battery_level();
 		
 		// Debug logging every second
 		if (led_counter % 1000 == 0) {
-			LOG_DBG("LED: connected=%d, usb_data=%d, ble_data=%d", is_connected, data_activity, ble_data_activity);
+			LOG_DBG("LED: connected=%d, usb_data=%d, ble_data=%d, battery=%d%%, bas_ready=%d", 
+			        is_connected, data_activity, ble_data_activity, battery_level, bas_ready);
 		}
 		
 		if (is_connected && (data_activity || ble_data_activity)) {
-			// Connected with data activity: Green flicker
+			// Connected with data activity: Battery-aware color flicker
 			if (led_counter % 20 == 0) {  // Very fast flicker every 20ms
-				gpio_pin_toggle_dt(&led_green);
+				static bool flicker_state = false;
+				if (flicker_state) {
+					// Show battery color
+					ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
+					set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
+				} else {
+					// Turn off for flicker effect
+					ble_bas_rgb_color_t off_color = {0, 0, 0};
+					set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+				}
+				flicker_state = !flicker_state;
 			}
-			// Turn off blue LED
-			gpio_pin_set_dt(&led_blue, 0);
 			
 		} else if (is_connected) {
-			// Connected but no data: Solid green
-			gpio_pin_set_dt(&led_green, 1);
-			gpio_pin_set_dt(&led_blue, 0);
+			// Connected but no data: Solid battery-aware color
+			ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
+			set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
 			
 		} else {
 			// Not connected: Blue blink (scanning)
-			gpio_pin_set_dt(&led_green, 0);
 			if (led_counter >= 500) {  // Slow blink every 500ms
-				gpio_pin_toggle_dt(&led_blue);
+				static bool blue_state = false;
+				if (blue_state) {
+					ble_bas_rgb_color_t blue_color = {0, 0, 255};
+					set_rgb_led(&led_red, &led_green, &led_blue, blue_color);
+				} else {
+					ble_bas_rgb_color_t off_color = {0, 0, 0};
+					set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+				}
+				blue_state = !blue_state;
 				led_counter = 0;
 			}
 		}

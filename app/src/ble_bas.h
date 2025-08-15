@@ -36,6 +36,38 @@ int ble_bas_discover(struct bt_conn *conn);
  */
 bool ble_bas_is_ready(void);
 
+/**
+ * @brief Get the current battery level of the connected device
+ * 
+ * @return Battery level percentage (0-100), or 0xFF if invalid/unknown
+ */
+uint8_t ble_bas_get_battery_level(void);
+
+/**
+ * @brief Battery level color indication modes
+ */
+typedef enum {
+	BAS_COLOR_MODE_DISCRETE,  /**< 4 discrete colors per quarter (green/yellow/orange/red) */
+	BAS_COLOR_MODE_GRADIENT   /**< Smooth gradient from green to red based on percentage */
+} ble_bas_color_mode_t;
+
+/**
+ * @brief RGB color structure for LED indication
+ */
+typedef struct {
+	uint8_t red;    /**< Red component (0-255) */
+	uint8_t green;  /**< Green component (0-255) */
+	uint8_t blue;   /**< Blue component (0-255) */
+} ble_bas_rgb_color_t;
+
+/**
+ * @brief Get LED color based on current battery level
+ * 
+ * @param mode Color mode (discrete quarters or smooth gradient)
+ * @return RGB color structure representing the battery level
+ */
+ble_bas_rgb_color_t ble_bas_get_battery_color(ble_bas_color_mode_t mode);
+
 #ifdef __cplusplus
 }
 #endif

@@ -21,6 +21,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 /* Battery Service client instance */
 static struct bt_bas_client bas;
 static bool bas_ready = false;
+static uint8_t current_battery_level = 0xFF; /* Invalid/unknown initially */
 
 /* Battery Service callbacks following Nordic central_bas pattern */
 static void battery_notify_cb(struct bt_bas_client *bas, uint8_t battery_level);
@@ -72,13 +73,65 @@ bool ble_bas_is_ready(void)
 	return bas_ready;
 }
 
+uint8_t ble_bas_get_battery_level(void)
+{
+	return current_battery_level;
+}
+
+ble_bas_rgb_color_t ble_bas_get_battery_color(ble_bas_color_mode_t mode)
+{
+	ble_bas_rgb_color_t color = {0, 0, 0}; /* Default to off */
+	
+	/* If battery level is invalid/unknown, default to green (assume full battery) */
+	if (current_battery_level == 0xFF || current_battery_level > 100) {
+		color.green = 255;
+		return color;
+	}
+	
+	if (mode == BAS_COLOR_MODE_DISCRETE) {
+		/* Discrete 4-quarter colors */
+		if (current_battery_level >= 75) {
+			/* Green: 100-75% */
+			color.green = 255;
+		} else if (current_battery_level >= 50) {
+			/* Yellow: 74-50% */
+			color.red = 255;
+			color.green = 255;
+		} else if (current_battery_level >= 25) {
+			/* Orange: 49-25% */
+			color.red = 255;
+			color.green = 165;
+		} else {
+			/* Red: 24-0% */
+			color.red = 255;
+		}
+	} else {
+		/* Gradient mode: smooth transition from green to red */
+		if (current_battery_level >= 50) {
+			/* Green to yellow gradient (100% to 50%) */
+			/* Green stays at 255, red increases from 0 to 255 */
+			color.green = 255;
+			color.red = (uint8_t)(255 * (100 - current_battery_level) / 50);
+		} else {
+			/* Yellow to red gradient (50% to 0%) */
+			/* Red stays at 255, green decreases from 255 to 0 */
+			color.red = 255;
+			color.green = (uint8_t)(255 * current_battery_level / 50);
+		}
+	}
+	
+	return color;
+}
+
 /* Battery Service callback implementations */
 static void battery_notify_cb(struct bt_bas_client *bas, uint8_t battery_level)
 {
 	if (battery_level == BT_BAS_VAL_INVALID) {
 		LOG_WRN("Battery notification aborted");
+		current_battery_level = 0xFF; /* Mark as invalid */
 	} else {
 		LOG_INF("=== BATTERY LEVEL: %d%% ===", battery_level);
+		current_battery_level = battery_level; /* Store current level */
 	}
 }
 
