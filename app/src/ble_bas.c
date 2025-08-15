@@ -73,6 +73,13 @@ bool ble_bas_is_ready(void)
 	return bas_ready;
 }
 
+void ble_bas_reset(void)
+{
+	bas_ready = false;
+	current_battery_level = 0xFF; /* Reset to invalid/unknown */
+	LOG_DBG("Battery service reset");
+}
+
 uint8_t ble_bas_get_battery_level(void)
 {
 	return current_battery_level;

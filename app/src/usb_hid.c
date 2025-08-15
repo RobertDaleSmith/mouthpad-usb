@@ -280,3 +280,68 @@ int usb_hid_send_report(const uint8_t *data, uint16_t len)
 	LOG_INF("HID report sent successfully");
 	return 0;
 }
+
+/**
+ * @brief Send HID release-all report to clear any stuck inputs
+ * 
+ * Sends reports with all buttons released and no movement to prevent
+ * stuck inputs when BLE device disconnects.
+ * 
+ * @return 0 on success, negative error code on failure
+ */
+int usb_hid_send_release_all(void)
+{
+	int ret;
+	
+	LOG_INF("=== SENDING HID RELEASE-ALL REPORTS ===");
+	
+	if (hid_dev == NULL) {
+		LOG_ERR("USB HID device not initialized");
+		return -ENODEV;
+	}
+	
+	/* Report ID 1: Release all buttons and wheel */
+	uint8_t report1[] = {
+		0x01,  /* Report ID 1 */
+		0x00,  /* No buttons pressed */
+		0x00   /* No wheel movement */
+	};
+	
+	/* Report ID 2: No X/Y movement */
+	uint8_t report2[] = {
+		0x02,  /* Report ID 2 */
+		0x00,  /* X movement low byte = 0 */
+		0x00,  /* X high/Y low = 0 */
+		0x00   /* Y high byte = 0 */
+	};
+	
+	/* Report ID 3: Release all consumer controls */
+	uint8_t report3[] = {
+		0x03,  /* Report ID 3 */
+		0x00   /* No consumer controls pressed */
+	};
+	
+	/* Send Report 1 - Release all buttons/wheel */
+	ret = usb_hid_send_report(report1, sizeof(report1));
+	if (ret != 0) {
+		LOG_ERR("Failed to send release report 1 (err %d)", ret);
+		return ret;
+	}
+	
+	/* Send Report 2 - Stop all movement */
+	ret = usb_hid_send_report(report2, sizeof(report2));
+	if (ret != 0) {
+		LOG_ERR("Failed to send release report 2 (err %d)", ret);
+		return ret;
+	}
+	
+	/* Send Report 3 - Release consumer controls */
+	ret = usb_hid_send_report(report3, sizeof(report3));
+	if (ret != 0) {
+		LOG_ERR("Failed to send release report 3 (err %d)", ret);
+		return ret;
+	}
+	
+	LOG_INF("HID release-all reports sent successfully");
+	return 0;
+}

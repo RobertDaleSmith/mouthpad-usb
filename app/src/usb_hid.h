@@ -30,4 +30,14 @@ int usb_init(void);
  */
 int usb_hid_send_report(const uint8_t *data, uint16_t len);
 
+/**
+ * @brief Send HID release-all report to clear any stuck inputs
+ *
+ * Sends reports with all buttons released and no movement to prevent
+ * stuck inputs when BLE device disconnects.
+ *
+ * @return 0 on success, negative error code on failure
+ */
+int usb_hid_send_release_all(void);
+
 #endif /* USB_H */

@@ -37,6 +37,13 @@ int ble_bas_discover(struct bt_conn *conn);
 bool ble_bas_is_ready(void);
 
 /**
+ * @brief Reset Battery Service state on disconnect
+ * 
+ * Resets the battery service state and clears the battery level
+ */
+void ble_bas_reset(void);
+
+/**
  * @brief Get the current battery level of the connected device
  * 
  * @return Battery level percentage (0-100), or 0xFF if invalid/unknown
