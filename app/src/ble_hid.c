@@ -581,7 +581,12 @@ static void discovery_completed_cb(struct bt_gatt_dm *dm, void *context)
 	err = bt_hogp_handles_assign(dm, hogp);
 	if (err) {
 		printk("Could not assign HOGP handles (err %d)\n", err);
-		return;
+	}
+
+	/* CRITICAL: Must release GATT DM data to allow subsequent discoveries */
+	err = bt_gatt_dm_data_release(dm);
+	if (err) {
+		printk("Could not release discovery data (err %d)\n", err);
 	}
 
 	printk("HOGP ready\n");

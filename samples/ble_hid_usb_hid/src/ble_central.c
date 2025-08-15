@@ -243,13 +243,13 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	bt_conn_unref(ble_central_get_default_conn());
 	ble_central_set_default_conn(NULL);
 
-	/* Backoff on Repeated Attempts (0x13) or Connection Timeout (0x08) */
-	if (reason == 0x13 || reason == 0x08) {
-			k_sleep(K_SECONDS(3));
+	/* Restart scan immediately like Nordic sample does */
+	err = bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE);
+	if (err) {
+		printk("Scanning failed to start (err %d)\n", err);
+	} else {
+		printk("Scanning restarted successfully after disconnection\n");
 	}
-	/* Let bt_scan module handle restarting automatically */
-	/* The scan module with connect_if_match=1 will restart scanning automatically */
-	printk("Disconnected - bt_scan module will restart scan automatically\n");
 
 	/* Call transport layer callback if registered */
 	if (disconnected_callback) {

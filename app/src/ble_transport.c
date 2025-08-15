@@ -379,15 +379,28 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 {
 	ARG_UNUSED(conn);
-	ARG_UNUSED(reason);
+	
+	LOG_INF("BLE Central disconnected (reason: 0x%02x) - cleaning up and resetting states", reason);
 	
 	// Reset ready states for both NUS and HID
 	nus_client_ready = false;
 	hid_client_ready = false;
 	hid_discovery_complete = false;
 	mtu_exchange_complete = false;
+	nus_discovery_complete = false;
 	
-	LOG_INF("BLE Central disconnected - resetting both NUS and HID bridge states");
+	// Release HOGP if active - like Nordic sample does
+	extern struct bt_hogp *ble_hid_get_hogp(void);
+	extern bool bt_hogp_assign_check(const struct bt_hogp *hogp);
+	extern void bt_hogp_release(struct bt_hogp *hogp);
+	
+	struct bt_hogp *hogp = ble_hid_get_hogp();
+	if (bt_hogp_assign_check(hogp)) {
+		printk("HIDS client active - releasing");
+		bt_hogp_release(hogp);
+	}
+	
+	LOG_INF("BLE Central disconnected - cleanup complete, ready for new connection");
 }
 
 bool ble_transport_is_connected(void)
