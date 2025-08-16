@@ -95,6 +95,9 @@ int main(void)
 		/* Continue without display - it's not critical for core functionality */
 	} else {
 		LOG_INF("OLED Display initialized successfully");
+		
+		/* Show splash screen with Augmental logo */
+		oled_display_splash_screen(2000);  /* Show logo for 2 seconds */
 	}
 
 	/* Initialize BLE Transport */
@@ -168,6 +171,11 @@ int main(void)
 	
 	if (!leds_ready) {
 		LOG_WRN("RGB LEDs not available - continuing without LED status");
+	}
+	
+	/* Reset display state after splash screen to ensure status updates work */
+	if (oled_display_is_available()) {
+		oled_display_reset_state();
 	}
 	
 	LOG_INF("Entering main loop...");

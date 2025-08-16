@@ -62,6 +62,22 @@ int oled_display_device_info(const char *device_name, uint32_t connection_count)
  */
 bool oled_display_is_available(void);
 
+/**
+ * @brief Display splash screen with Augmental logo
+ * 
+ * @param duration_ms How long to show splash screen (0 = show until next update)
+ * @return 0 on success, negative error code on failure
+ */
+int oled_display_splash_screen(uint32_t duration_ms);
+
+/**
+ * @brief Reset display state to force next status update
+ * 
+ * Call this to ensure the next oled_display_update_status() will update
+ * regardless of current values
+ */
+void oled_display_reset_state(void);
+
 #ifdef __cplusplus
 }
 #endif

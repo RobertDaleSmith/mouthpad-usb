@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "oled_display.h"
+#include "augmental_logo.h"
 
 #define LOG_MODULE_NAME oled_display
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -39,6 +40,8 @@ static int oled_display_setup_font(void);
 static int oled_display_invert(void);
 static void draw_battery_icon(uint8_t battery_level, uint16_t x, uint16_t y);
 static void draw_connection_status(bool is_connected, uint16_t x, uint16_t y);
+static int oled_display_set_contrast(uint8_t contrast);
+static void oled_display_invert_bitmap(const uint8_t *src, uint8_t *dst, size_t size);
 
 int oled_display_init(void)
 {
@@ -98,20 +101,6 @@ int oled_display_init(void)
 
     /* Small delay to ensure display clears */
     k_sleep(K_MSEC(100));
-
-    /* Show startup message with proper line spacing */
-    uint16_t startup_line_spacing = 16;  /* 16 pixels per line */
-    cfb_print(display_dev, "MouthPad^USB", 0, 0);
-    cfb_print(display_dev, "Scanning...", 0, startup_line_spacing);
-    
-    ret = cfb_framebuffer_finalize(display_dev);
-    if (ret != 0) {
-        LOG_ERR("Failed to finalize framebuffer (err %d)", ret);
-        return ret;
-    }
-
-    /* Another small delay to show startup message */
-    k_sleep(K_MSEC(500));
 
     display_ready = true;
     LOG_INF("OLED display initialized successfully");
@@ -355,4 +344,151 @@ static int oled_display_invert(void)
 bool oled_display_is_available(void)
 {
     return display_available && display_ready;
+}
+
+/* Set display contrast level (0-255) */
+static int oled_display_set_contrast(uint8_t contrast)
+{
+    const struct device *i2c_dev;
+    uint8_t cmd_buffer[2] = {0x00, 0x81}; /* Command prefix + Set contrast command */
+    uint8_t contrast_buffer[2] = {0x00, contrast}; /* Command prefix + contrast value */
+    int ret;
+
+    /* Get I2C device */
+    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (!device_is_ready(i2c_dev)) {
+        LOG_ERR("I2C device not ready for contrast adjustment");
+        return -ENODEV;
+    }
+
+    /* Send contrast command */
+    ret = i2c_write(i2c_dev, cmd_buffer, 2, 0x3c);
+    if (ret != 0) {
+        LOG_ERR("Failed to send contrast command via I2C (err %d)", ret);
+        return ret;
+    }
+
+    /* Send contrast value */
+    ret = i2c_write(i2c_dev, contrast_buffer, 2, 0x3c);
+    if (ret != 0) {
+        LOG_ERR("Failed to send contrast value via I2C (err %d)", ret);
+        return ret;
+    }
+
+    LOG_DBG("Display contrast set to %d", contrast);
+    return 0;
+}
+
+/* Invert bitmap data (flip all bits) */
+static void oled_display_invert_bitmap(const uint8_t *src, uint8_t *dst, size_t size)
+{
+    for (size_t i = 0; i < size; i++) {
+        dst[i] = ~src[i];  /* Invert all bits */
+    }
+}
+
+/* Display splash screen with Augmental logo */
+int oled_display_splash_screen(uint32_t duration_ms)
+{
+    int ret;
+    static uint8_t inverted_logo[AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8];
+
+    if (!display_available || !display_ready) {
+        return 0;  /* Silently skip if no display */
+    }
+
+    LOG_INF("Displaying Augmental logo splash screen with fade effects...");
+
+    /* Clear display first using CFB */
+    ret = cfb_framebuffer_clear(display_dev, false);
+    if (ret != 0) {
+        LOG_ERR("Failed to clear framebuffer for splash (err %d)", ret);
+        return ret;
+    }
+    
+    /* Finalize CFB to ensure display is cleared */
+    ret = cfb_framebuffer_finalize(display_dev);
+    if (ret != 0) {
+        LOG_ERR("Failed to finalize clear framebuffer (err %d)", ret);
+        return ret;
+    }
+
+    /* Invert the bitmap for white-on-black display */
+    oled_display_invert_bitmap(augmental_logo_bitmap, inverted_logo, 
+                               AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8);
+
+    /* Prepare buffer descriptor */
+    struct display_buffer_descriptor desc = {
+        .buf_size = AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8,
+        .width = AUGMENTAL_LOGO_WIDTH,
+        .height = AUGMENTAL_LOGO_HEIGHT,
+        .pitch = AUGMENTAL_LOGO_WIDTH,
+        .frame_incomplete = false
+    };
+
+    /* Write the inverted bitmap to the display */
+    ret = display_write(display_dev, 0, 0, &desc, inverted_logo);
+    if (ret != 0) {
+        LOG_ERR("Failed to write logo bitmap (err %d)", ret);
+        /* Fall back to text display on error */
+        uint16_t center_x = 64 - (9 * font_width / 2);  /* Center "AUGMENTAL" */
+        uint16_t center_y = 32 - font_height;
+        
+        cfb_print(display_dev, "AUGMENTAL", center_x, center_y);
+        cfb_print(display_dev, "TECH", center_x + 20, center_y + font_height + 4);
+        
+        ret = cfb_framebuffer_finalize(display_dev);
+        if (ret != 0) {
+            LOG_ERR("Failed to finalize text fallback (err %d)", ret);
+            return ret;
+        }
+    }
+
+    /* Fade in effect */
+    LOG_INF("Starting fade in...");
+    for (int contrast = 0; contrast <= 255; contrast += 15) {
+        oled_display_set_contrast(contrast);
+        k_sleep(K_MSEC(20));  /* 20ms per step for smooth fade */
+    }
+    oled_display_set_contrast(255);  /* Ensure full brightness */
+
+    /* Hold splash screen at full brightness */
+    if (duration_ms > 500) {
+        k_sleep(K_MSEC(duration_ms - 500));  /* Account for fade time */
+    }
+
+    /* Fast fade out effect */
+    LOG_INF("Starting fast fade out...");
+    for (int contrast = 255; contrast >= 0; contrast -= 51) {  /* Faster steps: 255, 204, 153, 102, 51, 0 */
+        oled_display_set_contrast(contrast);
+        k_sleep(K_MSEC(25));  /* Slightly longer per step but fewer steps */
+    }
+    
+    /* Ensure fully black */
+    oled_display_set_contrast(0);
+    k_sleep(K_MSEC(50));  /* Brief black screen */
+
+    /* Clear the bitmap completely */
+    ret = cfb_framebuffer_clear(display_dev, false);
+    if (ret == 0) {
+        cfb_framebuffer_finalize(display_dev);
+    }
+
+    /* Restore normal contrast for regular display */
+    oled_display_set_contrast(255);
+
+    /* Immediately show initial status after splash screen */
+    oled_display_update_status(0xFF, false);  /* Show "Scanning..." state */
+
+    LOG_INF("Splash screen complete - transitioned to status display");
+
+    return 0;
+}
+
+/* Reset display state to force next status update */
+void oled_display_reset_state(void)
+{
+    /* Reset state tracking so next update will definitely trigger */
+    last_battery_level = 0xFE;  /* Different from any real value */
+    last_connection_state = true;  /* Opposite of typical initial state */
 }
