@@ -76,31 +76,50 @@ int oled_display_init(void)
     
     LOG_INF("Display dimensions: %dx%d", display_cols, display_rows);
 
-    /* Setup font */
+    /* Turn off display first to prevent bright flash */
+    const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (device_is_ready(i2c_dev)) {
+        uint8_t display_off_cmd[2] = {0x00, 0xAE}; /* Display OFF command */
+        i2c_write(i2c_dev, display_off_cmd, 2, 0x3c);
+    }
+
+    /* Setup font first */
     ret = oled_display_setup_font();
     if (ret != 0) {
         LOG_ERR("Failed to setup font (err %d)", ret);
         return ret;
     }
 
-    /* Invert display for white text on black background */
-    ret = oled_display_invert();
-    if (ret != 0) {
-        LOG_WRN("Failed to invert display (err %d) - continuing with normal display", ret);
-        /* Continue anyway - inversion is not critical */
-    } else {
-        LOG_INF("Display inverted: white text on black background");
-    }
-
-    /* Clear display completely */
+    /* Clear display while it's off */
     ret = cfb_framebuffer_clear(display_dev, true);
     if (ret != 0) {
         LOG_ERR("Failed to clear framebuffer (err %d)", ret);
         return ret;
     }
 
-    /* Small delay to ensure display clears */
-    k_sleep(K_MSEC(100));
+    /* Finalize the clear */
+    ret = cfb_framebuffer_finalize(display_dev);
+    if (ret != 0) {
+        LOG_ERR("Failed to finalize clear (err %d)", ret);
+        return ret;
+    }
+
+    /* Set display to inverted mode while still off */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to invert display (err %d) - continuing with normal display", ret);
+    } else {
+        LOG_INF("Display inverted: white text on black background");
+    }
+
+    /* Turn display back on - now it should be dark/inverted */
+    if (device_is_ready(i2c_dev)) {
+        uint8_t display_on_cmd[2] = {0x00, 0xAF}; /* Display ON command */
+        i2c_write(i2c_dev, display_on_cmd, 2, 0x3c);
+    }
+
+    /* Small delay to ensure display is ready */
+    k_sleep(K_MSEC(50));
 
     display_ready = true;
     LOG_INF("OLED display initialized successfully");
@@ -320,6 +339,42 @@ static int oled_display_setup_font(void)
     return 0;
 }
 
+/* Private function to set normal (non-inverted) SSD1306 display via I2C command */
+static int oled_display_normal(void)
+{
+    const struct device *i2c_dev;
+    uint8_t cmd_buffer[2] = {0x00, 0xA6}; /* Command prefix + SSD1306 normal display command */
+    int ret;
+
+    if (!display_available || !display_ready) {
+        return 0;  /* Silently skip if no display */
+    }
+
+    /* Get I2C device */
+    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (!device_is_ready(i2c_dev)) {
+        LOG_ERR("I2C device not ready for display normal mode");
+        return -ENODEV;
+    }
+
+    /* Send normal display command to SSD1306 with proper command format */
+    /* 0x00 = Command byte, 0xA6 = Normal display command */
+    ret = i2c_write(i2c_dev, cmd_buffer, 2, 0x3c);
+    if (ret != 0) {
+        LOG_ERR("Failed to send normal display command via I2C (err %d)", ret);
+        /* Try again once after a brief delay */
+        k_sleep(K_MSEC(1));
+        ret = i2c_write(i2c_dev, cmd_buffer, 2, 0x3c);
+        if (ret != 0) {
+            LOG_ERR("Normal display command failed again (err %d)", ret);
+            return ret;
+        }
+    }
+
+    LOG_DBG("SSD1306 normal display command sent successfully (0x00 0xA6)");
+    return 0;
+}
+
 /* Private function to invert the SSD1306 display via I2C command */
 static int oled_display_invert(void)
 {
@@ -407,13 +462,12 @@ static void oled_display_invert_bitmap(const uint8_t *src, uint8_t *dst, size_t 
 int oled_display_splash_screen(uint32_t duration_ms)
 {
     int ret;
-    static uint8_t inverted_logo[AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8];
 
     if (!display_available || !display_ready) {
         return 0;  /* Silently skip if no display */
     }
 
-    LOG_INF("Displaying Augmental logo splash screen with fade effects...");
+    LOG_INF("Displaying Augmental logo splash screen...");
 
     /* Clear display first using CFB */
     ret = cfb_framebuffer_clear(display_dev, false);
@@ -429,10 +483,7 @@ int oled_display_splash_screen(uint32_t duration_ms)
         return ret;
     }
 
-    /* Invert the bitmap for white-on-black display */
-    oled_display_invert_bitmap(augmental_logo_bitmap, inverted_logo, 
-                               AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8);
-
+    /* Use original bitmap since display is in inverted mode (shows white on dark) */
     /* Prepare buffer descriptor */
     struct display_buffer_descriptor desc = {
         .buf_size = AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8,
@@ -442,8 +493,8 @@ int oled_display_splash_screen(uint32_t duration_ms)
         .frame_incomplete = false
     };
 
-    /* Write the inverted bitmap to the display */
-    ret = display_write(display_dev, 0, 0, &desc, inverted_logo);
+    /* Write the original bitmap to the display instantly */
+    ret = display_write(display_dev, 0, 0, &desc, augmental_logo_bitmap);
     if (ret != 0) {
         LOG_ERR("Failed to write logo bitmap (err %d)", ret);
         /* Fall back to text display on error */
@@ -460,18 +511,11 @@ int oled_display_splash_screen(uint32_t duration_ms)
         }
     }
 
-    /* Fade in effect */
-    LOG_INF("Starting fade in...");
-    for (int contrast = 0; contrast <= 255; contrast += 15) {
-        oled_display_set_contrast(contrast);
-        k_sleep(K_MSEC(20));  /* 20ms per step for smooth fade */
-    }
-    oled_display_set_contrast(255);  /* Ensure full brightness */
-
+    /* Set full brightness immediately - no fade in */
+    oled_display_set_contrast(255);
+    
     /* Hold splash screen at full brightness */
-    if (duration_ms > 500) {
-        k_sleep(K_MSEC(duration_ms - 500));  /* Account for fade time */
-    }
+    k_sleep(K_MSEC(duration_ms));
 
     /* Fast fade out effect */
     LOG_INF("Starting fast fade out...");
@@ -480,21 +524,56 @@ int oled_display_splash_screen(uint32_t duration_ms)
         k_sleep(K_MSEC(25));  /* Slightly longer per step but fewer steps */
     }
     
-    /* Ensure fully black */
-    oled_display_set_contrast(0);
-    k_sleep(K_MSEC(50));  /* Brief black screen */
+    /* Turn display OFF completely to avoid any flashing */
+    const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (device_is_ready(i2c_dev)) {
+        uint8_t display_off_cmd[2] = {0x00, 0xAE}; /* Display OFF command */
+        i2c_write(i2c_dev, display_off_cmd, 2, 0x3c);
+    }
+    
+    k_sleep(K_MSEC(50));  /* Brief pause while off */
 
-    /* Clear the bitmap completely */
+    /* Clear the bitmap completely and prepare status display while display is OFF */
     ret = cfb_framebuffer_clear(display_dev, false);
-    if (ret == 0) {
-        cfb_framebuffer_finalize(display_dev);
+    if (ret != 0) {
+        LOG_ERR("Failed to clear framebuffer (err %d)", ret);
+        return ret;
     }
 
-    /* Restore normal contrast for regular display */
-    oled_display_set_contrast(255);
+    /* Render the status display content while display is OFF */
+    uint16_t line_spacing = 16;
+    uint16_t y_pos = 0;
+    
+    /* Line 1: MouthPad^USB title */
+    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    y_pos += line_spacing;
+    
+    /* Line 2: Scanning status */
+    cfb_print(display_dev, "Scanning...", 0, y_pos);
+    
+    /* Finalize the content while display is still OFF */
+    ret = cfb_framebuffer_finalize(display_dev);
+    if (ret != 0) {
+        LOG_ERR("Failed to finalize status display (err %d)", ret);
+        return ret;
+    }
 
-    /* Immediately show initial status after splash screen */
-    oled_display_update_status(0xFF, false);  /* Show "Scanning..." state */
+    /* Restore full contrast first */
+    oled_display_set_contrast(255);
+    
+    /* Small delay to ensure all settings are applied */
+    k_sleep(K_MSEC(10));
+
+    /* Now turn display back ON - content is already rendered and inverted */
+    if (device_is_ready(i2c_dev)) {
+        uint8_t display_on_cmd[2] = {0x00, 0xAF}; /* Display ON command */
+        i2c_write(i2c_dev, display_on_cmd, 2, 0x3c);
+    }
+
+    /* Display remains in inverted mode - no need to restore */
+    
+    /* Reset the display state so the next update will work properly */
+    oled_display_reset_state();
 
     LOG_INF("Splash screen complete - transitioned to status display");
 
