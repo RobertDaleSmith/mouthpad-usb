@@ -139,6 +139,28 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 	// Handle different report types based on Report ID
 	uint8_t report_id = bt_hogp_rep_id(rep);
 	
+	// Button detection for buzzer feedback - check Report ID 1 (buttons)
+	if (report_id == 1 && size >= 1) {
+		static uint8_t last_buttons = 0;
+		uint8_t current_buttons = data[0];  // Raw BLE data, no Report ID prepended yet
+		
+		// Detect left click (bit 0) - press only (0->1 transition)
+		if ((current_buttons & 0x01) && !(last_buttons & 0x01)) {
+			printk("LEFT CLICK DETECTED - buzzing\n");
+			extern void buzzer_click_left(void);
+			buzzer_click_left();
+		}
+		
+		// Detect right click (bit 1) - press only (0->1 transition)  
+		if ((current_buttons & 0x02) && !(last_buttons & 0x02)) {
+			printk("RIGHT CLICK DETECTED - buzzing\n");
+			extern void buzzer_click_right(void);
+			buzzer_click_right();
+		}
+		
+		last_buttons = current_buttons;
+	}
+	
 	// Parse and forward each report ID independently
 	if (size >= 1) {
 		/* Send directly to USB for zero latency */
@@ -190,18 +212,38 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	}
 	printk("\n");
 	
-	/* Forward boot mouse report directly to USB as Report ID 1 */
-	/* Boot reports are always sent as Report ID 1 (buttons + wheel) */
-	uint8_t report_with_id[size + 1];
-	report_with_id[0] = 1;  // Report ID 1 for boot mouse
-	
-	/* Copy the raw boot mouse data */
-	for (uint8_t i = 0; i < size; i++) {
-		report_with_id[i + 1] = data[i];
+	// DEBUG: Analyze the BLE boot mouse data structure
+	if (size >= 1) {
+		uint8_t buttons = data[0] & 0x07;  // BLE boot mouse uses 3 bits for buttons
+		printk("BLE BOOT MOUSE: buttons=0x%02X (L:%c R:%c M:%c)", 
+			buttons,
+			(buttons & 0x01) ? '1' : '0',  // Left
+			(buttons & 0x02) ? '1' : '0',  // Right
+			(buttons & 0x04) ? '1' : '0'); // Middle
+		if (size >= 2) {
+			printk(" X=%d", (int8_t)data[1]);
+		}
+		if (size >= 3) {
+			printk(" Y=%d", (int8_t)data[2]);
+		}
+		printk("\n");
 	}
 	
+	/* Forward boot mouse report directly to USB as Report ID 1 */
+	/* Convert BLE boot mouse format to USB HID Report ID 1 format */
+	uint8_t report_with_id[3];  // Report ID + Buttons + Wheel
+	report_with_id[0] = 1;  // Report ID 1 for boot mouse
+	
+	/* Convert BLE boot mouse buttons (3 bits) to USB HID buttons (5 bits) */
+	uint8_t ble_buttons = data[0] & 0x07;  // Extract 3 button bits from BLE
+	uint8_t usb_buttons = ble_buttons;      // Map directly (left=bit0, right=bit1, middle=bit2)
+	report_with_id[1] = usb_buttons;        // Buttons byte (5 bits used, 3 bits padding)
+	
+	/* Set wheel to 0 for now (BLE boot mouse doesn't have wheel in standard format) */
+	report_with_id[2] = 0x00;  // Wheel byte
+	
 	/* Send directly to USB for zero latency */
-	int ret = hid_int_ep_write(hid_dev, report_with_id, size + 1, NULL);
+	int ret = hid_int_ep_write(hid_dev, report_with_id, 3, NULL);  // Always 3 bytes: Report ID + Buttons + Wheel
 	if (ret) {
 		printk("HID write error, %d", ret);
 	} else {

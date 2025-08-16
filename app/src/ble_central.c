@@ -173,6 +173,11 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 	if (has_nus && has_hid) {
 		printk("*** CONNECTING TO MOUTHPAD DEVICE: %s ***\n", addr);
 		LOG_INF("Connecting to MouthPad device: %s", addr);
+		
+		/* Update display to show device found */
+		extern int oled_display_device_found(const char *device_name);
+		oled_display_device_found("MouthPad Device");
+		
 	} else {
 		printk("*** REJECTING DEVICE (missing required services): %s ***\n", addr);
 		LOG_INF("Rejecting device - missing required services: %s", addr);
@@ -379,6 +384,11 @@ int ble_central_start_scan(void)
 	}
 
 	LOG_INF("Scan started (checking for devices with both NUS and HID services)");
+	
+	/* Update display to show scanning status */
+	extern int oled_display_scanning(void);
+	oled_display_scanning();
+	
 	return 0;
 }
 

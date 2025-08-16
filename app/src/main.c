@@ -18,6 +18,7 @@
 #include "ble_transport.h"
 #include "ble_bas.h"
 #include "oled_display.h"
+#include "buzzer.h"
 
 #define LOG_MODULE_NAME mouthpad_usb
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -40,13 +41,8 @@ static void set_rgb_led(const struct gpio_dt_spec *led_red,
 /* USB HID callback function */
 static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
 {
-	LOG_DBG("USB HID data received: %d bytes", len);
-	
-	// Debug: Log the first few bytes
-	if (len > 0) {
-		LOG_DBG("USB HID First bytes: %02x %02x %02x %02x", 
-			data[0], len > 1 ? data[1] : 0, len > 2 ? data[2] : 0, len > 3 ? data[3] : 0);
-	}
+	// This callback is for USB HID data going TO USB (BLE->USB bridge)
+	// Button detection is now handled in BLE HID layer where we have Report ID context
 	
 	// Bridge USB HID data to BLE HID
 	if (ble_transport_is_hid_ready()) {
@@ -98,6 +94,16 @@ int main(void)
 		
 		/* Show splash screen with Augmental logo */
 		oled_display_splash_screen(2000);  /* Show logo for 2 seconds */
+	}
+
+	/* Initialize Passive Buzzer */
+	LOG_INF("Initializing Passive Buzzer...");
+	err = buzzer_init();
+	if (err != 0) {
+		LOG_WRN("buzzer_init failed (err %d) - continuing without buzzer", err);
+		/* Continue without buzzer - it's not critical for core functionality */
+	} else {
+		LOG_INF("Passive Buzzer initialized successfully");
 	}
 
 	/* Initialize BLE Transport */
@@ -183,16 +189,12 @@ int main(void)
 	for (;;) {
 		/* USB CDC ↔ BLE NUS Bridge */
 		
-		LOG_DBG("Main loop iteration start");
-		
 		// Check for data from USB CDC and send to NUS
 		static uint8_t cdc_buffer[UART_BUF_SIZE];
 		static int cdc_pos = 0;
 		
-		LOG_DBG("About to call usb_cdc_receive_data");
 		uint8_t c;
 		int bytes_read = usb_cdc_receive_data(&c, 1);
-		LOG_DBG("usb_cdc_receive_data returned: %d", bytes_read);
 		
 		if (bytes_read > 0) { // Data received from CDC
 			cdc_buffer[cdc_pos] = c;
@@ -227,11 +229,7 @@ int main(void)
 		bool bas_ready = ble_bas_is_ready();
 		uint8_t battery_level = ble_bas_get_battery_level();
 		
-		// Debug logging every second
-		if (led_counter % 1000 == 0) {
-			LOG_DBG("LED: connected=%d, usb_data=%d, ble_data=%d, battery=%d%%, bas_ready=%d", 
-			        is_connected, data_activity, ble_data_activity, battery_level, bas_ready);
-		}
+		// Reduced debug logging to focus on HID reports
 		
 		// RGB LED status updates (only if LEDs are ready)
 		if (leds_ready) {

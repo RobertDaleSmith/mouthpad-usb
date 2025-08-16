@@ -115,8 +115,10 @@ static ALWAYS_INLINE void rwup_if_suspended(void)
 	}
 }
 
+/* USB HID output report callback function pointer (for future expansion) */
+
 /**
- * @brief USB HID endpoint ready callback
+ * @brief USB HID interrupt IN endpoint ready callback
  * 
  * Called when the USB HID interrupt endpoint is ready to accept data.
  * Signals the semaphore to allow BLE module to send reports.
@@ -129,9 +131,27 @@ static void int_in_ready_cb(const struct device *dev)
 	k_sem_give(&ep_write_sem);
 }
 
+/**
+ * @brief USB HID interrupt OUT endpoint ready callback
+ * 
+ * Called when the USB HID receives output reports from the host.
+ * This captures mouse button reports that we need for buzzer feedback.
+ * 
+ * @param dev USB HID device (unused)
+ */
+static void int_out_ready_cb(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+	LOG_INF("USB HID int_out_ready callback triggered");
+	
+	// TODO: Get the actual output report data
+	// This callback indicates output data is available, but we need to read it
+}
+
 /* USB HID operations structure */
 static const struct hid_ops ops = {
 	.int_in_ready = int_in_ready_cb,
+	.int_out_ready = int_out_ready_cb,
 };
 
 /* ============================================================================

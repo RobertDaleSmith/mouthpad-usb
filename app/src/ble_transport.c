@@ -34,6 +34,9 @@ static bool bridging_started = false;
 static bool hid_client_ready = false;
 static bool hid_discovery_complete = false;
 
+/* Connection state tracking for sound effects */
+static bool fully_connected = false;
+
 /* Data activity tracking for LED indication */
 static bool data_activity = false;
 static int64_t last_data_time = 0;
@@ -331,8 +334,13 @@ static void ble_hid_discovery_complete_cb(void)
 	LOG_INF("HID client ready - service discovery complete");
 	hid_client_ready = true;
 	hid_discovery_complete = true;
+	fully_connected = true;  /* Mark as fully connected - eligible for disconnect sound */
 	LOG_INF("HID client ready - bridge operational");
 	LOG_INF("BLE HID discovery status: ready=%d, complete=%d", hid_client_ready, hid_discovery_complete);
+	
+	/* Play happy connection sound - full bridge is now operational! */
+	extern void buzzer_connected(void);
+	buzzer_connected();
 	
 	/* Start Battery Service discovery after HID is complete */
 	ble_bas_discover(ble_central_get_default_conn());
@@ -363,6 +371,10 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 
 	LOG_INF("BLE Central connected - starting setup");
 
+	/* Update display to show pairing status */
+	extern int oled_display_pairing(void);
+	oled_display_pairing();
+
 	// Perform MTU exchange using the NUS client module
 	err = ble_nus_client_exchange_mtu(conn);
 	if (err) {
@@ -387,6 +399,15 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	
 	LOG_INF("BLE Central disconnected (reason: 0x%02x) - cleaning up and resetting states", reason);
 	
+	/* Only play disconnection sound if we were fully connected (not during connection failures) */
+	if (fully_connected) {
+		extern void buzzer_disconnected(void);
+		buzzer_disconnected();
+		LOG_INF("Played disconnection sound (was fully connected)");
+	} else {
+		LOG_INF("Skipped disconnection sound (was not fully connected)");
+	}
+	
 	/* Send USB HID release-all report to prevent stuck inputs */
 	LOG_INF("Sending USB HID release-all to clear any stuck inputs");
 	int ret = usb_hid_send_release_all();
@@ -400,6 +421,7 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	hid_discovery_complete = false;
 	mtu_exchange_complete = false;
 	nus_discovery_complete = false;
+	fully_connected = false;
 	
 	// Reset battery service state
 	ble_bas_reset();

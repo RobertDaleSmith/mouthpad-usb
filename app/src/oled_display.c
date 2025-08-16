@@ -168,13 +168,13 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
     } else {
         /* Create battery icon based on charge level */
         char battery_icon[8];
-        if (battery_level >= 75) {
+        if (battery_level > 75) {
             strcpy(battery_icon, "[||||]");  /* Full battery */
-        } else if (battery_level >= 50) {
+        } else if (battery_level > 50) {
             strcpy(battery_icon, "[|||.]");  /* 3/4 battery */
-        } else if (battery_level >= 25) {
+        } else if (battery_level > 25) {
             strcpy(battery_icon, "[||..]");  /* 1/2 battery */
-        } else if (battery_level >= 10) {
+        } else if (battery_level > 10) {
             strcpy(battery_icon, "[|...]");  /* 1/4 battery */
         } else {
             strcpy(battery_icon, "[....]");  /* Low battery */
@@ -189,6 +189,12 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
         LOG_ERR("Failed to finalize framebuffer (err %d)", ret);
         return ret;
     }
+
+    /* Small delay to ensure display update completes */
+    k_sleep(K_MSEC(2));
+    
+    /* Ensure display inversion is maintained */
+    oled_display_invert();
 
     /* Update last known state */
     last_battery_level = battery_level;
@@ -321,6 +327,10 @@ static int oled_display_invert(void)
     uint8_t cmd_buffer[2] = {0x00, 0xA7}; /* Command prefix + SSD1306 invert display command */
     int ret;
 
+    if (!display_available || !display_ready) {
+        return 0;  /* Silently skip if no display */
+    }
+
     /* Get I2C device */
     i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
     if (!device_is_ready(i2c_dev)) {
@@ -333,10 +343,16 @@ static int oled_display_invert(void)
     ret = i2c_write(i2c_dev, cmd_buffer, 2, 0x3c);
     if (ret != 0) {
         LOG_ERR("Failed to send invert command via I2C (err %d)", ret);
-        return ret;
+        /* Try again once after a brief delay */
+        k_sleep(K_MSEC(1));
+        ret = i2c_write(i2c_dev, cmd_buffer, 2, 0x3c);
+        if (ret != 0) {
+            LOG_ERR("Invert command failed again (err %d)", ret);
+            return ret;
+        }
     }
 
-    LOG_INF("SSD1306 invert command sent successfully (0x00 0xA7)");
+    LOG_DBG("SSD1306 invert command sent successfully (0x00 0xA7)");
     return 0;
 }
 
@@ -491,4 +507,127 @@ void oled_display_reset_state(void)
     /* Reset state tracking so next update will definitely trigger */
     last_battery_level = 0xFE;  /* Different from any real value */
     last_connection_state = true;  /* Opposite of typical initial state */
+}
+
+int oled_display_scanning(void)
+{
+    int ret;
+    
+    if (!display_available || !display_ready) {
+        return 0;  /* Silently skip if no display */
+    }
+    
+    /* Clear display */
+    ret = cfb_framebuffer_clear(display_dev, false);
+    if (ret != 0) {
+        LOG_ERR("Failed to clear framebuffer (err %d)", ret);
+        return ret;
+    }
+    
+    /* Use same line spacing as main status display */
+    uint16_t line_spacing = 16;
+    uint16_t y_pos = 0;
+    
+    /* Display scanning message */
+    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    y_pos += line_spacing;
+    cfb_print(display_dev, "Scanning...", 0, y_pos);
+    
+    /* Update display */
+    ret = cfb_framebuffer_finalize(display_dev);
+    if (ret != 0) {
+        LOG_ERR("Failed to finalize framebuffer (err %d)", ret);
+        return ret;
+    }
+    
+    /* Small delay to ensure display update completes */
+    k_sleep(K_MSEC(2));
+    
+    /* Ensure display inversion is maintained */
+    oled_display_invert();
+    
+    LOG_DBG("Scanning status displayed");
+    return 0;
+}
+
+int oled_display_device_found(const char *device_name)
+{
+    int ret;
+    
+    if (!display_available || !display_ready) {
+        return 0;  /* Silently skip if no display */
+    }
+    
+    /* Clear display */
+    ret = cfb_framebuffer_clear(display_dev, false);
+    if (ret != 0) {
+        LOG_ERR("Failed to clear framebuffer (err %d)", ret);
+        return ret;
+    }
+    
+    /* Use same line spacing as main status display */
+    uint16_t line_spacing = 16;
+    uint16_t y_pos = 0;
+    
+    /* Display device found message */
+    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    y_pos += line_spacing;
+    cfb_print(display_dev, "Found!", 0, y_pos);
+    
+    /* Update display */
+    ret = cfb_framebuffer_finalize(display_dev);
+    if (ret != 0) {
+        LOG_ERR("Failed to finalize framebuffer (err %d)", ret);
+        return ret;
+    }
+    
+    /* Small delay to ensure display update completes */
+    k_sleep(K_MSEC(2));
+    
+    /* Ensure display inversion is maintained */
+    oled_display_invert();
+    
+    LOG_DBG("Device found status displayed: %s", device_name ? device_name : "Unknown");
+    return 0;
+}
+
+int oled_display_pairing(void)
+{
+    int ret;
+    
+    if (!display_available || !display_ready) {
+        return 0;  /* Silently skip if no display */
+    }
+    
+    /* Clear display */
+    ret = cfb_framebuffer_clear(display_dev, false);
+    if (ret != 0) {
+        LOG_ERR("Failed to clear framebuffer (err %d)", ret);
+        return ret;
+    }
+    
+    /* Use same line spacing as main status display */
+    uint16_t line_spacing = 16;
+    uint16_t y_pos = 0;
+    
+    /* Display pairing message */
+    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    y_pos += line_spacing;
+    cfb_print(display_dev, "Pairing...", 0, y_pos);
+    
+    /* Update display */
+    ret = cfb_framebuffer_finalize(display_dev);
+    if (ret != 0) {
+        LOG_ERR("Failed to finalize framebuffer (err %d)", ret);
+        return ret;
+    }
+    
+    /* Small delay to ensure display update completes */
+    k_sleep(K_MSEC(2));
+    
+    /* Ensure display inversion is maintained */
+    oled_display_invert();
+    
+    LOG_DBG("Pairing status displayed");
+    return 0;
 }

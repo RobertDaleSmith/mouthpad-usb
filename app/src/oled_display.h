@@ -78,6 +78,31 @@ int oled_display_splash_screen(uint32_t duration_ms);
  */
 void oled_display_reset_state(void);
 
+/**
+ * @brief Display scanning status
+ * 
+ * Shows "Scanning..." message on display
+ * @return 0 on success, negative error code on failure
+ */
+int oled_display_scanning(void);
+
+/**
+ * @brief Display device found status
+ * 
+ * Shows "Device Found" and device name if provided
+ * @param device_name Name of found device (optional, can be NULL)
+ * @return 0 on success, negative error code on failure
+ */
+int oled_display_device_found(const char *device_name);
+
+/**
+ * @brief Display pairing status
+ * 
+ * Shows "Pairing..." message on display
+ * @return 0 on success, negative error code on failure
+ */
+int oled_display_pairing(void);
+
 #ifdef __cplusplus
 }
 #endif
