@@ -17,6 +17,7 @@
 #include "usb_hid.h"
 #include "ble_transport.h"
 #include "ble_bas.h"
+#include "oled_display.h"
 
 #define LOG_MODULE_NAME mouthpad_usb
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -86,6 +87,16 @@ int main(void)
 	}
 	LOG_INF("USB HID initialized successfully");
 
+	/* Initialize OLED Display */
+	LOG_INF("Initializing OLED Display...");
+	err = oled_display_init();
+	if (err != 0) {
+		LOG_WRN("oled_display_init failed (err %d) - continuing without display", err);
+		/* Continue without display - it's not critical for core functionality */
+	} else {
+		LOG_INF("OLED Display initialized successfully");
+	}
+
 	/* Initialize BLE Transport */
 	LOG_INF("Initializing BLE Transport...");
 	err = ble_transport_init();
@@ -106,35 +117,74 @@ int main(void)
 	LOG_INF("Battery LED color mode: %s", 
 	        (BATTERY_COLOR_MODE == BAS_COLOR_MODE_DISCRETE) ? "DISCRETE" : "GRADIENT");
 
+	LOG_INF("Initializing GPIO LEDs...");
+	
 	// RGB LED status indication system
 	const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);    // Red LED
 	const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);  // Green LED  
 	const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);   // Blue LED
 	static int led_counter = 0;
 	static bool data_activity = false;
+	static int display_update_counter = 0;
 	
-	// Configure RGB LEDs
-	if (!gpio_is_ready_dt(&led_red) || !gpio_is_ready_dt(&led_green) || !gpio_is_ready_dt(&led_blue)) {
-		LOG_ERR("RGB LED devices not ready");
+	// Configure RGB LEDs with error checking
+	bool leds_ready = false;
+	
+	LOG_INF("Checking GPIO devices...");
+	if (!gpio_is_ready_dt(&led_red)) {
+		LOG_ERR("Red LED GPIO device not ready");
+	} else if (!gpio_is_ready_dt(&led_green)) {
+		LOG_ERR("Green LED GPIO device not ready");
+	} else if (!gpio_is_ready_dt(&led_blue)) {
+		LOG_ERR("Blue LED GPIO device not ready");
 	} else {
-		gpio_pin_configure_dt(&led_red, GPIO_OUTPUT);
-		gpio_pin_configure_dt(&led_green, GPIO_OUTPUT);
-		gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT);
-		// Start with blue LED on (scanning state)
-		gpio_pin_set_dt(&led_red, 0);
-		gpio_pin_set_dt(&led_green, 0);
-		gpio_pin_set_dt(&led_blue, 1);
+		LOG_INF("All GPIO devices ready, configuring...");
+		
+		int ret;
+		ret = gpio_pin_configure_dt(&led_red, GPIO_OUTPUT);
+		if (ret != 0) {
+			LOG_ERR("Failed to configure red LED (err %d)", ret);
+		} else {
+			ret = gpio_pin_configure_dt(&led_green, GPIO_OUTPUT);
+			if (ret != 0) {
+				LOG_ERR("Failed to configure green LED (err %d)", ret);
+			} else {
+				ret = gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT);
+				if (ret != 0) {
+					LOG_ERR("Failed to configure blue LED (err %d)", ret);
+				} else {
+					LOG_INF("GPIO LEDs configured successfully");
+					leds_ready = true;
+					
+					// Start with blue LED on (scanning state)
+					gpio_pin_set_dt(&led_red, 0);
+					gpio_pin_set_dt(&led_green, 0);
+					gpio_pin_set_dt(&led_blue, 1);
+					LOG_INF("Initial LED state set (blue on)");
+				}
+			}
+		}
 	}
+	
+	if (!leds_ready) {
+		LOG_WRN("RGB LEDs not available - continuing without LED status");
+	}
+	
+	LOG_INF("Entering main loop...");
 
 	for (;;) {
 		/* USB CDC ↔ BLE NUS Bridge */
+		
+		LOG_DBG("Main loop iteration start");
 		
 		// Check for data from USB CDC and send to NUS
 		static uint8_t cdc_buffer[UART_BUF_SIZE];
 		static int cdc_pos = 0;
 		
+		LOG_DBG("About to call usb_cdc_receive_data");
 		uint8_t c;
 		int bytes_read = usb_cdc_receive_data(&c, 1);
+		LOG_DBG("usb_cdc_receive_data returned: %d", bytes_read);
 		
 		if (bytes_read > 0) { // Data received from CDC
 			cdc_buffer[cdc_pos] = c;
@@ -175,46 +225,58 @@ int main(void)
 			        is_connected, data_activity, ble_data_activity, battery_level, bas_ready);
 		}
 		
-		if (is_connected && (data_activity || ble_data_activity)) {
-			// Connected with data activity: Battery-aware color flicker
-			if (led_counter % 20 == 0) {  // Very fast flicker every 20ms
-				static bool flicker_state = false;
-				if (flicker_state) {
-					// Show battery color
-					ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
-					set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
-				} else {
-					// Turn off for flicker effect
-					ble_bas_rgb_color_t off_color = {0, 0, 0};
-					set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+		// RGB LED status updates (only if LEDs are ready)
+		if (leds_ready) {
+			if (is_connected && (data_activity || ble_data_activity)) {
+				// Connected with data activity: Battery-aware color flicker
+				if (led_counter % 20 == 0) {  // Very fast flicker every 20ms
+					static bool flicker_state = false;
+					if (flicker_state) {
+						// Show battery color
+						ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
+						set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
+					} else {
+						// Turn off for flicker effect
+						ble_bas_rgb_color_t off_color = {0, 0, 0};
+						set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+					}
+					flicker_state = !flicker_state;
 				}
-				flicker_state = !flicker_state;
-			}
-			
-		} else if (is_connected) {
-			// Connected but no data: Solid battery-aware color
-			ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
-			set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
-			
-		} else {
-			// Not connected: Blue blink (scanning)
-			if (led_counter >= 500) {  // Slow blink every 500ms
-				static bool blue_state = false;
-				if (blue_state) {
-					ble_bas_rgb_color_t blue_color = {0, 0, 255};
-					set_rgb_led(&led_red, &led_green, &led_blue, blue_color);
-				} else {
-					ble_bas_rgb_color_t off_color = {0, 0, 0};
-					set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+				
+			} else if (is_connected) {
+				// Connected but no data: Solid battery-aware color
+				ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
+				set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
+				
+			} else {
+				// Not connected: Blue blink (scanning)
+				if (led_counter >= 500) {  // Slow blink every 500ms
+					static bool blue_state = false;
+					if (blue_state) {
+						ble_bas_rgb_color_t blue_color = {0, 0, 255};
+						set_rgb_led(&led_red, &led_green, &led_blue, blue_color);
+					} else {
+						ble_bas_rgb_color_t off_color = {0, 0, 0};
+						set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+					}
+					blue_state = !blue_state;
+					led_counter = 0;
 				}
-				blue_state = !blue_state;
-				led_counter = 0;
 			}
 		}
 		
 		// Reset data activity flag periodically
 		if (led_counter % 100 == 0) {
 			data_activity = false;
+		}
+		
+		// Update OLED display every 100ms for responsive connection status updates (if available)
+		if (oled_display_is_available()) {
+			display_update_counter++;
+			if (display_update_counter >= 100) {
+				oled_display_update_status(battery_level, is_connected);
+				display_update_counter = 0;
+			}
 		}
 		
 		// Small delay to prevent busy waiting

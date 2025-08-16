@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2025 Robert Dale Smith
+ * Copyright (c) 2025 Augmental Tech
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* XIAO Expansion Board SSD1306 OLED Display Overlay */
+
+&i2c1 {
+	status = "okay";
+	
+	ssd1306: ssd1306@3c {
+		compatible = "solomon,ssd1306fb";
+		reg = <0x3c>;
+		width = <128>;
+		height = <64>;
+		segment-offset = <0>;
+		page-offset = <0>;
+		display-offset = <0>;
+		multiplex-ratio = <63>;
+		segment-remap;
+		com-invdir;
+		prechargep = <0x22>;
+	};
+};
+
+/ {
+	aliases {
+		oled-display = &ssd1306;
+	};
+};

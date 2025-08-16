@@ -11,11 +11,13 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/usb/usb_device.h>
+#include <zephyr/drivers/uart.h>
 
 LOG_MODULE_REGISTER(usb_cdc, LOG_LEVEL_INF);
 
-/* UART device for USB CDC */
-static const struct device *uart = DEVICE_DT_GET(DT_CHOSEN(nordic_nus_uart));
+/* USB CDC ACM device reference */
+static const struct device *cdc_acm_dev;
 
 /* Work structures for UART handling */
 static struct k_work_delayable uart_work;
@@ -79,8 +81,8 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 			return;
 		}
 
-		if (uart_tx(uart, buf->data, buf->len, SYS_FOREVER_MS)) {
-			LOG_WRN("Failed to send data over UART");
+		if (uart_tx(cdc_acm_dev, buf->data, buf->len, SYS_FOREVER_MS)) {
+			LOG_WRN("Failed to send data over CDC ACM");
 		}
 
 		break;
@@ -104,7 +106,7 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		if ((evt->data.rx.buf[buf->len - 1] == '\n') ||
 		    (evt->data.rx.buf[buf->len - 1] == '\r')) {
 			disable_req = true;
-			uart_rx_disable(uart);
+			uart_rx_disable(cdc_acm_dev);
 		}
 
 		break;
@@ -122,7 +124,7 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 			return;
 		}
 
-		uart_rx_enable(uart, buf->data, sizeof(buf->data),
+		uart_rx_enable(cdc_acm_dev, buf->data, sizeof(buf->data),
 			       UART_RX_TIMEOUT);
 
 		break;
@@ -132,9 +134,9 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		buf = k_malloc(sizeof(*buf));
 		if (buf) {
 			buf->len = 0;
-			uart_rx_buf_rsp(uart, buf->data, sizeof(buf->data));
+			uart_rx_buf_rsp(cdc_acm_dev, buf->data, sizeof(buf->data));
 		} else {
-			LOG_WRN("Not able to allocate UART receive buffer");
+			LOG_WRN("Not able to allocate CDC ACM receive buffer");
 		}
 
 		break;
@@ -162,7 +164,7 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		buf = CONTAINER_OF(aborted_buf, struct uart_data_t,
 				   data[0]);
 
-		uart_tx(uart, &buf->data[aborted_len],
+		uart_tx(cdc_acm_dev, &buf->data[aborted_len],
 			buf->len - aborted_len, SYS_FOREVER_MS);
 
 		break;
@@ -186,38 +188,24 @@ static void uart_work_handler(struct k_work *item)
 		return;
 	}
 
-	uart_rx_enable(uart, buf->data, sizeof(buf->data), UART_RX_TIMEOUT);
+	uart_rx_enable(cdc_acm_dev, buf->data, sizeof(buf->data), UART_RX_TIMEOUT);
 }
 
-/* Initialize USB CDC (UART) functionality */
+/* Initialize USB CDC functionality */
 int usb_cdc_init(void)
 {
-	struct uart_data_t *rx;
-
-	printk("usb_cdc_init: Starting UART initialization\n");
-	printk("usb_cdc_init: Using UART device: %s\n", uart->name);
-
-	if (!device_is_ready(uart)) {
-		printk("usb_cdc_init: UART device not ready\n");
-		LOG_ERR("UART device not ready");
+	LOG_INF("USB CDC: Starting CDC initialization");
+	
+	/* Get CDC ACM device */
+	cdc_acm_dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
+	if (!device_is_ready(cdc_acm_dev)) {
+		LOG_ERR("CDC ACM device not ready");
 		return -ENODEV;
 	}
-	printk("usb_cdc_init: UART device is ready\n");
-
-	rx = k_malloc(sizeof(*rx));
-	if (rx) {
-		rx->len = 0;
-		printk("usb_cdc_init: Allocated RX buffer\n");
-	} else {
-		printk("usb_cdc_init: Failed to allocate RX buffer\n");
-		return -ENOMEM;
-	}
-
-	printk("usb_cdc_init: Initializing UART work handler\n");
-	k_work_init_delayable(&uart_work, uart_work_handler);
-
-	printk("usb_cdc_init: Skipping UART callback setup - using polling instead\n");
-	printk("usb_cdc_init: UART initialization successful\n");
+	
+	/* Note: USB subsystem will be initialized by USB HID later */
+	LOG_INF("USB CDC: Device ready: %s", cdc_acm_dev->name);
+	LOG_INF("USB CDC: Initialization successful");
 	return 0;
 }
 
@@ -228,27 +216,32 @@ int usb_cdc_send_data(const uint8_t *data, uint16_t len)
 		return -EINVAL;
 	}
 
-	printk("*** FORWARDING %d BYTES TO CDC WITH NEW FRAMING ***\n", len);
+	if (!cdc_acm_dev) {
+		LOG_WRN("CDC ACM device not initialized");
+		return -ENODEV;
+	}
+
+	LOG_DBG("Forwarding %d bytes to CDC with framing", len);
 	
 	// Calculate CRC-16 for the payload
 	uint16_t crc = calculate_crc16(data, len);
 	
 	// Send dual start markers
-	uart_poll_out(uart, 0xAA); // First start marker
-	uart_poll_out(uart, 0x55); // Second start marker
+	uart_poll_out(cdc_acm_dev, 0xAA); // First start marker
+	uart_poll_out(cdc_acm_dev, 0x55); // Second start marker
 	
 	// Send packet length (2 bytes, big-endian)
-	uart_poll_out(uart, (len >> 8) & 0xFF); // High byte
-	uart_poll_out(uart, len & 0xFF);        // Low byte
+	uart_poll_out(cdc_acm_dev, (len >> 8) & 0xFF); // High byte
+	uart_poll_out(cdc_acm_dev, len & 0xFF);        // Low byte
 	
 	// Send packet data
 	for (uint16_t i = 0; i < len; i++) {
-		uart_poll_out(uart, data[i]);
+		uart_poll_out(cdc_acm_dev, data[i]);
 	}
 	
 	// Send CRC (2 bytes, big-endian)
-	uart_poll_out(uart, (crc >> 8) & 0xFF); // CRC high byte
-	uart_poll_out(uart, crc & 0xFF);        // CRC low byte
+	uart_poll_out(cdc_acm_dev, (crc >> 8) & 0xFF); // CRC high byte
+	uart_poll_out(cdc_acm_dev, crc & 0xFF);        // CRC low byte
 	
 	return 0;
 }
@@ -260,20 +253,28 @@ int usb_cdc_receive_data(uint8_t *buffer, uint16_t max_len)
 		return -EINVAL;
 	}
 
-	// Simple polling-based receive for now
-	unsigned char c;
-	int bytes_read = uart_poll_in(uart, &c);
-	
-	if (bytes_read == 0) { // Data received from CDC
-		*buffer = c;
-		return 1; // Return 1 byte received
+	if (!cdc_acm_dev) {
+		return 0; // No device, no data
 	}
-	
-	return 0; // No data available
+
+	/* Try to read data from CDC ACM */
+	int bytes_read = 0;
+	for (uint16_t i = 0; i < max_len; i++) {
+		unsigned char c;
+		int ret = uart_poll_in(cdc_acm_dev, &c);
+		if (ret == 0) {
+			buffer[bytes_read] = c;
+			bytes_read++;
+		} else {
+			break; // No more data available
+		}
+	}
+
+	return bytes_read;
 }
 
-/* Get UART device for external use */
+/* Get CDC ACM device for external use */
 const struct device *usb_cdc_get_uart_device(void)
 {
-	return uart;
+	return cdc_acm_dev;
 }
