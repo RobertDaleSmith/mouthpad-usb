@@ -1,6 +1,10 @@
 # MouthPad^ USB 
 
-A Zephyr RTOS application for the **Seeed XIAO nRF52840** that acts as a bridge between BLE HID devices and USB HID, with full Device Firmware Upgrade (DFU) support.
+A Zephyr RTOS application that acts as a bridge between BLE HID devices and USB HID, with full Device Firmware Upgrade (DFU) support.
+
+**Supported Boards:**
+- **Seeed XIAO nRF52840** (`xiao_ble`)
+- **Adafruit Feather nRF52840 Express** (`adafruit_feather_nrf52840`)
 
 <div style="text-align: center;">
    <img src="docs/images/mouthpad_usb.png" style="max-width: 420px">
@@ -16,7 +20,9 @@ A Zephyr RTOS application for the **Seeed XIAO nRF52840** that acts as a bridge 
 
 ## 🛠️ Hardware Requirements
 
-- **Seeed XIAO nRF52840** board
+- **Supported Board**: 
+  - Seeed XIAO nRF52840, or
+  - Adafruit Feather nRF52840 Express
 - USB cable for programming and USB HID functionality
 - BLE HID device to bridge (e.g., wireless mouse, keyboard)
 

@@ -14,6 +14,7 @@ on:
         type: choice
         options:
         - xiao_ble
+        - adafruit_feather_nrf52840
 
 jobs:
   build-and-test:
@@ -27,10 +28,12 @@ jobs:
       CMAKE_PREFIX_PATH: /opt/toolchains
     strategy:
       matrix:
-        board: [xiao_ble]
+        board: [xiao_ble, adafruit_feather_nrf52840]
         include:
           - board: xiao_ble
             description: "Seeed XIAO nRF52840"
+          - board: adafruit_feather_nrf52840
+            description: "Adafruit Feather nRF52840 Express"
 
     steps:
       - uses: actions/checkout@v4
@@ -115,7 +118,7 @@ jobs:
     - name: Create release package
       run: |
         mkdir -p release
-        for board in xiao_ble; do
+        for board in xiao_ble adafruit_feather_nrf52840; do
           if [ -d "artifacts/firmware-$board" ]; then
             mkdir -p "release/$board"
             cp artifacts/firmware-$board/* "release/$board/"
