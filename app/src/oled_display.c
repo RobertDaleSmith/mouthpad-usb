@@ -20,6 +20,26 @@
 #define LOG_MODULE_NAME oled_display
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
+/* Helper to get I2C device safely at runtime */
+static const struct device *get_i2c_device(void)
+{
+    /* Try to get i2c1 first (XIAO), then i2c0 (Feather) */
+    const struct device *dev;
+    
+    /* Try i2c1 first */
+    dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c1));
+    if (dev && device_is_ready(dev)) {
+        return dev;
+    }
+    
+    /* Fallback to i2c0 */
+    dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c0));
+    if (dev && device_is_ready(dev)) {
+        return dev;
+    }
+    
+    return NULL;
+}
 
 /* Display device and configuration */
 static const struct device *display_dev;
@@ -52,8 +72,8 @@ int oled_display_init(void)
     LOG_INF("Checking for OLED display...");
 
     /* Get display device */
-    display_dev = DEVICE_DT_GET(DT_ALIAS(oled_display));
-    if (!device_is_ready(display_dev)) {
+    display_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(oled_display));
+    if (!display_dev || !device_is_ready(display_dev)) {
         LOG_INF("OLED display not detected - continuing without display");
         display_available = false;
         display_ready = false;
@@ -335,8 +355,8 @@ static int oled_display_normal(void)
     }
 
     /* Get I2C device */
-    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (!device_is_ready(i2c_dev)) {
+    i2c_dev = get_i2c_device();
+    if (!i2c_dev || !device_is_ready(i2c_dev)) {
         LOG_WRN("I2C device not available for display normal mode");
         return 0;  /* Silently continue */
     }
@@ -367,8 +387,8 @@ static int oled_display_invert(void)
     int ret;
 
     /* Get I2C device */
-    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (!device_is_ready(i2c_dev)) {
+    i2c_dev = get_i2c_device();
+    if (!i2c_dev || !device_is_ready(i2c_dev)) {
         LOG_ERR("I2C device not ready for display inversion");
         return -ENODEV;
     }
@@ -400,8 +420,8 @@ static int oled_display_set_contrast(uint8_t contrast)
     int ret;
 
     /* Get I2C device */
-    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (!device_is_ready(i2c_dev)) {
+    i2c_dev = get_i2c_device();
+    if (!i2c_dev || !device_is_ready(i2c_dev)) {
         LOG_WRN("I2C device not available for contrast adjustment");
         return 0;  /* Silently continue */
     }
@@ -510,8 +530,8 @@ int oled_display_splash_screen(uint32_t duration_ms)
     }
     
     /* Turn display OFF completely to avoid any flashing */
-    const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (device_is_ready(i2c_dev)) {
+    const struct device *i2c_dev = get_i2c_device();
+    if (i2c_dev && device_is_ready(i2c_dev)) {
         uint8_t display_off_cmd[2] = {0x00, 0xAE}; /* Display OFF command */
         i2c_write(i2c_dev, display_off_cmd, 2, 0x3c);
     }
@@ -550,7 +570,7 @@ int oled_display_splash_screen(uint32_t duration_ms)
     k_sleep(K_MSEC(10));
 
     /* Now turn display back ON - content is already rendered and inverted */
-    if (device_is_ready(i2c_dev)) {
+    if (i2c_dev && device_is_ready(i2c_dev)) {
         uint8_t display_on_cmd[2] = {0x00, 0xAF}; /* Display ON command */
         i2c_write(i2c_dev, display_on_cmd, 2, 0x3c);
     }
