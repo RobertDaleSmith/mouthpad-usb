@@ -69,26 +69,33 @@ jobs:
               --pristine=always app
           ccache -sv
 
+      - name: 📦 Rename and Upload UF2 Artifacts
+        run: |
+          cd /zephyr_workspace
+          COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          
+          # Copy and rename UF2 files with commit hash
+          cp build/app/zephyr/zephyr.uf2 mouthpad^usb_${{ matrix.board }}_${COMMIT_SHA}.uf2
+          echo "✅ ${{ matrix.board }} UF2: mouthpad^usb_${{ matrix.board }}_${COMMIT_SHA}.uf2"
+          ls -la *.uf2
+
       - name: 📦 Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.board }}
           path: |
-            /zephyr_workspace/build/app/zephyr/zephyr.hex
-            /zephyr_workspace/build/app/zephyr/zephyr.uf2
-            /zephyr_workspace/build/app/zephyr/zephyr.bin
-            /zephyr_workspace/build/app/zephyr/zephyr.map
+            /zephyr_workspace/mouthpad^usb_${{ matrix.board }}_*.uf2
           retention-days: 30
 
       - name: 🔍 Verify Build Artifacts
         run: |
           cd /zephyr_workspace
-          echo "Checking for required files..."
-          [ -f build/app/zephyr/zephyr.hex ] && echo '✓ zephyr.hex found' || echo '✗ zephyr.hex missing'
-          [ -f build/app/zephyr/zephyr.bin ] && echo '✓ zephyr.bin found' || echo '✗ zephyr.bin missing'
+          echo "Checking for UF2 file..."
           [ -f build/app/zephyr/zephyr.uf2 ] && echo '✓ zephyr.uf2 found' || echo '✗ zephyr.uf2 missing'
-          echo 'Build size:'
-          ls -lh build/app/zephyr/zephyr.hex
+          echo 'UF2 file size:'
+          ls -lh build/app/zephyr/zephyr.uf2
+          echo 'Renamed UF2 files:'
+          ls -lh mouthpad^usb_*.uf2
 
   security-scan:
     runs-on: ubuntu-latest
@@ -110,6 +117,11 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     
     steps:
+    - name: Set commit hash
+      run: |
+        COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+        echo "COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_ENV
+        
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
@@ -118,19 +130,20 @@ jobs:
     - name: Create release package
       run: |
         mkdir -p release
+        
+        # Copy all UF2 files from board-specific artifacts
         for board in xiao_ble adafruit_feather_nrf52840; do
           if [ -d "artifacts/firmware-$board" ]; then
-            mkdir -p "release/$board"
-            cp artifacts/firmware-$board/* "release/$board/"
+            cp artifacts/firmware-$board/*.uf2 release/ 2>/dev/null || true
           fi
         done
         
         echo "Release package created:"
         find release -type f
 
-    - name: Upload release artifacts
+    - name: Upload release package
       uses: actions/upload-artifact@v4
       with:
-        name: release-package
+        name: mouthpad^usb_${{ env.COMMIT_SHA }}
         path: release/
         retention-days: 90 
