@@ -20,26 +20,6 @@
 #define LOG_MODULE_NAME oled_display
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
-/* Helper to get I2C device safely at runtime */
-static const struct device *get_i2c_device(void)
-{
-    /* Try to get i2c1 first (XIAO), then i2c0 (Feather) */
-    const struct device *dev;
-    
-    /* Try i2c1 first */
-    dev = device_get_binding("I2C_1");
-    if (dev && device_is_ready(dev)) {
-        return dev;
-    }
-    
-    /* Fallback to i2c0 */
-    dev = device_get_binding("I2C_0");
-    if (dev && device_is_ready(dev)) {
-        return dev;
-    }
-    
-    return NULL;
-}
 
 /* Display device and configuration */
 static const struct device *display_dev;
@@ -63,6 +43,7 @@ static void draw_battery_icon(uint8_t battery_level, uint16_t x, uint16_t y);
 static void draw_connection_status(bool is_connected, uint16_t x, uint16_t y);
 static int oled_display_set_contrast(uint8_t contrast);
 static void oled_display_invert_bitmap(const uint8_t *src, uint8_t *dst, size_t size);
+static int oled_display_invert_framebuffer(void);
 
 int oled_display_init(void)
 {
@@ -70,8 +51,7 @@ int oled_display_init(void)
 
     LOG_INF("Checking for OLED display...");
 
-    /* Get display device if available */
-#if DT_NODE_EXISTS(DT_ALIAS(oled_display))
+    /* Get display device */
     display_dev = DEVICE_DT_GET(DT_ALIAS(oled_display));
     if (!device_is_ready(display_dev)) {
         LOG_INF("OLED display not detected - continuing without display");
@@ -79,12 +59,6 @@ int oled_display_init(void)
         display_ready = false;
         return 0;  /* Return success to continue boot process */
     }
-#else
-    LOG_INF("No OLED display alias defined - continuing without display");
-    display_available = false;
-    display_ready = false;
-    return 0;  /* Return success to continue boot process */
-#endif
 
     display_available = true;
     LOG_INF("OLED display detected, initializing...");
@@ -104,50 +78,31 @@ int oled_display_init(void)
     
     LOG_INF("Display dimensions: %dx%d", display_cols, display_rows);
 
-    /* Turn off display first to prevent bright flash */
-    const struct device *i2c_dev = get_i2c_device();
-    if (i2c_dev && device_is_ready(i2c_dev)) {
-        uint8_t display_off_cmd[2] = {0x00, 0xAE}; /* Display OFF command */
-        i2c_write(i2c_dev, display_off_cmd, 2, 0x3c);
-    }
-
-    /* Setup font first */
+    /* Setup font */
     ret = oled_display_setup_font();
     if (ret != 0) {
         LOG_ERR("Failed to setup font (err %d)", ret);
         return ret;
     }
 
-    /* Clear display while it's off */
+    /* Invert display for white text on black background */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to invert display (err %d) - continuing with normal display", ret);
+        /* Continue anyway - inversion is not critical */
+    } else {
+        LOG_INF("Display inverted: white text on black background");
+    }
+
+    /* Clear display completely */
     ret = cfb_framebuffer_clear(display_dev, true);
     if (ret != 0) {
         LOG_ERR("Failed to clear framebuffer (err %d)", ret);
         return ret;
     }
 
-    /* Finalize the clear */
-    ret = cfb_framebuffer_finalize(display_dev);
-    if (ret != 0) {
-        LOG_ERR("Failed to finalize clear (err %d)", ret);
-        return ret;
-    }
-
-    /* Set display to inverted mode while still off */
-    ret = oled_display_invert();
-    if (ret != 0) {
-        LOG_WRN("Failed to invert display (err %d) - continuing with normal display", ret);
-    } else {
-        LOG_INF("Display inverted: white text on black background");
-    }
-
-    /* Turn display back on - now it should be dark/inverted */
-    if (device_is_ready(i2c_dev)) {
-        uint8_t display_on_cmd[2] = {0x00, 0xAF}; /* Display ON command */
-        i2c_write(i2c_dev, display_on_cmd, 2, 0x3c);
-    }
-
-    /* Small delay to ensure display is ready */
-    k_sleep(K_MSEC(50));
+    /* Small delay to ensure display clears */
+    k_sleep(K_MSEC(100));
 
     display_ready = true;
     LOG_INF("OLED display initialized successfully");
@@ -192,6 +147,13 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
         return ret;
     }
 
+    /* Ensure display stays inverted during status transitions */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion during status update (err %d)", ret);
+        /* Continue anyway - display will still work */
+    }
+
     /* Use much larger line spacing for clear separation */
     uint16_t line_spacing = 16;  /* 3 lines fit: 0, 16, 32 */
     uint16_t y_pos = 0;
@@ -202,7 +164,7 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
 
     /* Line 2: Connection status */
     if (is_connected) {
-        strcpy(status_str, "Connected");
+        strcpy(status_str, "Connected!");
     } else {
         strcpy(status_str, "Scanning...");
     }
@@ -230,18 +192,12 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
     }
     cfb_print(display_dev, battery_str, 0, y_pos);
 
-    /* Update display */
+    /* Update display - hardware inversion is already set */
     ret = cfb_framebuffer_finalize(display_dev);
     if (ret != 0) {
         LOG_ERR("Failed to finalize framebuffer (err %d)", ret);
         return ret;
     }
-
-    /* Small delay to ensure display update completes */
-    k_sleep(K_MSEC(2));
-    
-    /* Ensure display inversion is maintained */
-    oled_display_invert();
 
     /* Update last known state */
     last_battery_level = battery_level;
@@ -379,8 +335,8 @@ static int oled_display_normal(void)
     }
 
     /* Get I2C device */
-    i2c_dev = get_i2c_device();
-    if (!i2c_dev || !device_is_ready(i2c_dev)) {
+    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (!device_is_ready(i2c_dev)) {
         LOG_WRN("I2C device not available for display normal mode");
         return 0;  /* Silently continue */
     }
@@ -410,15 +366,11 @@ static int oled_display_invert(void)
     uint8_t cmd_buffer[2] = {0x00, 0xA7}; /* Command prefix + SSD1306 invert display command */
     int ret;
 
-    if (!display_available || !display_ready) {
-        return 0;  /* Silently skip if no display */
-    }
-
     /* Get I2C device */
-    i2c_dev = get_i2c_device();
-    if (!i2c_dev || !device_is_ready(i2c_dev)) {
-        LOG_WRN("I2C device not available for display inversion");
-        return 0;  /* Silently continue */
+    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (!device_is_ready(i2c_dev)) {
+        LOG_ERR("I2C device not ready for display inversion");
+        return -ENODEV;
     }
 
     /* Send invert command to SSD1306 with proper command format */
@@ -426,16 +378,10 @@ static int oled_display_invert(void)
     ret = i2c_write(i2c_dev, cmd_buffer, 2, 0x3c);
     if (ret != 0) {
         LOG_ERR("Failed to send invert command via I2C (err %d)", ret);
-        /* Try again once after a brief delay */
-        k_sleep(K_MSEC(1));
-        ret = i2c_write(i2c_dev, cmd_buffer, 2, 0x3c);
-        if (ret != 0) {
-            LOG_ERR("Invert command failed again (err %d)", ret);
-            return ret;
-        }
+        return ret;
     }
 
-    LOG_DBG("SSD1306 invert command sent successfully (0x00 0xA7)");
+    LOG_INF("SSD1306 invert command sent successfully (0x00 0xA7)");
     return 0;
 }
 
@@ -454,8 +400,8 @@ static int oled_display_set_contrast(uint8_t contrast)
     int ret;
 
     /* Get I2C device */
-    i2c_dev = get_i2c_device();
-    if (!i2c_dev || !device_is_ready(i2c_dev)) {
+    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (!device_is_ready(i2c_dev)) {
         LOG_WRN("I2C device not available for contrast adjustment");
         return 0;  /* Silently continue */
     }
@@ -511,7 +457,18 @@ int oled_display_splash_screen(uint32_t duration_ms)
         return ret;
     }
 
-    /* Use original bitmap since display is in inverted mode (shows white on dark) */
+    /* Apply inversion BEFORE displaying the logo */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to apply inversion before splash screen (err %d)", ret);
+        /* Continue anyway */
+    }
+
+    /* Invert the bitmap data for proper display with hardware inversion */
+    static uint8_t inverted_logo[128 * 64 / 8];  /* Buffer for inverted logo */
+    oled_display_invert_bitmap(augmental_logo_bitmap, inverted_logo, 
+                               AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8);
+    
     /* Prepare buffer descriptor */
     struct display_buffer_descriptor desc = {
         .buf_size = AUGMENTAL_LOGO_WIDTH * AUGMENTAL_LOGO_HEIGHT / 8,
@@ -521,8 +478,8 @@ int oled_display_splash_screen(uint32_t duration_ms)
         .frame_incomplete = false
     };
 
-    /* Write the original bitmap to the display instantly */
-    ret = display_write(display_dev, 0, 0, &desc, augmental_logo_bitmap);
+    /* Write the inverted bitmap to the display */
+    ret = display_write(display_dev, 0, 0, &desc, inverted_logo);
     if (ret != 0) {
         LOG_ERR("Failed to write logo bitmap (err %d)", ret);
         /* Fall back to text display on error */
@@ -553,8 +510,8 @@ int oled_display_splash_screen(uint32_t duration_ms)
     }
     
     /* Turn display OFF completely to avoid any flashing */
-    const struct device *i2c_dev = get_i2c_device();
-    if (i2c_dev && device_is_ready(i2c_dev)) {
+    const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+    if (device_is_ready(i2c_dev)) {
         uint8_t display_off_cmd[2] = {0x00, 0xAE}; /* Display OFF command */
         i2c_write(i2c_dev, display_off_cmd, 2, 0x3c);
     }
@@ -598,7 +555,12 @@ int oled_display_splash_screen(uint32_t duration_ms)
         i2c_write(i2c_dev, display_on_cmd, 2, 0x3c);
     }
 
-    /* Display remains in inverted mode - no need to restore */
+    /* Ensure inversion is reapplied after display ON command */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion after splash screen (err %d)", ret);
+        /* Continue anyway */
+    }
     
     /* Reset the display state so the next update will work properly */
     oled_display_reset_state();
@@ -631,6 +593,13 @@ int oled_display_scanning(void)
         return ret;
     }
     
+    /* Ensure display stays inverted */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion during scanning (err %d)", ret);
+        /* Continue anyway */
+    }
+    
     /* Use same line spacing as main status display */
     uint16_t line_spacing = 16;
     uint16_t y_pos = 0;
@@ -647,11 +616,12 @@ int oled_display_scanning(void)
         return ret;
     }
     
-    /* Small delay to ensure display update completes */
-    k_sleep(K_MSEC(2));
-    
-    /* Ensure display inversion is maintained */
-    oled_display_invert();
+    /* Extra inversion call after finalize to ensure it sticks */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion after scanning finalize (err %d)", ret);
+        /* Continue anyway */
+    }
     
     LOG_DBG("Scanning status displayed");
     return 0;
@@ -672,6 +642,13 @@ int oled_display_device_found(const char *device_name)
         return ret;
     }
     
+    /* Ensure display stays inverted */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion during device found (err %d)", ret);
+        /* Continue anyway */
+    }
+    
     /* Use same line spacing as main status display */
     uint16_t line_spacing = 16;
     uint16_t y_pos = 0;
@@ -679,7 +656,7 @@ int oled_display_device_found(const char *device_name)
     /* Display device found message */
     cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
     y_pos += line_spacing;
-    cfb_print(display_dev, "Found!", 0, y_pos);
+    cfb_print(display_dev, "Found.", 0, y_pos);
     
     /* Update display */
     ret = cfb_framebuffer_finalize(display_dev);
@@ -688,11 +665,12 @@ int oled_display_device_found(const char *device_name)
         return ret;
     }
     
-    /* Small delay to ensure display update completes */
-    k_sleep(K_MSEC(2));
-    
-    /* Ensure display inversion is maintained */
-    oled_display_invert();
+    /* Extra inversion call after finalize to ensure it sticks */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion after device found finalize (err %d)", ret);
+        /* Continue anyway */
+    }
     
     LOG_DBG("Device found status displayed: %s", device_name ? device_name : "Unknown");
     return 0;
@@ -713,6 +691,13 @@ int oled_display_pairing(void)
         return ret;
     }
     
+    /* Ensure display stays inverted */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion during pairing (err %d)", ret);
+        /* Continue anyway */
+    }
+    
     /* Use same line spacing as main status display */
     uint16_t line_spacing = 16;
     uint16_t y_pos = 0;
@@ -729,12 +714,61 @@ int oled_display_pairing(void)
         return ret;
     }
     
-    /* Small delay to ensure display update completes */
-    k_sleep(K_MSEC(2));
-    
-    /* Ensure display inversion is maintained */
-    oled_display_invert();
+    /* Extra inversion call after finalize to ensure it sticks */
+    ret = oled_display_invert();
+    if (ret != 0) {
+        LOG_WRN("Failed to reapply inversion after pairing finalize (err %d)", ret);
+        /* Continue anyway */
+    }
     
     LOG_DBG("Pairing status displayed");
+    return 0;
+}
+
+/* Custom framebuffer inversion function that directly manipulates pixel data */
+static int oled_display_invert_framebuffer(void)
+{
+    if (!display_available || !display_ready) {
+        return 0;  /* Silently skip if no display */
+    }
+
+    /* Get direct access to the display buffer */
+    uint8_t *buffer;
+    size_t buffer_size;
+    
+    /* For SSD1306 128x64 display = 128 * 64 / 8 = 1024 bytes */
+    buffer_size = display_cols * display_rows / 8;
+    
+    /* Try to get the CFB buffer - this might not work directly */
+    /* So we'll use display_write with an inverted pattern instead */
+    
+    /* Create a temporary buffer for the inverted data */
+    static uint8_t inverted_buffer[1024]; /* Max size for 128x64 display */
+    
+    /* First, we need to read the current framebuffer content */
+    /* Since we can't directly read from CFB, we'll use display_read if available */
+    /* or work with a known pattern */
+    
+    /* For now, let's create a fully inverted pattern */
+    for (size_t i = 0; i < buffer_size && i < sizeof(inverted_buffer); i++) {
+        inverted_buffer[i] = 0xFF; /* All pixels on = dark background */
+    }
+    
+    /* Write the inverted pattern to the display */
+    struct display_buffer_descriptor desc = {
+        .buf_size = buffer_size,
+        .width = display_cols,
+        .height = display_rows,
+        .pitch = display_cols,
+        .frame_incomplete = false
+    };
+    
+    int ret = display_write(display_dev, 0, 0, &desc, inverted_buffer);
+    if (ret != 0) {
+        LOG_ERR("Failed to write inverted framebuffer (err %d)", ret);
+        return ret;
+    }
+    
+    LOG_DBG("Framebuffer manually inverted");
     return 0;
 }
