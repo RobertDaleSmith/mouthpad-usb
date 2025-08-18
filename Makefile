@@ -11,9 +11,10 @@ init:
 	west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
 	west update
 
-# Build the project
+# Build the project (default to xiao_ble, can override with BOARD=)
+BOARD ?= xiao_ble
 build:
-	west build -b xiao_ble app --pristine=always
+	west build -b $(BOARD) app --pristine=always
 
 # Flash the built firmware
 flash:

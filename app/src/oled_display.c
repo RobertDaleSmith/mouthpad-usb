@@ -20,6 +20,27 @@
 #define LOG_MODULE_NAME oled_display
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
+/* Helper to get I2C device safely at runtime */
+static const struct device *get_i2c_device(void)
+{
+    /* Try to get i2c1 first (XIAO), then i2c0 (Feather) */
+    const struct device *dev;
+    
+    /* Try i2c1 first */
+    dev = device_get_binding("I2C_1");
+    if (dev && device_is_ready(dev)) {
+        return dev;
+    }
+    
+    /* Fallback to i2c0 */
+    dev = device_get_binding("I2C_0");
+    if (dev && device_is_ready(dev)) {
+        return dev;
+    }
+    
+    return NULL;
+}
+
 /* Display device and configuration */
 static const struct device *display_dev;
 static uint16_t display_rows;
@@ -49,7 +70,8 @@ int oled_display_init(void)
 
     LOG_INF("Checking for OLED display...");
 
-    /* Get display device */
+    /* Get display device if available */
+#if DT_NODE_EXISTS(DT_ALIAS(oled_display))
     display_dev = DEVICE_DT_GET(DT_ALIAS(oled_display));
     if (!device_is_ready(display_dev)) {
         LOG_INF("OLED display not detected - continuing without display");
@@ -57,6 +79,12 @@ int oled_display_init(void)
         display_ready = false;
         return 0;  /* Return success to continue boot process */
     }
+#else
+    LOG_INF("No OLED display alias defined - continuing without display");
+    display_available = false;
+    display_ready = false;
+    return 0;  /* Return success to continue boot process */
+#endif
 
     display_available = true;
     LOG_INF("OLED display detected, initializing...");
@@ -77,8 +105,8 @@ int oled_display_init(void)
     LOG_INF("Display dimensions: %dx%d", display_cols, display_rows);
 
     /* Turn off display first to prevent bright flash */
-    const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (device_is_ready(i2c_dev)) {
+    const struct device *i2c_dev = get_i2c_device();
+    if (i2c_dev && device_is_ready(i2c_dev)) {
         uint8_t display_off_cmd[2] = {0x00, 0xAE}; /* Display OFF command */
         i2c_write(i2c_dev, display_off_cmd, 2, 0x3c);
     }
@@ -351,10 +379,10 @@ static int oled_display_normal(void)
     }
 
     /* Get I2C device */
-    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (!device_is_ready(i2c_dev)) {
-        LOG_ERR("I2C device not ready for display normal mode");
-        return -ENODEV;
+    i2c_dev = get_i2c_device();
+    if (!i2c_dev || !device_is_ready(i2c_dev)) {
+        LOG_WRN("I2C device not available for display normal mode");
+        return 0;  /* Silently continue */
     }
 
     /* Send normal display command to SSD1306 with proper command format */
@@ -387,10 +415,10 @@ static int oled_display_invert(void)
     }
 
     /* Get I2C device */
-    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (!device_is_ready(i2c_dev)) {
-        LOG_ERR("I2C device not ready for display inversion");
-        return -ENODEV;
+    i2c_dev = get_i2c_device();
+    if (!i2c_dev || !device_is_ready(i2c_dev)) {
+        LOG_WRN("I2C device not available for display inversion");
+        return 0;  /* Silently continue */
     }
 
     /* Send invert command to SSD1306 with proper command format */
@@ -426,10 +454,10 @@ static int oled_display_set_contrast(uint8_t contrast)
     int ret;
 
     /* Get I2C device */
-    i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (!device_is_ready(i2c_dev)) {
-        LOG_ERR("I2C device not ready for contrast adjustment");
-        return -ENODEV;
+    i2c_dev = get_i2c_device();
+    if (!i2c_dev || !device_is_ready(i2c_dev)) {
+        LOG_WRN("I2C device not available for contrast adjustment");
+        return 0;  /* Silently continue */
     }
 
     /* Send contrast command */
@@ -525,8 +553,8 @@ int oled_display_splash_screen(uint32_t duration_ms)
     }
     
     /* Turn display OFF completely to avoid any flashing */
-    const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-    if (device_is_ready(i2c_dev)) {
+    const struct device *i2c_dev = get_i2c_device();
+    if (i2c_dev && device_is_ready(i2c_dev)) {
         uint8_t display_off_cmd[2] = {0x00, 0xAE}; /* Display OFF command */
         i2c_write(i2c_dev, display_off_cmd, 2, 0x3c);
     }

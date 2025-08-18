@@ -12,6 +12,9 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/led_strip.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 
 #include "usb_cdc.h"
 #include "usb_hid.h"
@@ -30,12 +33,61 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 static void set_rgb_led(const struct gpio_dt_spec *led_red, 
                        const struct gpio_dt_spec *led_green,
                        const struct gpio_dt_spec *led_blue,
-                       ble_bas_rgb_color_t color)
+                       ble_bas_rgb_color_t color,
+                       bool red_available, bool green_available, bool blue_available)
 {
 	/* LEDs are active LOW, so invert the logic */
-	gpio_pin_set_dt(led_red, color.red == 0 ? 0 : 1);
-	gpio_pin_set_dt(led_green, color.green == 0 ? 0 : 1);
-	gpio_pin_set_dt(led_blue, color.blue == 0 ? 0 : 1);
+	if (red_available) {
+		gpio_pin_set_dt(led_red, color.red == 0 ? 0 : 1);
+	}
+	if (green_available) {
+		gpio_pin_set_dt(led_green, color.green == 0 ? 0 : 1);
+	}
+	if (blue_available) {
+		gpio_pin_set_dt(led_blue, color.blue == 0 ? 0 : 1);
+	}
+}
+
+/* NeoPixel RGB LED helper function */
+#if DT_NODE_EXISTS(DT_NODELABEL(neopixel)) && \
+    (DT_SAME_NODE(DT_ALIAS(led0), DT_NODELABEL(neopixel)) || \
+     DT_SAME_NODE(DT_ALIAS(led1), DT_NODELABEL(neopixel)) || \
+     DT_SAME_NODE(DT_ALIAS(led2), DT_NODELABEL(neopixel)))
+#define HAS_NEOPIXEL 1
+static const struct device *neopixel_dev = DEVICE_DT_GET(DT_NODELABEL(neopixel));
+static struct led_rgb neopixel_color = {0, 0, 0};
+
+static void set_neopixel_color(ble_bas_rgb_color_t color)
+{
+	if (!device_is_ready(neopixel_dev)) {
+		return;
+	}
+	
+	neopixel_color.r = color.red;
+	neopixel_color.g = color.green; 
+	neopixel_color.b = color.blue;
+	
+	led_strip_update_rgb(neopixel_dev, &neopixel_color, 1);
+}
+#else
+#define HAS_NEOPIXEL 0
+static void set_neopixel_color(ble_bas_rgb_color_t color) { /* No-op */ }
+#endif
+
+/* Unified RGB LED function that handles both GPIO and NeoPixel */
+static void set_unified_rgb_led(const struct gpio_dt_spec *led_red, 
+                               const struct gpio_dt_spec *led_green,
+                               const struct gpio_dt_spec *led_blue,
+                               ble_bas_rgb_color_t color,
+                               bool red_available, bool green_available, bool blue_available)
+{
+#if HAS_NEOPIXEL
+	/* Use NeoPixel if available */
+	set_neopixel_color(color);
+#else
+	/* Fall back to individual GPIO LEDs */
+	set_rgb_led(led_red, led_green, led_blue, color, red_available, green_available, blue_available);
+#endif
 }
 
 /* USB HID callback function */
@@ -126,54 +178,131 @@ int main(void)
 	LOG_INF("Battery LED color mode: %s", 
 	        (BATTERY_COLOR_MODE == BAS_COLOR_MODE_DISCRETE) ? "DISCRETE" : "GRADIENT");
 
-	LOG_INF("Initializing GPIO LEDs...");
+	LOG_INF("Initializing LED system...");
+	// Enable NeoPixel power via P1.14 (required for Adafruit Feather nRF52840)
+	const struct gpio_dt_spec neopixel_power = {
+		.port = DEVICE_DT_GET(DT_NODELABEL(gpio1)),
+		.pin = 14,
+		.dt_flags = GPIO_ACTIVE_HIGH
+	};
 	
-	// RGB LED status indication system
+	if (gpio_is_ready_dt(&neopixel_power)) {
+		int ret = gpio_pin_configure_dt(&neopixel_power, GPIO_OUTPUT_ACTIVE);
+		if (ret == 0) {
+			gpio_pin_set_dt(&neopixel_power, 1);  // Enable NeoPixel power
+			k_sleep(K_MSEC(10));  // Brief power stabilization
+		}
+	}
+	
+#if HAS_NEOPIXEL
+	if (device_is_ready(neopixel_dev)) {
+		LOG_INF("NeoPixel initialized successfully");
+		
+		// Brief startup indication - short blue pulse  
+		struct led_rgb startup_blue = {0, 0, 64};
+		led_strip_update_rgb(neopixel_dev, &startup_blue, 1);
+		k_sleep(K_MSEC(200));
+		
+		// Turn off after startup indication
+		struct led_rgb off = {0, 0, 0};
+		led_strip_update_rgb(neopixel_dev, &off, 1);
+	} else {
+		LOG_WRN("NeoPixel device not ready");
+	}
+#else
+	LOG_INF("No NeoPixel detected, using GPIO LEDs");
+#endif
+	
+	// RGB LED status indication system - only if GPIO LEDs are available
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
 	const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);    // Red LED
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
 	const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);  // Green LED  
-	const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);   // Blue LED
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+	const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);   // Blue LED (or aliased to led1)
+#endif
 	static int led_counter = 0;
 	static bool data_activity = false;
 	static int display_update_counter = 0;
 	
 	// Configure RGB LEDs with error checking
 	bool leds_ready = false;
+	static bool led_red_available = false;
+	static bool led_green_available = false; 
+	static bool led_blue_available = false;
+	
+#if !HAS_NEOPIXEL
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
+	led_red_available = gpio_is_ready_dt(&led_red);
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
+	led_green_available = gpio_is_ready_dt(&led_green);
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+	led_blue_available = gpio_is_ready_dt(&led_blue);
+#endif
 	
 	LOG_INF("Checking GPIO devices...");
-	if (!gpio_is_ready_dt(&led_red)) {
-		LOG_ERR("Red LED GPIO device not ready");
-	} else if (!gpio_is_ready_dt(&led_green)) {
-		LOG_ERR("Green LED GPIO device not ready");
-	} else if (!gpio_is_ready_dt(&led_blue)) {
-		LOG_ERR("Blue LED GPIO device not ready");
-	} else {
-		LOG_INF("All GPIO devices ready, configuring...");
+	LOG_INF("LED availability: red=%d, green=%d, blue=%d", 
+	        led_red_available, led_green_available, led_blue_available);
+#else
+	LOG_INF("Using NeoPixel instead of individual GPIO LEDs");
+#endif
+	
+#if HAS_NEOPIXEL
+	leds_ready = device_is_ready(neopixel_dev);
+	LOG_INF("NeoPixel LEDs ready: %s", leds_ready ? "YES" : "NO");
+#else
+	if (led_red_available || led_green_available || led_blue_available) {
+		LOG_INF("At least one LED available, configuring...");
 		
-		int ret;
-		ret = gpio_pin_configure_dt(&led_red, GPIO_OUTPUT);
-		if (ret != 0) {
-			LOG_ERR("Failed to configure red LED (err %d)", ret);
-		} else {
+		int ret = 0;
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
+		if (led_red_available) {
+			ret = gpio_pin_configure_dt(&led_red, GPIO_OUTPUT);
+			if (ret != 0) {
+				LOG_ERR("Failed to configure red LED (err %d)", ret);
+				led_red_available = false;
+			} else {
+				gpio_pin_set_dt(&led_red, 0);
+			}
+		}
+#endif
+		
+#if DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
+		if (led_green_available) {
 			ret = gpio_pin_configure_dt(&led_green, GPIO_OUTPUT);
 			if (ret != 0) {
 				LOG_ERR("Failed to configure green LED (err %d)", ret);
+				led_green_available = false;
 			} else {
-				ret = gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT);
-				if (ret != 0) {
-					LOG_ERR("Failed to configure blue LED (err %d)", ret);
-				} else {
-					LOG_INF("GPIO LEDs configured successfully");
-					leds_ready = true;
-					
-					// Start with blue LED on (scanning state)
-					gpio_pin_set_dt(&led_red, 0);
-					gpio_pin_set_dt(&led_green, 0);
-					gpio_pin_set_dt(&led_blue, 1);
-					LOG_INF("Initial LED state set (blue on)");
-				}
+				gpio_pin_set_dt(&led_green, 0);
 			}
 		}
+#endif
+		
+#if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+		if (led_blue_available) {
+			ret = gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT);
+			if (ret != 0) {
+				LOG_ERR("Failed to configure blue LED (err %d)", ret);
+				led_blue_available = false;
+			} else {
+				gpio_pin_set_dt(&led_blue, 1);  // Start with blue on (scanning state)
+			}
+		}
+#endif
+		
+		if (led_red_available || led_green_available || led_blue_available) {
+			leds_ready = true;
+			LOG_INF("LEDs configured successfully");
+		}
+	} else {
+		LOG_WRN("No LEDs available - continuing without LED status indication");
 	}
+#endif
 	
 	if (!leds_ready) {
 		LOG_WRN("RGB LEDs not available - continuing without LED status");
@@ -240,11 +369,27 @@ int main(void)
 					if (flicker_state) {
 						// Show battery color
 						ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
-						set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
+#if !HAS_NEOPIXEL
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+						set_unified_rgb_led(&led_red, &led_green, &led_blue, battery_color, led_red_available, led_green_available, led_blue_available);
+#endif
+#else
+						set_neopixel_color(battery_color);
+#endif
 					} else {
 						// Turn off for flicker effect
 						ble_bas_rgb_color_t off_color = {0, 0, 0};
-						set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+#if !HAS_NEOPIXEL
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+						set_unified_rgb_led(&led_red, &led_green, &led_blue, off_color, led_red_available, led_green_available, led_blue_available);
+#endif
+#else
+						set_neopixel_color(off_color);
+#endif
 					}
 					flicker_state = !flicker_state;
 				}
@@ -252,7 +397,15 @@ int main(void)
 			} else if (is_connected) {
 				// Connected but no data: Solid battery-aware color
 				ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(BATTERY_COLOR_MODE);
-				set_rgb_led(&led_red, &led_green, &led_blue, battery_color);
+#if !HAS_NEOPIXEL
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+				set_unified_rgb_led(&led_red, &led_green, &led_blue, battery_color, led_red_available, led_green_available, led_blue_available);
+#endif
+#else
+				set_neopixel_color(battery_color);
+#endif
 				
 			} else {
 				// Not connected: Blue blink (scanning)
@@ -260,10 +413,26 @@ int main(void)
 					static bool blue_state = false;
 					if (blue_state) {
 						ble_bas_rgb_color_t blue_color = {0, 0, 255};
-						set_rgb_led(&led_red, &led_green, &led_blue, blue_color);
+#if !HAS_NEOPIXEL
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+						set_unified_rgb_led(&led_red, &led_green, &led_blue, blue_color, led_red_available, led_green_available, led_blue_available);
+#endif
+#else
+						set_neopixel_color(blue_color);
+#endif
 					} else {
 						ble_bas_rgb_color_t off_color = {0, 0, 0};
-						set_rgb_led(&led_red, &led_green, &led_blue, off_color);
+#if !HAS_NEOPIXEL
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios) && \
+    DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
+						set_unified_rgb_led(&led_red, &led_green, &led_blue, off_color, led_red_available, led_green_available, led_blue_available);
+#endif
+#else
+						set_neopixel_color(off_color);
+#endif
 					}
 					blue_state = !blue_state;
 					led_counter = 0;

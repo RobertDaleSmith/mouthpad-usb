@@ -1,0 +1,16 @@
+sd:
+  address: 0x0
+  size: 0x26000
+  region: flash_primary
+app:
+  address: 0x26000
+  size: 0xc6000
+  region: flash_primary
+settings_storage:
+  address: 0xec000
+  size: 0x8000
+  region: flash_primary
+external_flash:
+  address: 0xf4000
+  size: 0x32000
+  region: flash_primary
