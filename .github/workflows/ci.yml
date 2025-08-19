@@ -78,13 +78,15 @@ jobs:
           cp build/app/zephyr/zephyr.uf2 mouthpad^usb_${{ matrix.board }}_${COMMIT_SHA}.uf2
           echo "✅ ${{ matrix.board }} UF2: mouthpad^usb_${{ matrix.board }}_${COMMIT_SHA}.uf2"
           ls -la *.uf2
+          
+          # Export COMMIT_SHA for use in next step
+          echo "COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_ENV
 
-      - name: 📦 Upload Build Artifacts
+      - name: 📦 Upload Individual UF2 File
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.board }}
-          path: |
-            /zephyr_workspace/mouthpad^usb_${{ matrix.board }}_*.uf2
+          name: mouthpad^usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}
+          path: /zephyr_workspace/mouthpad^usb_${{ matrix.board }}_*.uf2
           retention-days: 30
 
       - name: 🔍 Verify Build Artifacts
@@ -133,8 +135,8 @@ jobs:
         
         # Copy all UF2 files from board-specific artifacts
         for board in xiao_ble adafruit_feather_nrf52840; do
-          if [ -d "artifacts/firmware-$board" ]; then
-            cp artifacts/firmware-$board/*.uf2 release/ 2>/dev/null || true
+          if [ -d "artifacts/mouthpad^usb_${board}_${COMMIT_SHA}" ]; then
+            cp artifacts/mouthpad^usb_${board}_${COMMIT_SHA}/*.uf2 release/ 2>/dev/null || true
           fi
         done
         
