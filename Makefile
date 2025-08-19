@@ -27,9 +27,18 @@ build-feather:
 flash:
 	west flash --runner jlink --build-dir build/app
 
-# Open serial monitor
+# Flash the built firmware
+flash-uf2:
+	west flash --runner uf2 --build-dir build/app
+
+# Open RTT monitor (console output via J-Link RTT)
+# NOTE: Segger RTT Viewer app is recommended for better user experience
 monitor:
-	west monitor
+	@echo "Starting J-Link RTT monitor (press Ctrl+C to exit)..."
+	@echo "Note: Segger RTT Viewer app provides better experience with GUI"
+	@/Applications/SEGGER/JLink_V794e/JLinkGDBServerCLExe -device nRF52840_xxAA -if SWD -speed 4000 -rtttelnetport 19021 -silent & \
+	sleep 2; \
+	/Applications/SEGGER/JLink_V794e/JLinkRTTClientExe
 
 # Clean build directory only
 clean:
@@ -59,8 +68,9 @@ help:
 	@echo "  build        - Build the project (default: xiao_ble, override with BOARD=)"
 	@echo "  build-xiao   - Build specifically for Seeed XIAO nRF52840"
 	@echo "  build-feather - Build specifically for Adafruit Feather nRF52840 Express"
-	@echo "  flash        - Flash the built firmware to device"
-	@echo "  monitor      - Open serial monitor"
+	@echo "  flash        - Flash the built firmware to device using J-Link"
+	@echo "  flash-uf2    - Flash the built firmware to device using UF2 bootloader"
+	@echo "  monitor      - Open RTT monitor (console output via J-Link RTT)"
 	@echo "  clean        - Remove build directory only"
 	@echo "  fullclean    - Remove all workspace files (requires re-initialization)"
 	@echo "  help         - Show this help message" 

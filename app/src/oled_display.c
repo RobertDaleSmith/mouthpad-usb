@@ -415,7 +415,7 @@ static int oled_display_invert(void)
         return ret;
     }
 
-    LOG_INF("SSD1306 invert command sent successfully (0x00 0xA7)");
+    LOG_DBG("SSD1306 invert command sent successfully (0x00 0xA7)");
     return 0;
 }
 
