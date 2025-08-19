@@ -1,7 +1,7 @@
 # Makefile for mouthpad_usb project
 # Provides convenient targets for building, cleaning, and workspace management
 
-.PHONY: init build flash monitor clean fullclean help
+.PHONY: init build build-xiao build-feather flash monitor clean fullclean help
 
 # Default target
 all: build
@@ -16,9 +16,16 @@ BOARD ?= xiao_ble
 build:
 	west build -b $(BOARD) app --pristine=always
 
+# Board-specific build targets
+build-xiao:
+	west build -b xiao_ble app --pristine=always
+
+build-feather:
+	west build -b adafruit_feather_nrf52840 app --pristine=always
+
 # Flash the built firmware
 flash:
-	west flash
+	west flash --runner jlink --build-dir build/app
 
 # Open serial monitor
 monitor:
@@ -48,10 +55,12 @@ fullclean:
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  init       - Initialize workspace (west init + west update)"
-	@echo "  build      - Build the project (west build -b xiao_ble app --pristine=always)"
-	@echo "  flash      - Flash the built firmware to device"
-	@echo "  monitor    - Open serial monitor"
-	@echo "  clean      - Remove build directory only"
-	@echo "  fullclean  - Remove all workspace files (requires re-initialization)"
-	@echo "  help       - Show this help message" 
+	@echo "  init         - Initialize workspace (west init + west update)"
+	@echo "  build        - Build the project (default: xiao_ble, override with BOARD=)"
+	@echo "  build-xiao   - Build specifically for Seeed XIAO nRF52840"
+	@echo "  build-feather - Build specifically for Adafruit Feather nRF52840 Express"
+	@echo "  flash        - Flash the built firmware to device"
+	@echo "  monitor      - Open serial monitor"
+	@echo "  clean        - Remove build directory only"
+	@echo "  fullclean    - Remove all workspace files (requires re-initialization)"
+	@echo "  help         - Show this help message" 
