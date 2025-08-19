@@ -96,20 +96,16 @@ ble_bas_rgb_color_t ble_bas_get_battery_color(ble_bas_color_mode_t mode)
 	}
 	
 	if (mode == BAS_COLOR_MODE_DISCRETE) {
-		/* Discrete 4-quarter colors */
-		if (current_battery_level >= 75) {
-			/* Green: 100-75% */
+		/* Segmented colors optimized for GPIO LEDs */
+		if (current_battery_level >= 50) {
+			/* Green: 100-50% */
 			color.green = 255;
-		} else if (current_battery_level >= 50) {
-			/* Yellow: 74-50% */
+		} else if (current_battery_level >= 10) {
+			/* Yellow: 49-10% */
 			color.red = 255;
 			color.green = 255;
-		} else if (current_battery_level >= 25) {
-			/* Orange: 49-25% */
-			color.red = 255;
-			color.green = 165;
 		} else {
-			/* Red: 24-0% */
+			/* Red: 10-0% */
 			color.red = 255;
 		}
 	} else {

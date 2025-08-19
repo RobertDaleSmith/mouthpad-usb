@@ -23,8 +23,8 @@
 #define LOG_MODULE_NAME mouthpad_usb
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
-/* Battery color indication mode - change this to test both modes */
-#define BATTERY_COLOR_MODE BAS_COLOR_MODE_GRADIENT  /* or BAS_COLOR_MODE_DISCRETE */
+/* Battery color indication mode - automatically set based on LED hardware */
+/* GPIO LEDs use discrete mode, NeoPixel uses gradient mode */
 
 /* USB HID callback function */
 static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
@@ -120,7 +120,18 @@ int main(void)
 		/* Continue without LEDs - not critical for core functionality */
 	} else {
 		LOG_INF("LED subsystem initialized successfully");
-		leds_set_battery_color_mode(BATTERY_COLOR_MODE);
+		
+		/* Choose color mode based on LED hardware */
+		if (leds_has_neopixel()) {
+			/* NeoPixel supports smooth gradients */
+			leds_set_battery_color_mode(BAS_COLOR_MODE_GRADIENT);
+			LOG_INF("Using gradient mode for NeoPixel LEDs");
+		} else {
+			/* GPIO LEDs work better with discrete colors */
+			leds_set_battery_color_mode(BAS_COLOR_MODE_DISCRETE);
+			LOG_INF("Using discrete mode for GPIO LEDs");
+		}
+		
 		leds_set_state(LED_STATE_SCANNING);  /* Start in scanning state */
 	}
 	

@@ -66,6 +66,13 @@ bool leds_is_available(void);
  */
 void leds_set_battery_color_mode(uint8_t mode);
 
+/**
+ * @brief Check if NeoPixel LEDs are being used
+ * 
+ * @return true if NeoPixel LEDs are available, false if using GPIO LEDs
+ */
+bool leds_has_neopixel(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -196,6 +196,15 @@ void leds_set_battery_color_mode(uint8_t mode)
             (mode == BAS_COLOR_MODE_DISCRETE) ? "DISCRETE" : "GRADIENT");
 }
 
+bool leds_has_neopixel(void)
+{
+#if HAS_NEOPIXEL
+    return true;
+#else
+    return false;
+#endif
+}
+
 /* Private function implementations */
 
 static void set_rgb_color(ble_bas_rgb_color_t color)
