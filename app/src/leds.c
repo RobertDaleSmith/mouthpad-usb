@@ -53,6 +53,9 @@ static uint32_t animation_counter = 0;
 static bool animation_phase = false;
 static uint8_t battery_color_mode = BAS_COLOR_MODE_GRADIENT;
 
+/* NeoPixel brightness control (0-255, default 25 for comfortable viewing) */
+static uint8_t neopixel_brightness = 25;
+
 /* Private function declarations */
 static void set_rgb_color(ble_bas_rgb_color_t color);
 static void set_neopixel_color(ble_bas_rgb_color_t color);
@@ -223,9 +226,10 @@ static void set_neopixel_color(ble_bas_rgb_color_t color)
         return;
     }
     
-    neopixel_color.r = color.red;
-    neopixel_color.g = color.green;
-    neopixel_color.b = color.blue;
+    /* Scale colors by brightness to prevent blinding brightness */
+    neopixel_color.r = (color.red * neopixel_brightness) / 255;
+    neopixel_color.g = (color.green * neopixel_brightness) / 255;
+    neopixel_color.b = (color.blue * neopixel_brightness) / 255;
     
     led_strip_update_rgb(neopixel_dev, &neopixel_color, 1);
 #endif
@@ -264,7 +268,7 @@ static int init_neopixel(void)
     LOG_INF("NeoPixel initialized successfully");
     
     /* Brief startup indication - short blue pulse */
-    struct led_rgb startup_blue = {0, 0, 64};
+    struct led_rgb startup_blue = {0, 0, (64 * neopixel_brightness) / 255};
     led_strip_update_rgb(neopixel_dev, &startup_blue, 1);
     k_sleep(K_MSEC(200));
     
