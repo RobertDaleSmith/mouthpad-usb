@@ -36,6 +36,10 @@ bool ble_transport_has_data_activity(void);
 int8_t ble_transport_get_rssi(void);
 void ble_transport_set_rssi(int8_t rssi);
 
+/* Connection control */
+void ble_transport_disconnect(void);
+void ble_transport_clear_bonds(void);
+
 /* Future HID Transport functions (for later integration) */
 int ble_transport_register_hid_data_callback(ble_data_callback_t cb);
 int ble_transport_register_hid_ready_callback(ble_ready_callback_t cb);

@@ -19,12 +19,44 @@
 #include "oled_display.h"
 #include "buzzer.h"
 #include "leds.h"
+#include "button.h"
 
 #define LOG_MODULE_NAME mouthpad_usb
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 /* Battery color indication mode - automatically set based on LED hardware */
 /* GPIO LEDs use discrete mode, NeoPixel uses gradient mode */
+
+/* Button event callback function */
+static void button_event_callback(button_event_t event)
+{
+	switch (event) {
+	case BUTTON_EVENT_CLICK:
+		LOG_INF("=== BUTTON CLICK ===");
+		/* TODO: Add click functionality */
+		break;
+		
+	case BUTTON_EVENT_DOUBLE_CLICK:
+		LOG_INF("=== BUTTON DOUBLE CLICK ===");
+		/* TODO: Add double-click functionality */
+		break;
+		
+	case BUTTON_EVENT_HOLD:
+		LOG_INF("=== BUTTON HOLD - CLEARING BLE BONDS ===");
+		/* Clear BLE bonds and reset for new pairing */
+		if (ble_transport_is_connected()) {
+			LOG_INF("Disconnecting current BLE connection...");
+			ble_transport_disconnect();
+		}
+		/* Clear all BLE bonds */
+		ble_transport_clear_bonds();
+		LOG_INF("BLE bonds cleared - ready for new pairing");
+		break;
+		
+	default:
+		break;
+	}
+}
 
 /* USB HID callback function */
 static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
@@ -135,6 +167,17 @@ int main(void)
 		leds_set_state(LED_STATE_SCANNING);  /* Start in scanning state */
 	}
 	
+	/* Initialize User Button */
+	LOG_INF("Initializing user button...");
+	err = button_init();
+	if (err != 0) {
+		LOG_WRN("button_init failed (err %d) - continuing without button", err);
+		/* Continue without button - not critical for core functionality */
+	} else {
+		LOG_INF("User button initialized successfully");
+		button_register_callback(button_event_callback);
+	}
+	
 	static bool data_activity = false;
 	static int display_update_counter = 0;
 	
@@ -197,6 +240,11 @@ int main(void)
 			
 			/* Update LED animations */
 			leds_update();
+		}
+		
+		/* Update button state */
+		if (button_is_available()) {
+			button_update();
 		}
 		
 		/* Reset data activity flag periodically */

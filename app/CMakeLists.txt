@@ -20,6 +20,7 @@ project(mouthpad_usb)
     src/oled_display.c
     src/buzzer.c
     src/leds.c
+    src/button.c
     src/main.c
   )
 # NORDIC SDK APP END

@@ -514,3 +514,31 @@ void ble_transport_set_rssi(int8_t rssi)
 	last_known_rssi = rssi;
 	LOG_DBG("RSSI updated to %d dBm", rssi);
 }
+
+void ble_transport_disconnect(void)
+{
+	struct bt_conn *conn = ble_central_get_default_conn();
+	if (conn) {
+		LOG_INF("Disconnecting BLE connection...");
+		int err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		if (err) {
+			LOG_ERR("Failed to disconnect BLE connection (err %d)", err);
+		}
+	} else {
+		LOG_WRN("No active BLE connection to disconnect");
+	}
+}
+
+void ble_transport_clear_bonds(void)
+{
+	LOG_INF("Clearing all BLE bonds...");
+	
+	/* Clear all bonds */
+	int err = bt_unpair(BT_ID_DEFAULT, NULL);
+	if (err) {
+		LOG_ERR("Failed to clear bonds (err %d)", err);
+		return;
+	}
+	
+	LOG_INF("All BLE bonds cleared successfully");
+}
