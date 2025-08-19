@@ -48,6 +48,9 @@ static void scan_connecting_error(struct bt_scan_device_info *device_info);
 static void scan_connecting(struct bt_scan_device_info *device_info,
 			    struct bt_conn *conn);
 
+/* Background scan state */
+static bool background_scan_active = false;
+
 /* Authentication callbacks */
 static void auth_cancel(struct bt_conn *conn);
 static void pairing_complete(struct bt_conn *conn, bool bonded);
@@ -60,8 +63,18 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.security_changed = security_changed
 };
 
+/* Forward declarations for background scanning */
+static void scan_filter_match_background(struct bt_scan_device_info *device_info,
+				         struct bt_scan_filter_match *filter_match,
+				         bool connectable);
+static void stop_background_scan(void);
+
 /* Scan callbacks structure */
 BT_SCAN_CB_INIT(scan_cb, scan_filter_match, NULL,
+		scan_connecting_error, scan_connecting);
+
+/* Background scan callbacks structure for RSSI updates during connection */
+BT_SCAN_CB_INIT(background_scan_cb, scan_filter_match_background, NULL,
 		scan_connecting_error, scan_connecting);
 
 /* Authentication callbacks */
@@ -126,6 +139,9 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	bt_conn_unref(default_conn);
 	default_conn = NULL;
+
+	/* Stop any background scanning */
+	stop_background_scan();
 
 	/* Call external disconnected callback if registered */
 	if (disconnected_cb) {
@@ -453,5 +469,70 @@ const char *ble_central_get_device_type_string(const struct bt_scan_device_info 
 		return "HID_ONLY";
 	} else {
 		return "UNKNOWN";
+	}
+}
+
+/* Background scan callback - only updates RSSI for already connected devices */
+static void scan_filter_match_background(struct bt_scan_device_info *device_info,
+				         struct bt_scan_filter_match *filter_match,
+				         bool connectable)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
+	
+	/* Only process if we're connected and this is our connected device */
+	if (default_conn) {
+		const bt_addr_le_t *connected_addr = bt_conn_get_dst(default_conn);
+		if (bt_addr_le_cmp(device_info->recv_info->addr, connected_addr) == 0) {
+			/* This is advertising from our connected device - update RSSI! */
+			int8_t rssi = device_info->recv_info->rssi;
+			LOG_INF("Background RSSI update for connected device %s: %d dBm", addr, rssi);
+			
+			/* Update RSSI in transport layer */
+			extern void ble_transport_set_rssi(int8_t rssi);
+			ble_transport_set_rssi(rssi);
+		}
+	}
+}
+
+/* Start background scanning for RSSI updates while connected */
+int ble_central_start_background_scan_for_rssi(void)
+{
+	if (background_scan_active) {
+		LOG_DBG("Background scan already active");
+		return 0;
+	}
+	
+	if (!default_conn) {
+		LOG_WRN("No active connection for background scanning");
+		return -ENOTCONN;
+	}
+	
+	/* Use passive scanning to avoid interfering with connection */
+	background_scan_active = true;
+	
+	LOG_INF("Starting background scan for RSSI updates");
+	
+	/* Register the background scan callback */
+	bt_scan_cb_register(&background_scan_cb);
+	
+	int err = bt_scan_start(BT_SCAN_TYPE_SCAN_PASSIVE);
+	if (err) {
+		LOG_ERR("Failed to start background scan (err %d)", err);
+		background_scan_active = false;
+		return err;
+	}
+	
+	return 0;
+}
+
+/* Stop background scanning */
+static void stop_background_scan(void)
+{
+	if (background_scan_active) {
+		LOG_INF("Stopping background scan for RSSI updates");
+		bt_scan_stop();
+		/* Note: No need to unregister callback as it's statically defined */
+		background_scan_active = false;
 	}
 }

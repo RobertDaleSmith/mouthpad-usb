@@ -691,7 +691,7 @@ int oled_display_device_found(const char *device_name)
     /* Display device found message */
     cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
     y_pos += line_spacing;
-    cfb_print(display_dev, "Found", 0, y_pos);
+    cfb_print(display_dev, "Pairing...", 0, y_pos);
     
     /* Update display */
     ret = cfb_framebuffer_finalize(display_dev);

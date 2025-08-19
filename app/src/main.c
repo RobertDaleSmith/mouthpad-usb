@@ -225,7 +225,6 @@ int main(void)
 		/* Check BLE connection status and data activity */
 		bool is_connected = ble_transport_is_connected();
 		bool ble_data_activity = ble_transport_has_data_activity();
-		bool bas_ready = ble_bas_is_ready();
 		uint8_t battery_level = ble_bas_get_battery_level();
 		
 		/* Update LED state based on connection and activity */

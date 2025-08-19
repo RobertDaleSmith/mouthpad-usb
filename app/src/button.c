@@ -136,8 +136,8 @@ int button_update(void)
     
     /* Log when pin state changes or periodically */
     if (pin_state != last_pin_state || (current_time - last_debug_time) > 1000) {
-        LOG_INF("BUTTON DEBUG: pin=%d, raw=%d, debounced=%d, state=%d", 
-                pin_state, button_pressed_raw, button_pressed_debounced, button_state);
+        // LOG_INF("BUTTON DEBUG: pin=%d, raw=%d, debounced=%d, state=%d", 
+        //         pin_state, button_pressed_raw, button_pressed_debounced, button_state);
         last_pin_state = pin_state;
         last_debug_time = current_time;
     }

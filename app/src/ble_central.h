@@ -37,4 +37,7 @@ bool ble_central_is_nus_device(const struct bt_scan_device_info *device_info);
 bool ble_central_is_hid_device(const struct bt_scan_device_info *device_info);
 const char *ble_central_get_device_type_string(const struct bt_scan_device_info *device_info);
 
+/* Background scanning for RSSI updates during connections */
+int ble_central_start_background_scan_for_rssi(void);
+
 #endif /* BLE_CENTRAL_H */

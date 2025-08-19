@@ -9,8 +9,10 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/gap.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/hci_types.h>
+#include <zephyr/bluetooth/addr.h>
 #include <zephyr/sys/byteorder.h>
 #include <string.h>
 
@@ -47,12 +49,17 @@ static int64_t last_data_time = 0;
 /* RSSI tracking - stored from advertising during scan */
 static int8_t last_known_rssi = 0;
 
+/* RSSI reading infrastructure */
+static struct k_work_delayable rssi_read_work;
+static bool rssi_reading_active = false;
+
 /* HID Bridge callbacks */
 static ble_data_callback_t hid_data_callback = NULL;
 static ble_ready_callback_t hid_ready_callback = NULL;
 
 /* Internal callback functions */
 static void ble_nus_data_received_cb(const uint8_t *data, uint16_t len);
+static void rssi_read_work_handler(struct k_work *work);
 static void ble_nus_discovery_complete_cb(void);
 static void ble_nus_mtu_exchange_cb(uint16_t mtu);
 static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len);
@@ -132,6 +139,9 @@ int ble_transport_init(void)
 		return err;
 	}
 	LOG_INF("BLE HID client initialized successfully");
+
+	/* Initialize RSSI reading work */
+	k_work_init_delayable(&rssi_read_work, rssi_read_work_handler);
 
 	/* Start scanning */
 	err = ble_central_start_scan();
@@ -359,7 +369,9 @@ static void gatt_discover(struct bt_conn *conn)
 	}
 
 	LOG_INF("Starting GATT discovery for both NUS and HID services");
-	LOG_INF("Connected device address: %s", bt_addr_le_str(bt_conn_get_dst(conn)));
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
+	LOG_INF("Connected device address: %s", addr_str);
 
 	/* Reset discovery state */
 	nus_discovery_complete = false;
@@ -381,6 +393,37 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 	extern int oled_display_pairing(void);
 	oled_display_pairing();
 
+	/* Request optimal connection parameters for better signal and responsiveness */
+	struct bt_le_conn_param conn_params = {
+		.interval_min = 16,    /* 20ms (16 * 1.25ms) */
+		.interval_max = 40,    /* 50ms (40 * 1.25ms) */
+		.latency = 0,          /* No latency for responsiveness */
+		.timeout = 400         /* 4 seconds (400 * 10ms) */
+	};
+	
+	err = bt_conn_le_param_update(conn, &conn_params);
+	if (err) {
+		LOG_WRN("Failed to request connection parameter update (err %d)", err);
+	} else {
+		LOG_INF("Connection parameter update requested (20-50ms interval, 0 latency)");
+	}
+
+#if defined(CONFIG_BT_USER_PHY_UPDATE)
+	/* Request PHY update for better throughput or range */
+	struct bt_conn_le_phy_param phy_params = {
+		.options = BT_CONN_LE_PHY_OPT_NONE,
+		.pref_tx_phy = BT_GAP_LE_PHY_2M | BT_GAP_LE_PHY_CODED, /* Prefer 2M for speed or Coded for range */
+		.pref_rx_phy = BT_GAP_LE_PHY_2M | BT_GAP_LE_PHY_CODED
+	};
+	
+	err = bt_conn_le_phy_update(conn, &phy_params);
+	if (err) {
+		LOG_WRN("Failed to request PHY update (err %d)", err);
+	} else {
+		LOG_INF("PHY update requested (2M or Coded PHY for better signal)");
+	}
+#endif
+
 	// Perform MTU exchange using the NUS client module
 	err = ble_nus_client_exchange_mtu(conn);
 	if (err) {
@@ -397,6 +440,11 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 		LOG_INF("Security setup successful");
 		gatt_discover(conn);
 	}
+
+	/* Start periodic RSSI reading */
+	rssi_reading_active = true;
+	k_work_schedule(&rssi_read_work, K_SECONDS(2));  /* First read in 2 seconds */
+	LOG_INF("Started periodic RSSI reading");
 }
 
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
@@ -425,6 +473,11 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	nus_client_ready = false;
 	hid_client_ready = false;
 	hid_discovery_complete = false;
+
+	/* Stop periodic RSSI reading */
+	rssi_reading_active = false;
+	k_work_cancel_delayable(&rssi_read_work);
+	LOG_INF("Stopped periodic RSSI reading");
 	mtu_exchange_complete = false;
 	nus_discovery_complete = false;
 	fully_connected = false;
@@ -494,19 +547,119 @@ int8_t ble_transport_get_rssi(void)
 	last_rssi_read_time = current_time;
 	rssi_read_attempts++;
 	
-	/* For now, simulate RSSI variation by adding small random changes to the stored value */
-	/* This is a temporary workaround until we fix the HCI RSSI reading */
-	int8_t simulated_variation = (rssi_read_attempts % 8) - 4; /* -4 to +3 dBm variation */
-	int8_t current_rssi = last_known_rssi + simulated_variation;
+	/* Get the connection and try to read real RSSI */
+	int8_t current_rssi = last_known_rssi;
+	struct bt_conn *conn = ble_central_get_default_conn();
+	
+	if (conn) {
+		/* Log connection info for debugging */
+		struct bt_conn_info info;
+		int err = bt_conn_get_info(conn, &info);
+		if (err == 0 && info.type == BT_CONN_TYPE_LE) {
+			LOG_DBG("Connection info - interval: %d, latency: %d, timeout: %d",
+			        info.le.interval, info.le.latency, info.le.timeout);
+			
+#if defined(CONFIG_BT_USER_PHY_UPDATE)
+			if (info.le.phy) {
+				LOG_DBG("PHY info - TX: %d, RX: %d", 
+				        info.le.phy->tx_phy, info.le.phy->rx_phy);
+			}
+#endif
+#if defined(CONFIG_BT_USER_DATA_LEN_UPDATE)
+			if (info.le.data_len) {
+				LOG_DBG("Data len - TX max: %d, RX max: %d",
+				        info.le.data_len->tx_max_len, info.le.data_len->rx_max_len);
+			}
+#endif
+		}
+		
+		/* Use the real RSSI value (updated by periodic nRF controller reads) */
+		current_rssi = last_known_rssi;
+	}
 	
 	/* Bound the RSSI to reasonable values */
 	if (current_rssi > -20) current_rssi = -20;
 	if (current_rssi < -100) current_rssi = -100;
 	
-	LOG_INF("RSSI simulated update: %d dBm (base: %d, variation: %d)", 
-	        current_rssi, last_known_rssi, simulated_variation);
+	LOG_DBG("Current RSSI: %d dBm (real measurement)", current_rssi);
 	
 	return current_rssi;
+}
+
+
+/* RSSI work handler - reads actual connection RSSI using HCI command */
+static void rssi_read_work_handler(struct k_work *work)
+{
+	if (!ble_transport_is_connected()) {
+		/* Stop RSSI reading if not connected */
+		rssi_reading_active = false;
+		return;
+	}
+	
+	struct bt_conn *conn = ble_central_get_default_conn();
+	if (!conn) {
+		LOG_WRN("No active connection for RSSI reading");
+		return;
+	}
+	
+	/* Read actual connection RSSI using HCI command (based on zephyr/samples/bluetooth/hci_pwr_ctrl) */
+	struct net_buf *buf, *rsp = NULL;
+	struct bt_hci_cp_read_rssi *cp;
+	struct bt_hci_rp_read_rssi *rp;
+	int err;
+	
+	/* Allocate HCI command buffer */
+	buf = bt_hci_cmd_create(BT_HCI_OP_READ_RSSI, sizeof(*cp));
+	if (!buf) {
+		LOG_ERR("Failed to create HCI buffer for RSSI read");
+		goto schedule_next;
+	}
+	
+	cp = net_buf_add(buf, sizeof(*cp));
+	cp->handle = sys_cpu_to_le16(bt_conn_index(conn));
+	
+	/* Send synchronous HCI Read RSSI command */
+	err = bt_hci_cmd_send_sync(BT_HCI_OP_READ_RSSI, buf, &rsp);
+	if (err) {
+		LOG_ERR("HCI Read RSSI failed (err %d)", err);
+		goto schedule_next;
+	}
+	
+	rp = (void *)rsp->data;
+	if (rp->status) {
+		LOG_ERR("HCI Read RSSI command failed (status 0x%02x)", rp->status);
+		goto cleanup_and_schedule;
+	}
+	
+	/* Update RSSI with real measurement */
+	int8_t new_rssi = rp->rssi;
+	
+	/* Log RSSI updates */
+	static uint32_t rssi_read_count = 0;
+	rssi_read_count++;
+	
+	if (rssi_read_count == 1) {
+		LOG_INF("=== REAL-TIME CONNECTION RSSI ===");
+		LOG_INF("Successfully reading live connection RSSI via HCI commands!");
+		LOG_INF("Initial connection RSSI: %d dBm", new_rssi);
+	} else if (new_rssi != last_known_rssi) {
+		LOG_INF("RSSI CHANGE: %d -> %d dBm (signal strength updated)", last_known_rssi, new_rssi);
+	} else if (rssi_read_count % 15 == 0) {  /* Every 30 seconds */
+		LOG_INF("Connection RSSI: %d dBm (stable)", new_rssi);
+	}
+	
+	last_known_rssi = new_rssi;
+	
+cleanup_and_schedule:
+	if (rsp) {
+		net_buf_unref(rsp);
+	}
+
+schedule_next:
+	/* Schedule next RSSI reading in 2 seconds */
+	if (rssi_reading_active) {
+		k_work_schedule(&rssi_read_work, K_SECONDS(2));
+	}
 }
 
 void ble_transport_set_rssi(int8_t rssi)
