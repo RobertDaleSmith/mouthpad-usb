@@ -12,6 +12,8 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/gap.h>
+#include <zephyr/bluetooth/addr.h>
 #include <bluetooth/gatt_dm.h>
 #include <bluetooth/scan.h>
 #include <bluetooth/services/nus.h>
@@ -48,6 +50,13 @@ static void scan_connecting_error(struct bt_scan_device_info *device_info);
 static void scan_connecting(struct bt_scan_device_info *device_info,
 			    struct bt_conn *conn);
 
+/* Device name extraction from advertising data */
+static int extract_device_name_from_scan(struct bt_scan_device_info *device_info, char *name_buf, size_t buf_len);
+
+/* Device name storage functions */
+static void store_device_name_for_addr(const bt_addr_le_t *addr, const char *name);
+static const char *get_stored_device_name_for_addr(const bt_addr_le_t *addr);
+
 /* Background scan state */
 static bool background_scan_active = false;
 
@@ -69,8 +78,11 @@ static void scan_filter_match_background(struct bt_scan_device_info *device_info
 				         bool connectable);
 static void stop_background_scan(void);
 
+/* Forward declaration for no_match callback */
+static void scan_no_match(struct bt_scan_device_info *device_info, bool connectable);
+
 /* Scan callbacks structure */
-BT_SCAN_CB_INIT(scan_cb, scan_filter_match, NULL,
+BT_SCAN_CB_INIT(scan_cb, scan_filter_match, scan_no_match,
 		scan_connecting_error, scan_connecting);
 
 /* Background scan callbacks structure for RSSI updates during connection */
@@ -197,9 +209,42 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		extern void ble_transport_set_rssi(int8_t rssi);
 		ble_transport_set_rssi(rssi);
 		
+		/* Extract device name directly from advertising data */
+		char device_name[32];
+		if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) == 0) {
+			/* Successfully extracted name - truncate to 12 characters */
+			LOG_INF("Extracted device name from advertising: '%s'", device_name);
+			device_name[12] = '\0';  /* Truncate to 12 chars for display */
+		} else {
+			/* Fallback to checking stored names */
+			const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
+			if (stored_name) {
+				strncpy(device_name, stored_name, 12);
+				device_name[12] = '\0';
+				LOG_INF("Using stored device name: '%s'", device_name);
+			} else {
+				/* Final fallback - use shortened address */
+				char addr_str[BT_ADDR_LE_STR_LEN];
+				bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
+				/* Use last 12 chars of address */
+				int addr_len = strlen(addr_str);
+				if (addr_len > 12) {
+					strncpy(device_name, addr_str + addr_len - 12, 12);
+				} else {
+					strncpy(device_name, addr_str, 12);
+				}
+				device_name[12] = '\0';
+				LOG_INF("No device name found, using address: '%s'", device_name);
+			}
+		}
+		
+		/* Store device name in transport layer */
+		extern void ble_transport_set_device_name(const char *name);
+		ble_transport_set_device_name(device_name);
+		
 		/* Update display to show device found */
 		extern int oled_display_device_found(const char *device_name);
-		oled_display_device_found("MouthPad Device");
+		oled_display_device_found(device_name);
 		
 	} else {
 		printk("*** REJECTING DEVICE (missing required services): %s ***\n", addr);
@@ -534,5 +579,120 @@ static void stop_background_scan(void)
 		bt_scan_stop();
 		/* Note: No need to unregister callback as it's statically defined */
 		background_scan_active = false;
+	}
+}
+
+/* Parse advertising data callback for bt_data_parse() */
+static bool parse_device_name_cb(struct bt_data *data, void *user_data)
+{
+	struct {
+		char *name_buf;
+		size_t buf_len;
+		bool found;
+	} *name_info = user_data;
+	
+	if (data->type == BT_DATA_NAME_COMPLETE || data->type == BT_DATA_NAME_SHORTENED) {
+		/* Copy the name to our buffer */
+		size_t name_len = MIN(data->data_len, name_info->buf_len - 1);
+		memcpy(name_info->name_buf, data->data, name_len);
+		name_info->name_buf[name_len] = '\0';
+		name_info->found = true;
+		return false; /* Stop parsing, we found the name */
+	}
+	
+	return true; /* Continue parsing */
+}
+
+/* Extract device name from BLE advertising data */
+static int extract_device_name_from_scan(struct bt_scan_device_info *device_info, char *name_buf, size_t buf_len)
+{
+	if (!device_info || !name_buf || buf_len == 0) {
+		LOG_WRN("Invalid parameters for name extraction");
+		return -EINVAL;
+	}
+	
+	if (!device_info->adv_data || device_info->adv_data->len == 0) {
+		LOG_DBG("No advertising data available for device");
+		return -ENOENT;
+	}
+	
+	/* Initialize with default name */
+	strncpy(name_buf, "Unknown Device", buf_len - 1);
+	name_buf[buf_len - 1] = '\0';
+	
+	/* Use bt_data_parse to find the device name */
+	struct {
+		char *name_buf;
+		size_t buf_len;
+		bool found;
+	} name_info = {
+		.name_buf = name_buf,
+		.buf_len = buf_len,
+		.found = false
+	};
+	
+	/* bt_data_parse expects a net_buf_simple */
+	bt_data_parse(device_info->adv_data, parse_device_name_cb, &name_info);
+	
+	if (name_info.found) {
+		// LOG_INF("Extracted device name from advertising: '%s'", name_buf);
+		return 0;
+	}
+	
+	LOG_DBG("No device name found in advertising data");
+	return -ENOENT;
+}
+
+/* Store device names from advertising data for later use */
+static char pending_device_names[8][32]; /* Store up to 8 device names */
+static bt_addr_le_t pending_device_addrs[8];
+static int pending_device_count = 0;
+
+/* Store device name for a specific address */
+static void store_device_name_for_addr(const bt_addr_le_t *addr, const char *name)
+{
+	/* Check if we already have this device */
+	for (int i = 0; i < pending_device_count; i++) {
+		if (bt_addr_le_cmp(&pending_device_addrs[i], addr) == 0) {
+			/* Update existing entry */
+			strncpy(pending_device_names[i], name, sizeof(pending_device_names[i]) - 1);
+			pending_device_names[i][sizeof(pending_device_names[i]) - 1] = '\0';
+			return;
+		}
+	}
+	
+	/* Add new entry if we have space */
+	if (pending_device_count < ARRAY_SIZE(pending_device_names)) {
+		pending_device_addrs[pending_device_count] = *addr;
+		strncpy(pending_device_names[pending_device_count], name, 
+		        sizeof(pending_device_names[pending_device_count]) - 1);
+		pending_device_names[pending_device_count][sizeof(pending_device_names[pending_device_count]) - 1] = '\0';
+		pending_device_count++;
+	}
+}
+
+/* Get stored device name for a specific address */
+static const char *get_stored_device_name_for_addr(const bt_addr_le_t *addr)
+{
+	for (int i = 0; i < pending_device_count; i++) {
+		if (bt_addr_le_cmp(&pending_device_addrs[i], addr) == 0) {
+			return pending_device_names[i];
+		}
+	}
+	return NULL;
+}
+
+/* Scan no_match callback to capture device names from all advertising packets */
+static void scan_no_match(struct bt_scan_device_info *device_info, bool connectable)
+{
+	/* Extract and store device name for potential future connection */
+	char device_name[32];
+	if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) == 0) {
+		/* Successfully extracted name, store it */
+		store_device_name_for_addr(device_info->recv_info->addr, device_name);
+		
+		char addr_str[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
+		LOG_INF("*** FOUND DEVICE NAME '%s' from %s ***", device_name, addr_str);
 	}
 }

@@ -36,6 +36,10 @@ bool ble_transport_has_data_activity(void);
 int8_t ble_transport_get_rssi(void);
 void ble_transport_set_rssi(int8_t rssi);
 
+/* Device name functions */
+void ble_transport_set_device_name(const char *name);
+const char *ble_transport_get_device_name(void);
+
 /* Connection control */
 void ble_transport_disconnect(void);
 void ble_transport_clear_bonds(void);

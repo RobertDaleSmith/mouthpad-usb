@@ -182,8 +182,16 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected, int8_t 
     uint16_t line_spacing = 16;  /* 3 lines fit: 0, 16, 32 */
     uint16_t y_pos = 0;
 
-    /* Line 1: MouthPad^USB title */
-    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    /* Line 1: Device name - use connected device name when connected, otherwise default */
+    extern const char *ble_transport_get_device_name(void);
+    const char *full_title = is_connected ? ble_transport_get_device_name() : "MouthPad^USB";
+    
+    /* Truncate title to 12 characters for display */
+    char display_title[13];  /* 12 chars + null terminator */
+    strncpy(display_title, full_title, 12);
+    display_title[12] = '\0';
+    
+    cfb_print(display_dev, display_title, 0, y_pos);
     y_pos += line_spacing;
 
     /* Line 2: Connection status */
@@ -563,8 +571,8 @@ int oled_display_splash_screen(uint32_t duration_ms)
     uint16_t line_spacing = 16;
     uint16_t y_pos = 0;
     
-    /* Line 1: MouthPad^USB title */
-    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    /* Line 1: MouthPad USB title */
+    cfb_print(display_dev, "MouthPad USB", 0, y_pos);
     y_pos += line_spacing;
     
     /* Line 2: Scanning status */
@@ -640,7 +648,7 @@ int oled_display_scanning(void)
     uint16_t y_pos = 0;
     
     /* Display scanning message */
-    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    cfb_print(display_dev, "MouthPad USB", 0, y_pos);
     y_pos += line_spacing;
     cfb_print(display_dev, "Scanning...", 0, y_pos);
     
@@ -689,7 +697,7 @@ int oled_display_device_found(const char *device_name)
     uint16_t y_pos = 0;
     
     /* Display device found message */
-    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    cfb_print(display_dev, "MouthPad USB", 0, y_pos);
     y_pos += line_spacing;
     cfb_print(display_dev, "Pairing...", 0, y_pos);
     
@@ -738,7 +746,7 @@ int oled_display_pairing(void)
     uint16_t y_pos = 0;
     
     /* Display pairing message */
-    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
+    cfb_print(display_dev, "MouthPad USB", 0, y_pos);
     y_pos += line_spacing;
     cfb_print(display_dev, "Pairing...", 0, y_pos);
     

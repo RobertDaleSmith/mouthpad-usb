@@ -49,6 +49,9 @@ static int64_t last_data_time = 0;
 /* RSSI tracking - stored from advertising during scan */
 static int8_t last_known_rssi = 0;
 
+/* Connected device name tracking */
+static char connected_device_name[32] = "MouthPad USB";  /* Shortened to fit 12 char limit */
+
 /* RSSI reading infrastructure */
 static struct k_work_delayable rssi_read_work;
 static bool rssi_reading_active = false;
@@ -482,6 +485,10 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	nus_discovery_complete = false;
 	fully_connected = false;
 	
+	/* Reset device name to default */
+	strncpy(connected_device_name, "MouthPad USB", sizeof(connected_device_name) - 1);
+	connected_device_name[sizeof(connected_device_name) - 1] = '\0';
+	
 	// Reset battery service state
 	ble_bas_reset();
 	
@@ -666,6 +673,20 @@ void ble_transport_set_rssi(int8_t rssi)
 {
 	last_known_rssi = rssi;
 	LOG_DBG("RSSI updated to %d dBm", rssi);
+}
+
+void ble_transport_set_device_name(const char *name)
+{
+	if (name) {
+		strncpy(connected_device_name, name, sizeof(connected_device_name) - 1);
+		connected_device_name[sizeof(connected_device_name) - 1] = '\0';
+		LOG_INF("Connected device name set to: %s", connected_device_name);
+	}
+}
+
+const char *ble_transport_get_device_name(void)
+{
+	return connected_device_name;
 }
 
 void ble_transport_disconnect(void)
