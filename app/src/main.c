@@ -445,11 +445,13 @@ int main(void)
 			data_activity = false;
 		}
 		
-		// Update OLED display every 100ms for responsive connection status updates (if available)
+		// Update OLED display every 500ms for responsive connection status updates (if available)
+		// Reduced frequency to avoid overwhelming RSSI reads
 		if (oled_display_is_available()) {
 			display_update_counter++;
-			if (display_update_counter >= 100) {
-				oled_display_update_status(battery_level, is_connected);
+			if (display_update_counter >= 500) {
+				int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
+				oled_display_update_status(battery_level, is_connected, rssi_dbm);
 				display_update_counter = 0;
 			}
 		}

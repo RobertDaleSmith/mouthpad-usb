@@ -162,17 +162,24 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 
 	/* Log device type and connection status */
 	log_device_type(device_info, addr);
-	printk("*** DEVICE FOUND: %s connectable: %d ***\n", addr, connectable);
-	LOG_INF("Filters matched. Address: %s connectable: %d",
-		addr, connectable);
+	/* Log RSSI information */
+	int8_t rssi = device_info->recv_info->rssi;
+	printk("*** DEVICE FOUND: %s connectable: %d RSSI: %d dBm ***\n", 
+	       addr, connectable, rssi);
+	LOG_INF("Filters matched. Address: %s connectable: %d RSSI: %d dBm",
+		addr, connectable, rssi);
 	
 	/* Only connect to devices that have both NUS and HID services */
 	bool has_nus = is_nus_device(device_info);
 	bool has_hid = is_hid_device(device_info);
 	
 	if (has_nus && has_hid) {
-		printk("*** CONNECTING TO MOUTHPAD DEVICE: %s ***\n", addr);
-		LOG_INF("Connecting to MouthPad device: %s", addr);
+		printk("*** CONNECTING TO MOUTHPAD DEVICE: %s (RSSI: %d dBm) ***\n", addr, rssi);
+		LOG_INF("Connecting to MouthPad device: %s (RSSI: %d dBm)", addr, rssi);
+		
+		/* Store RSSI for later use during connection */
+		extern void ble_transport_set_rssi(int8_t rssi);
+		ble_transport_set_rssi(rssi);
 		
 		/* Update display to show device found */
 		extern int oled_display_device_found(const char *device_name);

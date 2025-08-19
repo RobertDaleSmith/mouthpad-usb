@@ -33,6 +33,8 @@ bool ble_transport_is_nus_ready(void);
 /* Connection status */
 bool ble_transport_is_connected(void);
 bool ble_transport_has_data_activity(void);
+int8_t ble_transport_get_rssi(void);
+void ble_transport_set_rssi(int8_t rssi);
 
 /* Future HID Transport functions (for later integration) */
 int ble_transport_register_hid_data_callback(ble_data_callback_t cb);

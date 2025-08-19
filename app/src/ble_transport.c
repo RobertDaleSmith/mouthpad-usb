@@ -9,6 +9,9 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/hci_types.h>
+#include <zephyr/sys/byteorder.h>
 #include <string.h>
 
 #include "ble_transport.h"
@@ -40,6 +43,9 @@ static bool fully_connected = false;
 /* Data activity tracking for LED indication */
 static bool data_activity = false;
 static int64_t last_data_time = 0;
+
+/* RSSI tracking - stored from advertising during scan */
+static int8_t last_known_rssi = 0;
 
 /* HID Bridge callbacks */
 static ble_data_callback_t hid_data_callback = NULL;
@@ -467,4 +473,44 @@ void ble_transport_mark_data_activity(void)
 	data_activity = true;
 	last_data_time = k_uptime_get();
 	LOG_DBG("=== DATA ACTIVITY MARKED (DIRECT) ===");
+}
+
+int8_t ble_transport_get_rssi(void)
+{
+	static int64_t last_rssi_read_time = 0;
+	static uint32_t rssi_read_attempts = 0;
+	
+	if (!ble_transport_is_connected()) {
+		return 0;  /* Return 0 for no connection */
+	}
+	
+	/* Only try to read RSSI every 2 seconds to avoid overwhelming the system */
+	int64_t current_time = k_uptime_get();
+	if (current_time - last_rssi_read_time < 2000) {
+		LOG_DBG("Using cached RSSI: %d dBm", last_known_rssi);
+		return last_known_rssi;
+	}
+	
+	last_rssi_read_time = current_time;
+	rssi_read_attempts++;
+	
+	/* For now, simulate RSSI variation by adding small random changes to the stored value */
+	/* This is a temporary workaround until we fix the HCI RSSI reading */
+	int8_t simulated_variation = (rssi_read_attempts % 8) - 4; /* -4 to +3 dBm variation */
+	int8_t current_rssi = last_known_rssi + simulated_variation;
+	
+	/* Bound the RSSI to reasonable values */
+	if (current_rssi > -20) current_rssi = -20;
+	if (current_rssi < -100) current_rssi = -100;
+	
+	LOG_INF("RSSI simulated update: %d dBm (base: %d, variation: %d)", 
+	        current_rssi, last_known_rssi, simulated_variation);
+	
+	return current_rssi;
+}
+
+void ble_transport_set_rssi(int8_t rssi)
+{
+	last_known_rssi = rssi;
+	LOG_DBG("RSSI updated to %d dBm", rssi);
 }

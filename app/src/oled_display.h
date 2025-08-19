@@ -30,13 +30,14 @@ int oled_display_init(void);
 int oled_display_clear(void);
 
 /**
- * @brief Update the display with current battery level and connection status
+ * @brief Update the display with current battery level, connection status, and signal strength
  * 
  * @param battery_level Battery percentage (0-100), or 0xFF if unknown
  * @param is_connected Whether BLE device is connected
+ * @param rssi_dbm BLE signal strength in dBm (-128 to 127), or 0 if unknown/not connected
  * @return 0 on success, negative error code on failure
  */
-int oled_display_update_status(uint8_t battery_level, bool is_connected);
+int oled_display_update_status(uint8_t battery_level, bool is_connected, int8_t rssi_dbm);
 
 /**
  * @brief Display a simple message on the OLED

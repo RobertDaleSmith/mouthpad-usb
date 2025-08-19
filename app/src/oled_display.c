@@ -55,6 +55,7 @@ static uint8_t font_height;
 /* Status tracking */
 static uint8_t last_battery_level = 0xFF;
 static bool last_connection_state = false;
+static int8_t last_rssi_dbm = 0;
 
 /* Private function declarations */
 static int oled_display_setup_font(void);
@@ -64,6 +65,7 @@ static void draw_connection_status(bool is_connected, uint16_t x, uint16_t y);
 static int oled_display_set_contrast(uint8_t contrast);
 static void oled_display_invert_bitmap(const uint8_t *src, uint8_t *dst, size_t size);
 static int oled_display_invert_framebuffer(void);
+static const char* rssi_to_signal_bars(int8_t rssi_dbm);
 
 int oled_display_init(void)
 {
@@ -145,10 +147,10 @@ int oled_display_clear(void)
     return cfb_framebuffer_finalize(display_dev);
 }
 
-int oled_display_update_status(uint8_t battery_level, bool is_connected)
+int oled_display_update_status(uint8_t battery_level, bool is_connected, int8_t rssi_dbm)
 {
     char battery_str[32];
-    char status_str[32];
+    char status_str[40];
     int ret;
 
     if (!display_available || !display_ready) {
@@ -156,7 +158,9 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
     }
 
     /* Only update if something changed */
-    if (battery_level == last_battery_level && is_connected == last_connection_state) {
+    if (battery_level == last_battery_level && 
+        is_connected == last_connection_state &&
+        rssi_dbm == last_rssi_dbm) {
         return 0;
     }
 
@@ -184,7 +188,7 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
 
     /* Line 2: Connection status */
     if (is_connected) {
-        strcpy(status_str, "Connected!");
+        strcpy(status_str, "Connected");
     } else {
         strcpy(status_str, "Scanning...");
     }
@@ -211,6 +215,15 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
         snprintf(battery_str, sizeof(battery_str), "%s %d%%", battery_icon, battery_level);
     }
     cfb_print(display_dev, battery_str, 0, y_pos);
+    y_pos += line_spacing;
+
+    /* Line 4: Signal strength (only when connected) */
+    if (is_connected) {
+        const char* signal_bars = rssi_to_signal_bars(rssi_dbm);
+        char signal_str[32];
+        snprintf(signal_str, sizeof(signal_str), "%s%ddBm", signal_bars, rssi_dbm);
+        cfb_print(display_dev, signal_str, 0, y_pos);
+    }
 
     /* Update display - hardware inversion is already set */
     ret = cfb_framebuffer_finalize(display_dev);
@@ -222,9 +235,10 @@ int oled_display_update_status(uint8_t battery_level, bool is_connected)
     /* Update last known state */
     last_battery_level = battery_level;
     last_connection_state = is_connected;
+    last_rssi_dbm = rssi_dbm;
 
-    LOG_DBG("Display updated: battery=%d%%, connected=%s", 
-            battery_level, is_connected ? "yes" : "no");
+    LOG_DBG("Display updated: battery=%d%%, connected=%s, rssi=%ddBm", 
+            battery_level, is_connected ? "yes" : "no", rssi_dbm);
 
     return 0;
 }
@@ -596,6 +610,7 @@ void oled_display_reset_state(void)
     /* Reset state tracking so next update will definitely trigger */
     last_battery_level = 0xFE;  /* Different from any real value */
     last_connection_state = true;  /* Opposite of typical initial state */
+    last_rssi_dbm = -100;  /* Different from any typical value */
 }
 
 int oled_display_scanning(void)
@@ -676,7 +691,7 @@ int oled_display_device_found(const char *device_name)
     /* Display device found message */
     cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
     y_pos += line_spacing;
-    cfb_print(display_dev, "Found.", 0, y_pos);
+    cfb_print(display_dev, "Found", 0, y_pos);
     
     /* Update display */
     ret = cfb_framebuffer_finalize(display_dev);
@@ -791,4 +806,27 @@ static int oled_display_invert_framebuffer(void)
     
     LOG_DBG("Framebuffer manually inverted");
     return 0;
+}
+
+/* Convert RSSI value to signal strength bars */
+static const char* rssi_to_signal_bars(int8_t rssi_dbm)
+{
+    /* RSSI to signal bar conversion based on typical BLE signal strength:
+     * -30 dBm = Excellent (4 bars)  [||||]
+     * -50 dBm = Good (3 bars)       [|||.]
+     * -70 dBm = Fair (2 bars)       [||..]  
+     * -80 dBm = Weak (1 bar)        [|...]
+     * -90+ dBm = Very weak (0 bars) [....]
+     */
+    if (rssi_dbm >= -40) {
+        return "[||||]";  /* Excellent */
+    } else if (rssi_dbm >= -60) {
+        return "[|||.]";  /* Good */
+    } else if (rssi_dbm >= -75) {
+        return "[||..]";  /* Fair */
+    } else if (rssi_dbm >= -85) {
+        return "[|...]";  /* Weak */
+    } else {
+        return "[....]";  /* Very weak */
+    }
 }
