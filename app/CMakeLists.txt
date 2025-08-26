@@ -12,7 +12,10 @@ project(mouthpad_usb)
   target_sources(app PRIVATE
     src/ble_transport.c
     src/ble_central.c
+    src/ble_multi_conn.c
+    src/even_g1.c
     src/ble_nus_client.c
+    src/ble_nus_multi_client.c
     src/ble_hid.c
     src/ble_bas.c
     src/usb_cdc.c

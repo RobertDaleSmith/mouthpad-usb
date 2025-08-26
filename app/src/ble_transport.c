@@ -18,7 +18,10 @@
 
 #include "ble_transport.h"
 #include "ble_central.h"
+#include "ble_multi_conn.h"
+#include "even_g1.h"
 #include "ble_nus_client.h"
+#include "ble_nus_multi_client.h"
 #include "ble_hid.h"
 #include "ble_bas.h"
 #include "usb_cdc.h"
@@ -49,8 +52,9 @@ static int64_t last_data_time = 0;
 /* RSSI tracking - stored from advertising during scan */
 static int8_t last_known_rssi = 0;
 
-/* Connected device name tracking */
+/* Connected device name and type tracking */
 static char connected_device_name[32] = "MouthPad USB";  /* Shortened to fit 12 char limit */
+static ble_device_type_t pending_device_type = DEVICE_TYPE_UNKNOWN;
 
 /* RSSI reading infrastructure */
 static struct k_work_delayable rssi_read_work;
@@ -65,6 +69,7 @@ static void ble_nus_data_received_cb(const uint8_t *data, uint16_t len);
 static void rssi_read_work_handler(struct k_work *work);
 static void ble_nus_discovery_complete_cb(void);
 static void ble_nus_mtu_exchange_cb(uint16_t mtu);
+static void ble_nus_multi_discovery_complete_cb(struct bt_conn *conn);
 static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len);
 static void ble_hid_discovery_complete_cb(void);
 static void ble_central_connected_cb(struct bt_conn *conn);
@@ -95,6 +100,20 @@ int ble_transport_init(void)
 {
 	int err;
 
+	/* Initialize multi-connection manager */
+	err = ble_multi_conn_init();
+	if (err != 0) {
+		LOG_ERR("ble_multi_conn_init failed (err %d)", err);
+		return err;
+	}
+	
+	/* Initialize Even G1 module */
+	err = even_g1_init();
+	if (err != 0) {
+		LOG_ERR("even_g1_init failed (err %d)", err);
+		return err;
+	}
+
 	/* Register BLE Central callbacks */
 	ble_central_register_connected_cb(ble_central_connected_cb);
 	ble_central_register_disconnected_cb(ble_central_disconnected_cb);
@@ -110,6 +129,11 @@ int ble_transport_init(void)
 	ble_nus_client_register_data_received_cb(ble_nus_data_received_cb);
 	ble_nus_client_register_discovery_complete_cb(ble_nus_discovery_complete_cb);
 	ble_nus_client_register_mtu_exchange_cb(ble_nus_mtu_exchange_cb);
+
+	/* Register Multi-Connection NUS Client callbacks for Even G1 */
+	ble_nus_multi_client_register_data_received_cb(even_g1_nus_data_received);
+	ble_nus_multi_client_register_discovery_complete_cb(ble_nus_multi_discovery_complete_cb);
+	ble_nus_multi_client_register_mtu_exchange_cb(even_g1_mtu_exchanged);
 	
 	/* Register HID Client callbacks */
 	LOG_INF("Registering BLE HID callbacks...");
@@ -127,6 +151,14 @@ int ble_transport_init(void)
 		return err;
 	}
 	LOG_INF("BLE NUS client initialized successfully");
+
+	/* Initialize Multi-Connection NUS client for Even G1 devices */
+	err = ble_nus_multi_client_init();
+	if (err != 0) {
+		LOG_ERR("ble_nus_multi_client_init failed (err %d)", err);
+		return err;
+	}
+	LOG_INF("BLE Multi-Connection NUS client initialized successfully");
 
 	/* Initialize Battery Service client */
 	err = ble_bas_init();
@@ -269,21 +301,82 @@ static void ble_nus_data_received_cb(const uint8_t *data, uint16_t len)
 		LOG_INF("PACKET STRUCTURE: Type=0x%02x, Length=%d", data[0], len);
 	}
 	
+	// Check if this is from an Even G1 device
+	struct bt_conn *conn = ble_central_get_default_conn();
+	ble_device_connection_t *device = ble_multi_conn_get(conn);
+	
+	if (device && (device->type == DEVICE_TYPE_EVEN_G1_LEFT || device->type == DEVICE_TYPE_EVEN_G1_RIGHT)) {
+		LOG_INF("Even G1 data received from %s", 
+		        device->type == DEVICE_TYPE_EVEN_G1_LEFT ? "LEFT arm" : "RIGHT arm");
+		
+		// Route to Even G1 handler
+		even_g1_nus_data_received(conn, data, len);
+		
+		// Send a test display message on first 0xF5 packet (touch event)
+		if (data[0] == 0xF5) {
+			static bool test_sent = false;
+			if (!test_sent) {
+				LOG_INF("Sending test display message to Even G1");
+				even_g1_send_text_dual_arm("Hello from MouthPad!");
+				test_sent = true;
+			}
+		}
+	} else {
+		// Handle MouthPad or other device data
+		LOG_DBG("Non-Even G1 device data - bridging to USB CDC");
+		
+		// Bridge NUS data directly to USB CDC for MouthPad devices
+		if (usb_cdc_send_callback) {
+			usb_cdc_send_callback(data, len);
+		}
+	}
+	
 	// Mark data activity for LED indication
 	data_activity = true;
 	last_data_time = k_uptime_get();
 	LOG_DBG("=== DATA ACTIVITY MARKED ===");
-	
-	// Bridge NUS data directly to USB CDC
-	if (usb_cdc_send_callback) {
-		usb_cdc_send_callback(data, len);
-	}
 }
 
 static void ble_nus_mtu_exchange_cb(uint16_t mtu)
 {
 	LOG_INF("MTU exchange completed: %d bytes", mtu);
 	mtu_exchange_complete = true;
+	
+	/* Notify Even G1 module of MTU exchange if it's an Even G1 device */
+	struct bt_conn *conn = ble_central_get_default_conn();
+	
+	LOG_INF("*** DEBUG: MTU exchange - conn=%p ***", conn);
+	
+	if (!conn) {
+		LOG_WRN("No default connection for MTU exchange callback");
+		return;
+	}
+	
+	ble_device_connection_t *device = ble_multi_conn_get(conn);
+	LOG_INF("*** DEBUG: MTU exchange - device=%p, type=%d ***", 
+	        device, device ? device->type : -1);
+	
+	if (device && (device->type == DEVICE_TYPE_EVEN_G1_LEFT || device->type == DEVICE_TYPE_EVEN_G1_RIGHT)) {
+		LOG_INF("Notifying Even G1 module of MTU exchange for %s arm",
+		        device->type == DEVICE_TYPE_EVEN_G1_LEFT ? "LEFT" : "RIGHT");
+		even_g1_mtu_exchanged(conn, mtu);
+	} else {
+		LOG_WRN("MTU exchange callback - device not found or not Even G1");
+		
+		/* Fallback: Check all connections to find Even G1 devices */
+		int conn_count = ble_multi_conn_count();
+		LOG_INF("Checking %d connections for Even G1 devices", conn_count);
+		
+		for (int i = 0; i < conn_count; i++) {
+			ble_device_connection_t *check_device = ble_multi_conn_get_by_index(i);
+			if (check_device && 
+			    (check_device->type == DEVICE_TYPE_EVEN_G1_LEFT || check_device->type == DEVICE_TYPE_EVEN_G1_RIGHT)) {
+				LOG_INF("Found Even G1 device at index %d, notifying MTU exchange", i);
+				even_g1_mtu_exchanged(check_device->conn, mtu);
+				break;
+			}
+		}
+	}
 }
 
 static void ble_nus_discovery_complete_cb(void)
@@ -292,8 +385,37 @@ static void ble_nus_discovery_complete_cb(void)
 	nus_client_ready = true;
 	LOG_INF("NUS client ready - bridge operational");
 	
+	/* Notify Even G1 module of NUS discovery if it's an Even G1 device */
+	struct bt_conn *conn = ble_central_get_default_conn();
+	ble_device_connection_t *device = ble_multi_conn_get(conn);
+	
+	if (device && (device->type == DEVICE_TYPE_EVEN_G1_LEFT || device->type == DEVICE_TYPE_EVEN_G1_RIGHT)) {
+		LOG_INF("Notifying Even G1 module of NUS discovery");
+		even_g1_nus_discovered(conn);
+	}
+	
 	/* Trigger HID discovery after NUS discovery completes */
 	nus_discovery_completed_cb();
+}
+
+static void ble_nus_multi_discovery_complete_cb(struct bt_conn *conn)
+{
+	LOG_INF("Multi-Connection NUS discovery complete for connection %p", conn);
+	
+	/* Add connection to multi-connection NUS client for Even G1 support */
+	ble_device_connection_t *device = ble_multi_conn_get(conn);
+	LOG_INF("Even G1 NUS discovered for %s arm", 
+	device->type == DEVICE_TYPE_EVEN_G1_LEFT ? "LEFT" : "RIGHT");
+	
+	/* Mark connection as NUS ready in multi-conn system */
+	ble_multi_conn_set_nus_ready(conn, true);
+	
+	/* Notify Even G1 module */
+	even_g1_nus_discovered(conn);
+	
+	/* Notify central state machine */
+	extern void ble_central_even_g1_discovery_complete(struct bt_conn *conn);
+	ble_central_even_g1_discovery_complete(conn);
 }
 
 static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len)
@@ -367,14 +489,31 @@ static void ble_hid_discovery_complete_cb(void)
 
 static void gatt_discover(struct bt_conn *conn)
 {
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
+	LOG_INF("Starting GATT discovery for connection: %s", addr_str);
+	
+	/* Check if this is an Even G1 device */
+	ble_device_connection_t *device = ble_multi_conn_get(conn);
+	if (device && (device->type == DEVICE_TYPE_EVEN_G1_LEFT || device->type == DEVICE_TYPE_EVEN_G1_RIGHT)) {
+		LOG_INF("Starting Even G1 NUS discovery via multi-connection client");
+		ble_nus_multi_client_discover(conn);
+		
+		/* Also exchange MTU for Even G1 devices */
+		int mtu_err = ble_nus_multi_client_exchange_mtu(conn);
+		if (mtu_err) {
+			LOG_ERR("Failed to start MTU exchange for Even G1: %d", mtu_err);
+		}
+		return;
+	}
+	
+	/* For non-Even G1 devices, use traditional discovery */
 	if (conn != ble_central_get_default_conn()) {
+		LOG_WRN("GATT discovery skipped for non-default non-Even G1 connection");
 		return;
 	}
 
-	LOG_INF("Starting GATT discovery for both NUS and HID services");
-	char addr_str[BT_ADDR_LE_STR_LEN];
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
-	LOG_INF("Connected device address: %s", addr_str);
+	LOG_INF("Starting traditional GATT discovery for both NUS and HID services");
 
 	/* Reset discovery state */
 	nus_discovery_complete = false;
@@ -389,8 +528,47 @@ static void gatt_discover(struct bt_conn *conn)
 static void ble_central_connected_cb(struct bt_conn *conn)
 {
 	int err;
+	char addr[BT_ADDR_LE_STR_LEN];
 
-	LOG_INF("BLE Central connected - starting setup");
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	LOG_INF("BLE Central connected: %s - starting setup", addr);
+
+	/* Use the device type and name that were detected during scanning */
+	ble_device_type_t device_type = ble_transport_get_device_type();
+	const char *device_name = ble_transport_get_device_name();
+	
+	int slot = ble_multi_conn_add(conn, device_type, device_name);
+	if (slot < 0) {
+		LOG_ERR("Failed to add connection to multi-conn manager: %d", slot);
+		/* Continue anyway for backward compatibility */
+	} else {
+		LOG_INF("Added connection to multi-conn slot %d", slot);
+		
+		/* Register connection with Even G1 module if it's an Even G1 device */
+		if (device_type == DEVICE_TYPE_EVEN_G1_LEFT) {
+			LOG_INF("Registering Even G1 Left Arm connection");
+			even_g1_connect_left(conn);
+			
+			/* Add to multi-connection NUS client for Even G1 support */
+			int multi_err = ble_nus_multi_client_add_connection(conn);
+			if (multi_err) {
+				LOG_ERR("Failed to add Even G1 Left Arm to multi-NUS client: %d", multi_err);
+			} else {
+				LOG_INF("Even G1 Left Arm added to multi-NUS client");
+			}
+		} else if (device_type == DEVICE_TYPE_EVEN_G1_RIGHT) {
+			LOG_INF("Registering Even G1 Right Arm connection");
+			even_g1_connect_right(conn);
+			
+			/* Add to multi-connection NUS client for Even G1 support */
+			int multi_err = ble_nus_multi_client_add_connection(conn);
+			if (multi_err) {
+				LOG_ERR("Failed to add Even G1 Right Arm to multi-NUS client: %d", multi_err);
+			} else {
+				LOG_INF("Even G1 Right Arm added to multi-NUS client");
+			}
+		}
+	}
 
 	/* Update display to show pairing status */
 	extern int oled_display_pairing(void);
@@ -427,20 +605,45 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 	}
 #endif
 
-	// Perform MTU exchange using the NUS client module
-	err = ble_nus_client_exchange_mtu(conn);
-	if (err) {
-		LOG_WRN("MTU exchange failed (err %d)", err);
+	/* Get device info to determine security requirements and MTU exchange */
+	ble_device_connection_t *device = ble_multi_conn_get(conn);
+	
+	bt_security_t security_level = BT_SECURITY_L2;  /* Default for MouthPad */
+	
+	if (device) {
+		switch (device->type) {
+		case DEVICE_TYPE_EVEN_G1_LEFT:
+		case DEVICE_TYPE_EVEN_G1_RIGHT:
+			security_level = BT_SECURITY_L1;  /* Lower security for Even G1 */
+			LOG_INF("Using L1 security for Even G1 device - skipping transport MTU exchange");
+			break;
+		case DEVICE_TYPE_MOUTHPAD:
+			security_level = BT_SECURITY_L2;  /* Higher security for MouthPad */
+			LOG_INF("Using L2 security for MouthPad device - performing transport MTU exchange");
+			
+			// Perform MTU exchange using the NUS client module - only for MouthPad devices
+			err = ble_nus_client_exchange_mtu(conn);
+			if (err) {
+				LOG_WRN("MTU exchange failed (err %d)", err);
+			} else {
+				LOG_INF("MTU exchange initiated successfully");
+			}
+			break;
+		default:
+			security_level = BT_SECURITY_L1;  /* Default to L1 for unknown devices */
+			LOG_INF("Using L1 security for unknown device type - skipping transport MTU exchange");
+			break;
+		}
 	} else {
-		LOG_INF("MTU exchange initiated successfully");
+		LOG_WRN("No device info found - skipping transport MTU exchange");
 	}
-
-	err = bt_conn_set_security(conn, BT_SECURITY_L2);
+	
+	err = bt_conn_set_security(conn, security_level);
 	if (err) {
-		LOG_WRN("Failed to set security: %d", err);
+		LOG_WRN("Failed to set security level %d: %d", security_level, err);
 		gatt_discover(conn);
 	} else {
-		LOG_INF("Security setup successful");
+		LOG_INF("Security setup successful (level %d)", security_level);
 		gatt_discover(conn);
 	}
 
@@ -452,9 +655,39 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 {
-	ARG_UNUSED(conn);
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 	
-	LOG_INF("BLE Central disconnected (reason: 0x%02x) - cleaning up and resetting states", reason);
+	LOG_INF("BLE Central disconnected: %s (reason: 0x%02x) - cleaning up", addr, reason);
+	
+	/* Get device info before removing from multi-conn manager */
+	ble_device_connection_t *device = ble_multi_conn_get(conn);
+	if (device) {
+		LOG_INF("Disconnected device type: %d, name: %s", device->type, device->name);
+		
+		/* Handle Even G1 disconnection */
+		if (device->type == DEVICE_TYPE_EVEN_G1_LEFT) {
+			even_g1_disconnect_left();
+			/* Remove from multi-connection NUS client */
+			int multi_err = ble_nus_multi_client_remove_connection(conn);
+			if (multi_err) {
+				LOG_ERR("Failed to remove Even G1 Left from multi-NUS client: %d", multi_err);
+			}
+		} else if (device->type == DEVICE_TYPE_EVEN_G1_RIGHT) {
+			even_g1_disconnect_right();
+			/* Remove from multi-connection NUS client */
+			int multi_err = ble_nus_multi_client_remove_connection(conn);
+			if (multi_err) {
+				LOG_ERR("Failed to remove Even G1 Right from multi-NUS client: %d", multi_err);
+			}
+		}
+	}
+	
+	/* Remove from multi-connection manager */
+	int err = ble_multi_conn_remove(conn);
+	if (err) {
+		LOG_WRN("Failed to remove connection from multi-conn manager: %d", err);
+	}
 	
 	/* Only play disconnection sound if we were fully connected (not during connection failures) */
 	if (fully_connected) {
@@ -485,9 +718,10 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	nus_discovery_complete = false;
 	fully_connected = false;
 	
-	/* Reset device name to default */
+	/* Reset device name and type to default */
 	strncpy(connected_device_name, "MouthPad USB", sizeof(connected_device_name) - 1);
 	connected_device_name[sizeof(connected_device_name) - 1] = '\0';
+	pending_device_type = DEVICE_TYPE_UNKNOWN;
 	
 	// Reset battery service state
 	ble_bas_reset();
@@ -687,6 +921,17 @@ void ble_transport_set_device_name(const char *name)
 const char *ble_transport_get_device_name(void)
 {
 	return connected_device_name;
+}
+
+void ble_transport_set_device_type(ble_device_type_t type)
+{
+	pending_device_type = type;
+	LOG_INF("Pending device type set to: %d", type);
+}
+
+ble_device_type_t ble_transport_get_device_type(void)
+{
+	return pending_device_type;
 }
 
 void ble_transport_disconnect(void)

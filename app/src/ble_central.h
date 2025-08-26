@@ -16,6 +16,7 @@
 /* BLE Central initialization and control functions */
 int ble_central_init(void);
 int ble_central_start_scan(void);
+int ble_central_start_scan_for_missing_devices(void);
 int ble_central_stop_scan(void);
 
 /* Connection management */
@@ -39,5 +40,9 @@ const char *ble_central_get_device_type_string(const struct bt_scan_device_info 
 
 /* Background scanning for RSSI updates during connections */
 int ble_central_start_background_scan_for_rssi(void);
+
+/* Even G1 state machine callbacks - called by transport layer */
+void ble_central_even_g1_discovery_complete(struct bt_conn *conn);
+void ble_central_even_g1_mtu_exchange_complete(struct bt_conn *conn);
 
 #endif /* BLE_CENTRAL_H */

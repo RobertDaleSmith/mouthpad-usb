@@ -10,6 +10,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/bluetooth/conn.h>
+#include "ble_multi_conn.h"
 
 /* Callback function types */
 typedef void (*ble_data_callback_t)(const uint8_t *data, uint16_t len);
@@ -49,6 +50,10 @@ int ble_transport_register_hid_data_callback(ble_data_callback_t cb);
 int ble_transport_register_hid_ready_callback(ble_ready_callback_t cb);
 int ble_transport_send_hid_data(const uint8_t *data, uint16_t len);
 bool ble_transport_is_hid_ready(void);
+
+/* Device information management */
+void ble_transport_set_device_type(ble_device_type_t type);
+ble_device_type_t ble_transport_get_device_type(void);
 
 /* Internal transport state management */
 void ble_transport_handle_connection(struct bt_conn *conn);

@@ -6,6 +6,8 @@
  */
 
 #include "ble_central.h"
+#include "ble_multi_conn.h"
+#include "even_g1.h"
 #include <zephyr/kernel.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -25,13 +27,61 @@
 LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_INF);
 
 /* BLE Central state */
-static struct bt_conn *default_conn;
+static struct bt_conn *default_conn;  /* Keep for backward compatibility */
 static struct k_work scan_work;
+static bool even_g1_pairing_mode = false;  /* True when looking for second Even G1 arm */
+static bool connection_in_progress = false;  /* Prevent multiple simultaneous connections */
+static struct k_work_delayable connection_retry_work;
+static int64_t last_connection_attempt_time = 0;  /* Track last attempt to prevent spam */
+#define CONNECTION_ATTEMPT_DELAY_MS 2000  /* Wait 2 seconds between attempts */
+
+/* Even G1 Dual-Arm Connection State Machine */
+typedef enum {
+    EVEN_G1_STATE_IDLE,
+    EVEN_G1_STATE_CONNECTING_LEFT,
+    EVEN_G1_STATE_LEFT_CONNECTED,
+    EVEN_G1_STATE_LEFT_DISCOVERING,
+    EVEN_G1_STATE_LEFT_MTU_EXCHANGING,
+    EVEN_G1_STATE_LEFT_READY,
+    EVEN_G1_STATE_CONNECTING_RIGHT,
+    EVEN_G1_STATE_RIGHT_CONNECTED,
+    EVEN_G1_STATE_RIGHT_DISCOVERING,
+    EVEN_G1_STATE_RIGHT_MTU_EXCHANGING,
+    EVEN_G1_STATE_BOTH_READY
+} even_g1_connection_state_t;
+
+static even_g1_connection_state_t even_g1_state = EVEN_G1_STATE_IDLE;
+static struct bt_conn *even_g1_left_pending_conn = NULL;
+static struct bt_conn *even_g1_right_pending_conn = NULL;
+
+/* Even G1 discovery cache */
+struct even_g1_discovered_device {
+	bt_addr_le_t addr;
+	ble_device_type_t device_type;
+	char name[32];
+	int8_t rssi;
+	bool valid;
+};
+
+static struct even_g1_discovered_device even_g1_left_cache;
+static struct even_g1_discovered_device even_g1_right_cache;
 
 /* Device type detection */
 static bool is_nus_device(const struct bt_scan_device_info *device_info);
 static bool is_hid_device(const struct bt_scan_device_info *device_info);
 static void log_device_type(const struct bt_scan_device_info *device_info, const char *addr);
+
+/* Even G1 dual connection helper */
+static void connect_to_both_even_g1_arms(void);
+
+/* Even G1 state machine functions */
+static void even_g1_advance_state_machine(void);
+static void even_g1_handle_connection_complete(struct bt_conn *conn);
+static void even_g1_handle_discovery_complete(struct bt_conn *conn);
+static void even_g1_handle_mtu_exchange_complete(struct bt_conn *conn);
+static void even_g1_reset_state_machine(void);
+static void even_g1_start_left_connection(void);
+static void even_g1_start_right_connection(void);
 
 /* Callback functions for external modules */
 static ble_central_connected_cb_t connected_cb;
@@ -59,6 +109,9 @@ static const char *get_stored_device_name_for_addr(const bt_addr_le_t *addr);
 
 /* Background scan state */
 static bool background_scan_active = false;
+
+/* Smart scanning state for button-triggered scans */
+static bool smart_scan_active = false;
 
 /* Authentication callbacks */
 static void auth_cancel(struct bt_conn *conn);
@@ -111,6 +164,9 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		printk("*** CONNECTION FAILED: %s, error: 0x%02x ***\n", addr, conn_err);
 		LOG_INF("Failed to connect to %s, 0x%02x %s", addr, conn_err,
 			bt_hci_err_to_str(conn_err));
+		
+		/* Reset connection in progress flag */
+		connection_in_progress = false;
 
 		if (default_conn == conn) {
 			bt_conn_unref(default_conn);
@@ -124,15 +180,29 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 
 	printk("*** CONNECTED TO DEVICE: %s ***\n", addr);
 	LOG_INF("Connected: %s", addr);
+	
+	/* Reset connection in progress flag */
+	connection_in_progress = false;
+
+	/* Handle Even G1 state machine updates */
+	even_g1_handle_connection_complete(conn);
 
 	/* Call external connected callback if registered */
 	if (connected_cb) {
 		connected_cb(conn);
 	}
 
-	err = bt_scan_stop();
-	if ((!err) && (err != -EALREADY)) {
-		LOG_ERR("Stop LE scan failed (err %d)", err);
+	/* Stop scanning once all desired connections are established */
+	if (!ble_multi_conn_need_even_g1_pair() && !even_g1_pairing_mode) {
+		err = bt_scan_stop();
+		if ((!err) && (err != -EALREADY)) {
+			LOG_ERR("Stop LE scan failed (err %d)", err);
+		}
+		LOG_INF("All desired devices connected, scan stopped");
+		even_g1_pairing_mode = false;
+	} else {
+		LOG_INF("Continuing scan for remaining devices (Even G1 pair needed: %s)", 
+		        ble_multi_conn_need_even_g1_pair() ? "yes" : "no");
 	}
 }
 
@@ -145,23 +215,44 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	printk("*** DISCONNECTED FROM DEVICE: %s, reason: 0x%02x ***\n", addr, reason);
 	LOG_INF("Disconnected: %s, reason 0x%02x %s", addr, reason, bt_hci_err_to_str(reason));
 
-	if (default_conn != conn) {
-		return;
+	/* Check if this was an Even G1 device and reset state machine if needed */
+	if (conn == even_g1_left_pending_conn || conn == even_g1_right_pending_conn) {
+		LOG_WRN("Even G1 device disconnected - resetting state machine");
+		even_g1_reset_state_machine();
 	}
 
-	bt_conn_unref(default_conn);
-	default_conn = NULL;
-
-	/* Stop any background scanning */
-	stop_background_scan();
-
-	/* Call external disconnected callback if registered */
+	/* Always call external disconnected callback first for any connection */
 	if (disconnected_cb) {
 		disconnected_cb(conn, reason);
 	}
 
-	printk("*** RESTARTING SCAN AFTER DISCONNECTION ***\n");
-	(void)k_work_submit(&scan_work);
+	/* Handle cleanup for default connection */
+	if (default_conn == conn) {
+		bt_conn_unref(default_conn);
+		default_conn = NULL;
+
+		/* Stop any background scanning */
+		stop_background_scan();
+
+		printk("*** RESTARTING SCAN AFTER DISCONNECTION ***\n");
+		(void)k_work_submit(&scan_work);
+	} else {
+		/* For non-default connections, still restart scan to look for replacements */
+		LOG_INF("Non-default connection disconnected, checking if scan restart needed");
+		
+		/* Check if we need to restart scanning (e.g., for Even G1 pairing) */
+		int active_connections = ble_multi_conn_count();
+		LOG_INF("Active connections remaining: %d", active_connections);
+		
+		/* If this was an Even G1 device, check if we need to keep looking for its pair */
+		if (ble_multi_conn_need_even_g1_pair()) {
+			LOG_INF("Even G1 pair still needed, ensuring scan is active");
+			k_work_submit(&scan_work);
+		}
+	}
+	
+	/* Reset connection progress flag in case it was stuck */
+	connection_in_progress = false;
 }
 
 static void security_changed(struct bt_conn *conn, bt_security_t level,
@@ -173,6 +264,13 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 
 	if (!err) {
 		LOG_INF("Security changed: %s level %u", addr, level);
+		
+		/* Notify Even G1 module if this is an Even G1 connection */
+		ble_device_connection_t *dev = ble_multi_conn_get(conn);
+		if (dev && (dev->type == DEVICE_TYPE_EVEN_G1_LEFT || 
+		           dev->type == DEVICE_TYPE_EVEN_G1_RIGHT)) {
+			even_g1_security_changed(conn, level);
+		}
 	} else {
 		LOG_WRN("Security failed: %s level %u err %d %s", addr, level, err,
 			bt_security_err_to_str(err));
@@ -185,58 +283,146 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 			      bool connectable)
 {
 	char addr[BT_ADDR_LE_STR_LEN];
+	char device_name[32] = {0};
 
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
 
-	/* Log device type and connection status */
-	log_device_type(device_info, addr);
 	/* Log RSSI information */
 	int8_t rssi = device_info->recv_info->rssi;
-	printk("*** DEVICE FOUND: %s connectable: %d RSSI: %d dBm ***\n", 
-	       addr, connectable, rssi);
-	LOG_INF("Filters matched. Address: %s connectable: %d RSSI: %d dBm",
-		addr, connectable, rssi);
 	
-	/* Only connect to devices that have both NUS and HID services */
-	bool has_nus = is_nus_device(device_info);
-	bool has_hid = is_hid_device(device_info);
+	/* Extract device name first */
+	if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) != 0) {
+		/* Fallback to stored name or address */
+		const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
+		if (stored_name) {
+			strncpy(device_name, stored_name, sizeof(device_name) - 1);
+		} else {
+			strncpy(device_name, "Unknown", sizeof(device_name) - 1);
+		}
+	}
 	
-	if (has_nus && has_hid) {
-		printk("*** CONNECTING TO MOUTHPAD DEVICE: %s (RSSI: %d dBm) ***\n", addr, rssi);
-		LOG_INF("Connecting to MouthPad device: %s (RSSI: %d dBm)", addr, rssi);
+	/* Detect device type using multi-connection manager first */
+	ble_device_type_t device_type = ble_multi_conn_detect_device_type(device_info, device_name);
+	
+	/* Only log devices we're interested in to reduce spam */
+	if (device_type == DEVICE_TYPE_MOUTHPAD || 
+	    device_type == DEVICE_TYPE_EVEN_G1_LEFT || 
+	    device_type == DEVICE_TYPE_EVEN_G1_RIGHT) {
+		printk("*** DEVICE FOUND: %s (%s) connectable: %d RSSI: %d dBm ***\n", 
+		       addr, device_name, connectable, rssi);
+		LOG_INF("Device found: %s (%s) RSSI: %d dBm", addr, device_name, rssi);
+	}
+	
+	/* Check if we should connect to this device */
+	bool should_connect = false;
+	const char *connect_reason = NULL;
+	
+	/* Smart scan filtering: if button-triggered, only look for missing device types */
+	if (smart_scan_active) {
+		bool has_mouthpad = ble_multi_conn_has_type(DEVICE_TYPE_MOUTHPAD);
+		bool has_even_g1 = ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_LEFT) || 
+		                   ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_RIGHT);
+		
+		/* If we have Even G1 connected, only look for MouthPad */
+		if (has_even_g1 && device_type != DEVICE_TYPE_MOUTHPAD) {
+			LOG_DBG("Smart scan: Have Even G1, ignoring non-MouthPad device (%s)", device_name);
+			return;
+		}
+		
+		/* If we have MouthPad connected, only look for Even G1 */
+		if (has_mouthpad && device_type != DEVICE_TYPE_EVEN_G1_LEFT && device_type != DEVICE_TYPE_EVEN_G1_RIGHT) {
+			LOG_DBG("Smart scan: Have MouthPad, ignoring non-Even G1 device (%s)", device_name);
+			return;
+		}
+		
+		/* Check if this is the same device we're already connected to */
+		ble_device_connection_t *existing_conn;
+		if (device_type == DEVICE_TYPE_MOUTHPAD) {
+			existing_conn = ble_multi_conn_get_mouthpad();
+		} else if (device_type == DEVICE_TYPE_EVEN_G1_LEFT) {
+			existing_conn = ble_multi_conn_get_even_g1_left();
+		} else if (device_type == DEVICE_TYPE_EVEN_G1_RIGHT) {
+			existing_conn = ble_multi_conn_get_even_g1_right();
+		} else {
+			existing_conn = NULL;
+		}
+		
+		if (existing_conn && bt_addr_le_cmp(device_info->recv_info->addr, &existing_conn->addr) == 0) {
+			LOG_INF("Smart scan: Ignoring identical device already connected (%s)", device_name);
+			return;
+		}
+		
+		LOG_INF("Smart scan: Targeting %s device (%s)", 
+		        device_type == DEVICE_TYPE_MOUTHPAD ? "MouthPad" : "Even G1", device_name);
+	}
+	
+	switch (device_type) {
+	case DEVICE_TYPE_MOUTHPAD:
+		if (!ble_multi_conn_has_type(DEVICE_TYPE_MOUTHPAD)) {
+			should_connect = true;
+			connect_reason = "MouthPad device";
+		} else {
+			LOG_INF("Already have a MouthPad connected, skipping");
+		}
+		break;
+		
+	case DEVICE_TYPE_EVEN_G1_LEFT:
+		if (!ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_LEFT)) {
+			/* Cache this device instead of connecting immediately */
+			even_g1_left_cache.addr = *device_info->recv_info->addr;
+			even_g1_left_cache.device_type = device_type;
+			strncpy(even_g1_left_cache.name, device_name, sizeof(even_g1_left_cache.name) - 1);
+			even_g1_left_cache.rssi = rssi;
+			even_g1_left_cache.valid = true;
+			LOG_INF("Cached Even G1 Left Arm for dual connection");
+			even_g1_pairing_mode = true;
+		} else {
+			LOG_INF("Already have Even G1 left arm connected, skipping");
+		}
+		break;
+		
+	case DEVICE_TYPE_EVEN_G1_RIGHT:
+		if (!ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_RIGHT)) {
+			/* Cache this device instead of connecting immediately */
+			even_g1_right_cache.addr = *device_info->recv_info->addr;
+			even_g1_right_cache.device_type = device_type;
+			strncpy(even_g1_right_cache.name, device_name, sizeof(even_g1_right_cache.name) - 1);
+			even_g1_right_cache.rssi = rssi;
+			even_g1_right_cache.valid = true;
+			LOG_INF("Cached Even G1 Right Arm for dual connection");
+			even_g1_pairing_mode = true;
+		} else {
+			LOG_INF("Already have Even G1 right arm connected, skipping");
+		}
+		break;
+		
+	case DEVICE_TYPE_NUS_GENERIC:
+		/* For now, skip generic NUS devices unless in special mode */
+		LOG_DBG("Generic NUS device found, skipping for now");
+		break;
+		
+	default:
+		/* Don't log for unknown device types to reduce spam */
+		break;
+	}
+	
+	/* Check if we have both Even G1 arms cached and should connect to both */
+	if (even_g1_left_cache.valid && even_g1_right_cache.valid && 
+	    !ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_LEFT) && 
+	    !ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_RIGHT)) {
+		connect_to_both_even_g1_arms();
+		return;  /* Early return - dual connection handled */
+	}
+	
+	if (should_connect) {
+		printk("*** CONNECTING TO %s: %s (RSSI: %d dBm) ***\n", 
+		       connect_reason, addr, rssi);
+		LOG_INF("Connecting to %s: %s (RSSI: %d dBm)", 
+		        connect_reason, addr, rssi);
 		
 		/* Store RSSI for later use during connection */
 		extern void ble_transport_set_rssi(int8_t rssi);
 		ble_transport_set_rssi(rssi);
-		
-		/* Extract device name directly from advertising data */
-		char device_name[32];
-		if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) == 0) {
-			/* Successfully extracted name - truncate to 12 characters */
-			LOG_INF("Extracted device name from advertising: '%s'", device_name);
-			device_name[12] = '\0';  /* Truncate to 12 chars for display */
-		} else {
-			/* Fallback to checking stored names */
-			const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
-			if (stored_name) {
-				strncpy(device_name, stored_name, 12);
-				device_name[12] = '\0';
-				LOG_INF("Using stored device name: '%s'", device_name);
-			} else {
-				/* Final fallback - use shortened address */
-				char addr_str[BT_ADDR_LE_STR_LEN];
-				bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
-				/* Use last 12 chars of address */
-				int addr_len = strlen(addr_str);
-				if (addr_len > 12) {
-					strncpy(device_name, addr_str + addr_len - 12, 12);
-				} else {
-					strncpy(device_name, addr_str, 12);
-				}
-				device_name[12] = '\0';
-				LOG_INF("No device name found, using address: '%s'", device_name);
-			}
-		}
 		
 		/* Store device name in transport layer */
 		extern void ble_transport_set_device_name(const char *name);
@@ -246,9 +432,12 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		extern int oled_display_device_found(const char *device_name);
 		oled_display_device_found(device_name);
 		
+		/* For MouthPad devices, let the scan module handle connection automatically */
+		if (device_type == DEVICE_TYPE_MOUTHPAD) {
+			LOG_INF("MouthPad connection will be handled by scan module");
+		}
+		/* Note: Even G1 devices are handled by dual connection logic above */
 	} else {
-		printk("*** REJECTING DEVICE (missing required services): %s ***\n", addr);
-		LOG_INF("Rejecting device - missing required services: %s", addr);
 		/* Don't connect to this device */
 		return;
 	}
@@ -266,8 +455,35 @@ static void scan_connecting(struct bt_scan_device_info *device_info,
 			    struct bt_conn *conn)
 {
 	char addr[BT_ADDR_LE_STR_LEN];
+	char device_name[32] = {0};
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
 	printk("*** SCAN CONNECTING: %s ***\n", addr);
+	
+	/* Try to get device name from stored names or scan data */
+	const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
+	if (stored_name) {
+		strncpy(device_name, stored_name, sizeof(device_name) - 1);
+	} else if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) != 0) {
+		strncpy(device_name, "Unknown", sizeof(device_name) - 1);
+	}
+	
+	/* Detect device type and set it in transport layer */
+	ble_device_type_t device_type = ble_multi_conn_detect_device_type(device_info, device_name);
+	
+	/* Store device type and name in transport layer for connection callback */
+	extern void ble_transport_set_device_type(ble_device_type_t type);
+	extern void ble_transport_set_device_name(const char *name);
+	ble_transport_set_device_type(device_type);
+	ble_transport_set_device_name(device_name);
+	
+	LOG_INF("Device connecting via filter: %s (%s) type=%d", addr, device_name, device_type);
+	
+	/* Reset smart scan mode when connection succeeds */
+	if (smart_scan_active) {
+		LOG_INF("Smart scan: Connection successful, disabling smart scan mode");
+		smart_scan_active = false;
+	}
+	
 	default_conn = bt_conn_ref(conn);
 }
 
@@ -313,6 +529,12 @@ static void try_add_address_filter(const struct bt_bond_info *info, void *user_d
 
 	if (conn) {
 		bt_conn_unref(conn);
+		return;
+	}
+
+	/* Skip address filters for Even G1 devices - force them through device detection */
+	if (strstr(addr, "F8:21:E9:32:7B:9B") != NULL || strstr(addr, "F4:7B:D2:69:81:C6") != NULL) {
+		LOG_INF("Skipping address filter for Even G1 device: %s (forcing through device detection)", addr);
 		return;
 	}
 
@@ -421,28 +643,36 @@ int ble_central_start_scan(void)
 
 	bt_scan_filter_remove_all();
 
-	/* Add UUID filter for HID service (like working sample) */
+	/* Add HID filter for MouthPad devices, Even G1 will be caught in scan_no_match */
 	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_HIDS);
 	if (err) {
-		LOG_ERR("Cannot add HID UUID scan filter (err %d)", err);
-		return err;
+		LOG_WRN("Cannot add HID UUID scan filter (err %d), scanning all devices", err);
+	} else {
+		LOG_INF("Added HID UUID filter for MouthPad devices");
 	}
 
 	bt_foreach_bond(BT_ID_DEFAULT, try_add_address_filter, &filter_mode);
 
-	/* Always enable UUID filter, optionally add address filters */
-	uint8_t enable_filters = BT_SCAN_UUID_FILTER;
+	/* Enable UUID and address filters */
+	uint8_t enable_filters = 0;
+	if (err == 0) {  /* HID filter was added successfully */
+		enable_filters |= BT_SCAN_UUID_FILTER;
+	}
 	if (filter_mode != 0) {
 		enable_filters |= filter_mode;
-		LOG_INF("Enabling HID UUID filter + address filters for bonded devices");
-	} else {
-		LOG_INF("Enabling HID UUID filter (no bonded devices)");
 	}
-
-	err = bt_scan_filter_enable(enable_filters, false);
-	if (err) {
-		LOG_ERR("Filters cannot be turned on (err %d)", err);
-		return err;
+	
+	if (enable_filters != 0) {
+		err = bt_scan_filter_enable(enable_filters, false);
+		if (err) {
+			LOG_ERR("Filters cannot be turned on (err %d)", err);
+			return err;
+		}
+		LOG_INF("Enabled filters: HID=%d, Address=%d", 
+		        (enable_filters & BT_SCAN_UUID_FILTER) ? 1 : 0,
+		        (filter_mode != 0) ? 1 : 0);
+	} else {
+		LOG_INF("No filters enabled - scanning all devices");
 	}
 
 	err = bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE);
@@ -451,7 +681,7 @@ int ble_central_start_scan(void)
 		return err;
 	}
 
-	LOG_INF("Scan started (checking for devices with both NUS and HID services)");
+	LOG_INF("Scan started (checking for MouthPad and Even G1 devices)");
 	
 	/* Update display to show scanning status */
 	extern int oled_display_scanning(void);
@@ -460,8 +690,40 @@ int ble_central_start_scan(void)
 	return 0;
 }
 
+int ble_central_start_scan_for_missing_devices(void)
+{
+	/* Check what devices we already have */
+	bool has_mouthpad = ble_multi_conn_has_type(DEVICE_TYPE_MOUTHPAD);
+	bool has_even_g1 = ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_LEFT) || 
+	                   ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_RIGHT);
+	
+	if (has_mouthpad && has_even_g1) {
+		LOG_INF("Smart scan: Already have both MouthPad and Even G1 connected - nothing to scan for");
+		return 0;
+	}
+	
+	if (has_mouthpad) {
+		LOG_INF("Smart scan: Have MouthPad, scanning for Even G1 devices only");
+	} else if (has_even_g1) {
+		LOG_INF("Smart scan: Have Even G1, scanning for MouthPad devices only");
+	} else {
+		LOG_INF("Smart scan: No devices connected, scanning for any compatible device");
+	}
+	
+	/* Enable smart scan mode and start regular scan */
+	smart_scan_active = true;
+	int err = ble_central_start_scan();
+	if (err) {
+		smart_scan_active = false;
+		return err;
+	}
+	
+	return 0;
+}
+
 int ble_central_stop_scan(void)
 {
+	smart_scan_active = false;
 	return bt_scan_stop();
 }
 
@@ -685,14 +947,302 @@ static const char *get_stored_device_name_for_addr(const bt_addr_le_t *addr)
 /* Scan no_match callback to capture device names from all advertising packets */
 static void scan_no_match(struct bt_scan_device_info *device_info, bool connectable)
 {
-	/* Extract and store device name for potential future connection */
-	char device_name[32];
-	if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) == 0) {
-		/* Successfully extracted name, store it */
-		store_device_name_for_addr(device_info->recv_info->addr, device_name);
-		
-		char addr_str[BT_ADDR_LE_STR_LEN];
-		bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
-		LOG_INF("*** FOUND DEVICE NAME '%s' from %s ***", device_name, addr_str);
+	char addr[BT_ADDR_LE_STR_LEN];
+	char device_name[32] = {0};
+
+	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
+	
+	/* Extract device name */
+	if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) != 0) {
+		const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
+		if (stored_name) {
+			strncpy(device_name, stored_name, sizeof(device_name) - 1);
+		} else {
+			strncpy(device_name, "Unknown", sizeof(device_name) - 1);
+		}
 	}
+	
+	/* Store device name for future reference */
+	store_device_name_for_addr(device_info->recv_info->addr, device_name);
+	
+	/* Check if this could be an Even G1 device (NUS service but no HID) */
+	ble_device_type_t device_type = ble_multi_conn_detect_device_type(device_info, device_name);
+	
+	/* Only log devices we're interested in */
+	if (device_type == DEVICE_TYPE_MOUTHPAD || 
+	    device_type == DEVICE_TYPE_EVEN_G1_LEFT || 
+	    device_type == DEVICE_TYPE_EVEN_G1_RIGHT) {
+		LOG_INF("No filter match: %s (%s) - type %d", addr, device_name, device_type);
+	}
+	
+	if (device_type == DEVICE_TYPE_EVEN_G1_LEFT || device_type == DEVICE_TYPE_EVEN_G1_RIGHT) {
+		int8_t rssi = device_info->recv_info->rssi;
+		
+		/* Cache Even G1 devices instead of connecting immediately */
+		if (device_type == DEVICE_TYPE_EVEN_G1_LEFT && !ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_LEFT)) {
+			/* Cache left arm */
+			even_g1_left_cache.addr = *device_info->recv_info->addr;
+			even_g1_left_cache.device_type = device_type;
+			strncpy(even_g1_left_cache.name, device_name, sizeof(even_g1_left_cache.name) - 1);
+			even_g1_left_cache.rssi = rssi;
+			even_g1_left_cache.valid = true;
+			LOG_INF("Cached Even G1 Left Arm for dual connection");
+			even_g1_pairing_mode = true;
+		} else if (device_type == DEVICE_TYPE_EVEN_G1_RIGHT && !ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_RIGHT)) {
+			/* Cache right arm */
+			even_g1_right_cache.addr = *device_info->recv_info->addr;
+			even_g1_right_cache.device_type = device_type;
+			strncpy(even_g1_right_cache.name, device_name, sizeof(even_g1_right_cache.name) - 1);
+			even_g1_right_cache.rssi = rssi;
+			even_g1_right_cache.valid = true;
+			LOG_INF("Cached Even G1 Right Arm for dual connection");
+			even_g1_pairing_mode = true;
+		}
+		
+		/* Check if we have both arms cached and should connect to both */
+		if (even_g1_left_cache.valid && even_g1_right_cache.valid && 
+		    !ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_LEFT) && 
+		    !ble_multi_conn_has_type(DEVICE_TYPE_EVEN_G1_RIGHT)) {
+			connect_to_both_even_g1_arms();
+			return;  /* Early return - dual connection handled */
+		}
+		/* All Even G1 connection logic is now handled by the dual-arm caching above */
+	}
+}
+
+/* Even G1 State Machine Implementation */
+
+static void even_g1_reset_state_machine(void)
+{
+	LOG_INF("Resetting Even G1 state machine");
+	even_g1_state = EVEN_G1_STATE_IDLE;
+	
+	if (even_g1_left_pending_conn) {
+		bt_conn_unref(even_g1_left_pending_conn);
+		even_g1_left_pending_conn = NULL;
+	}
+	
+	if (even_g1_right_pending_conn) {
+		bt_conn_unref(even_g1_right_pending_conn);
+		even_g1_right_pending_conn = NULL;
+	}
+	
+	/* Clear cache */
+	even_g1_left_cache.valid = false;
+	even_g1_right_cache.valid = false;
+	even_g1_pairing_mode = false;
+}
+
+static void even_g1_start_left_connection(void)
+{
+	if (!even_g1_left_cache.valid) {
+		LOG_ERR("Cannot start left connection - no cached left arm");
+		even_g1_reset_state_machine();
+		return;
+	}
+	
+	LOG_INF("Starting Even G1 left arm connection");
+	
+	extern void ble_transport_set_rssi(int8_t rssi);
+	extern void ble_transport_set_device_name(const char *name);
+	extern void ble_transport_set_device_type(ble_device_type_t type);
+	extern int oled_display_device_found(const char *device_name);
+	
+	/* Set transport layer for left arm */
+	ble_transport_set_device_type(even_g1_left_cache.device_type);
+	ble_transport_set_rssi(even_g1_left_cache.rssi);
+	ble_transport_set_device_name(even_g1_left_cache.name);
+	oled_display_device_found(even_g1_left_cache.name);
+	
+	even_g1_state = EVEN_G1_STATE_CONNECTING_LEFT;
+	
+	int err = bt_conn_le_create(&even_g1_left_cache.addr, 
+	                            BT_CONN_LE_CREATE_CONN,
+	                            BT_LE_CONN_PARAM_DEFAULT, 
+	                            &even_g1_left_pending_conn);
+	if (err) {
+		LOG_ERR("Failed to create connection to left arm: %d", err);
+		even_g1_reset_state_machine();
+	} else {
+		LOG_INF("Connection initiated to Even G1 left arm");
+		/* Set as default connection for MTU exchange callbacks */
+		default_conn = bt_conn_ref(even_g1_left_pending_conn);
+	}
+}
+
+static void even_g1_start_right_connection(void)
+{
+	if (!even_g1_right_cache.valid) {
+		LOG_ERR("Cannot start right connection - no cached right arm");
+		even_g1_reset_state_machine();
+		return;
+	}
+	
+	LOG_INF("Starting Even G1 right arm connection");
+	
+	extern void ble_transport_set_rssi(int8_t rssi);
+	extern void ble_transport_set_device_name(const char *name);
+	extern void ble_transport_set_device_type(ble_device_type_t type);
+	extern int oled_display_device_found(const char *device_name);
+	
+	/* Set transport layer for right arm */
+	ble_transport_set_device_type(even_g1_right_cache.device_type);
+	ble_transport_set_rssi(even_g1_right_cache.rssi);
+	ble_transport_set_device_name(even_g1_right_cache.name);
+	oled_display_device_found(even_g1_right_cache.name);
+	
+	even_g1_state = EVEN_G1_STATE_CONNECTING_RIGHT;
+	
+	int err = bt_conn_le_create(&even_g1_right_cache.addr, 
+	                            BT_CONN_LE_CREATE_CONN,
+	                            BT_LE_CONN_PARAM_DEFAULT, 
+	                            &even_g1_right_pending_conn);
+	if (err) {
+		LOG_ERR("Failed to create connection to right arm: %d", err);
+		even_g1_reset_state_machine();
+	} else {
+		LOG_INF("Connection initiated to Even G1 right arm");
+		/* Update default connection for right arm */
+		if (default_conn) {
+			bt_conn_unref(default_conn);
+		}
+		default_conn = bt_conn_ref(even_g1_right_pending_conn);
+	}
+}
+
+static void even_g1_advance_state_machine(void)
+{
+	LOG_INF("*** ADVANCING STATE MACHINE: current state = %d ***", even_g1_state);
+	
+	switch (even_g1_state) {
+	case EVEN_G1_STATE_IDLE:
+		/* Start with left arm */
+		LOG_INF("State: IDLE - checking if both arms cached");
+		if (even_g1_left_cache.valid && even_g1_right_cache.valid) {
+			LOG_INF("Both arms cached, starting left connection");
+			even_g1_start_left_connection();
+		}
+		break;
+		
+	case EVEN_G1_STATE_LEFT_READY:
+		/* Left arm is ready, now connect to right arm */
+		LOG_INF("State: LEFT_READY - starting right arm connection");
+		even_g1_start_right_connection();
+		break;
+		
+	case EVEN_G1_STATE_RIGHT_MTU_EXCHANGING:
+		/* Right arm MTU exchange complete, we should be fully ready */
+		even_g1_state = EVEN_G1_STATE_BOTH_READY;
+		LOG_INF("*** BOTH EVEN G1 ARMS CONNECTED AND READY ***");
+		printk("*** BOTH EVEN G1 ARMS CONNECTED AND READY ***\\n");
+		
+		/* Stop scanning since we have both arms */
+		int scan_err = bt_scan_stop();
+		if (scan_err && scan_err != -EALREADY) {
+			LOG_WRN("Failed to stop scan: %d", scan_err);
+		}
+		
+		/* Clear pairing mode */
+		even_g1_pairing_mode = false;
+		break;
+		
+	default:
+		/* No action needed for other states */
+		LOG_INF("State: %d - no action needed", even_g1_state);
+		break;
+	}
+}
+
+static void even_g1_handle_connection_complete(struct bt_conn *conn)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	
+	LOG_INF("*** CONNECTION COMPLETE CALLBACK: %s, state=%d ***", addr, even_g1_state);
+	
+	if (even_g1_state == EVEN_G1_STATE_CONNECTING_LEFT && conn == even_g1_left_pending_conn) {
+		LOG_INF("Even G1 left arm connected: %s", addr);
+		even_g1_state = EVEN_G1_STATE_LEFT_CONNECTED;
+		LOG_INF("*** LEFT ARM CONNECTED - STATE NOW %d ***", even_g1_state);
+	} else if (even_g1_state == EVEN_G1_STATE_CONNECTING_RIGHT && conn == even_g1_right_pending_conn) {
+		LOG_INF("Even G1 right arm connected: %s", addr);
+		even_g1_state = EVEN_G1_STATE_RIGHT_CONNECTED;
+		LOG_INF("*** RIGHT ARM CONNECTED - STATE NOW %d ***", even_g1_state);
+	}
+}
+
+static void even_g1_handle_discovery_complete(struct bt_conn *conn)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	
+	LOG_INF("*** DISCOVERY COMPLETE CALLBACK: %s, state=%d ***", addr, even_g1_state);
+	
+	if (even_g1_state == EVEN_G1_STATE_LEFT_CONNECTED && conn == even_g1_left_pending_conn) {
+		LOG_INF("Even G1 left arm service discovery complete: %s", addr);
+		even_g1_state = EVEN_G1_STATE_LEFT_MTU_EXCHANGING;
+		LOG_INF("*** LEFT ARM DISCOVERY COMPLETE - STATE NOW %d (waiting for MTU) ***", even_g1_state);
+	} else if (even_g1_state == EVEN_G1_STATE_RIGHT_CONNECTED && conn == even_g1_right_pending_conn) {
+		LOG_INF("Even G1 right arm service discovery complete: %s", addr);
+		even_g1_state = EVEN_G1_STATE_RIGHT_MTU_EXCHANGING;
+		LOG_INF("*** RIGHT ARM DISCOVERY COMPLETE - STATE NOW %d (waiting for MTU) ***", even_g1_state);
+	}
+}
+
+static void even_g1_handle_mtu_exchange_complete(struct bt_conn *conn)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	
+	LOG_INF("*** STATE MACHINE MTU CALLBACK: %s, state=%d, left_pending=%p, right_pending=%p ***", 
+	        addr, even_g1_state, even_g1_left_pending_conn, even_g1_right_pending_conn);
+	
+	if ((even_g1_state == EVEN_G1_STATE_LEFT_CONNECTED || even_g1_state == EVEN_G1_STATE_LEFT_DISCOVERING || even_g1_state == EVEN_G1_STATE_LEFT_MTU_EXCHANGING) && 
+	    conn == even_g1_left_pending_conn) {
+		LOG_INF("Even G1 left arm MTU exchange complete: %s", addr);
+		even_g1_state = EVEN_G1_STATE_LEFT_READY;
+		LOG_INF("*** ADVANCING STATE MACHINE TO CONNECT RIGHT ARM ***");
+		even_g1_advance_state_machine(); /* This will trigger right arm connection */
+	} else if ((even_g1_state == EVEN_G1_STATE_RIGHT_CONNECTED || even_g1_state == EVEN_G1_STATE_RIGHT_DISCOVERING || even_g1_state == EVEN_G1_STATE_RIGHT_MTU_EXCHANGING) && 
+	           conn == even_g1_right_pending_conn) {
+		LOG_INF("Even G1 right arm MTU exchange complete: %s", addr);
+		/* Mark right arm ready and advance to final state */
+		even_g1_state = EVEN_G1_STATE_RIGHT_MTU_EXCHANGING;
+		even_g1_advance_state_machine(); /* This will mark both arms ready */
+	} else {
+		LOG_WRN("MTU exchange callback - state/connection mismatch!");
+		LOG_WRN("Current state: %d", even_g1_state);
+		LOG_WRN("Connection: %p vs left: %p vs right: %p", conn, even_g1_left_pending_conn, even_g1_right_pending_conn);
+	}
+}
+
+/* Even G1 dual connection helper - now uses state machine */
+static void connect_to_both_even_g1_arms(void)
+{
+	printk("*** BOTH EVEN G1 ARMS FOUND - STARTING STATE MACHINE ***\n");
+	LOG_INF("Both Even G1 arms discovered, starting sequential connection state machine");
+	
+	/* Stop scanning to avoid conflicts with connection creation */
+	LOG_INF("Stopping scan for dual connection attempt");
+	int scan_err = bt_scan_stop();
+	if (scan_err && scan_err != -EALREADY) {
+		LOG_WRN("Failed to stop scan: %d", scan_err);
+	}
+	
+	/* Small delay to let scan stop complete */
+	k_msleep(100);
+	
+	/* Start the state machine */
+	even_g1_advance_state_machine();
+}
+
+/* Public API for Even G1 state machine callbacks */
+void ble_central_even_g1_discovery_complete(struct bt_conn *conn)
+{
+	even_g1_handle_discovery_complete(conn);
+}
+
+void ble_central_even_g1_mtu_exchange_complete(struct bt_conn *conn)
+{
+	even_g1_handle_mtu_exchange_complete(conn);
 }

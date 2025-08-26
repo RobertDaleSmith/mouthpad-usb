@@ -15,7 +15,10 @@
 #include "usb_cdc.h"
 #include "usb_hid.h"
 #include "ble_transport.h"
+#include "ble_central.h"
 #include "ble_bas.h"
+#include "ble_multi_conn.h"
+#include "even_g1.h"
 #include "oled_display.h"
 #include "buzzer.h"
 #include "leds.h"
@@ -32,8 +35,9 @@ static void button_event_callback(button_event_t event)
 {
 	switch (event) {
 	case BUTTON_EVENT_CLICK:
-		LOG_INF("=== BUTTON CLICK ===");
-		/* TODO: Add click functionality */
+		LOG_INF("=== BUTTON CLICK - STARTING SMART DEVICE SCAN ===");
+		/* Start smart scan for missing devices (MouthPad or Even G1) */
+		ble_central_start_scan_for_missing_devices();
 		break;
 		
 	case BUTTON_EVENT_DOUBLE_CLICK:
@@ -222,18 +226,34 @@ int main(void)
 			}
 		}
 		
-		/* Check BLE connection status and data activity */
-		bool is_connected = ble_transport_is_connected();
+		/* Check multi-device connection status and data activity */
+		bool has_mouthpad = ble_multi_conn_has_type(DEVICE_TYPE_MOUTHPAD);
+		bool has_even_g1_ready = even_g1_is_ready(); /* Both arms fully connected */
+		bool any_connected = has_mouthpad || has_even_g1_ready;
 		bool ble_data_activity = ble_transport_has_data_activity();
 		uint8_t battery_level = ble_bas_get_battery_level();
 		
 		/* Update LED state based on connection and activity */
 		if (leds_is_available()) {
-			if (is_connected && (data_activity || ble_data_activity)) {
+			
+			if (any_connected && (data_activity || ble_data_activity)) {
 				leds_set_state(LED_STATE_DATA_ACTIVITY);
-			} else if (is_connected) {
+			} else if (any_connected) {
+				/* Connected state - show battery level if MouthPad connected, otherwise green */
+				if (has_mouthpad) {
+					/* Use MouthPad battery level for color */
+					ble_device_connection_t *mouthpad = ble_multi_conn_get_mouthpad();
+					if (mouthpad) {
+						/* Update battery level from connected MouthPad for LED color */
+						battery_level = ble_bas_get_battery_level();
+					}
+				} else {
+					/* Even G1 only - show solid green */
+					battery_level = 100;
+				}
 				leds_set_state(LED_STATE_CONNECTED);
 			} else {
+				/* No devices connected - scanning state */
 				leds_set_state(LED_STATE_SCANNING);
 			}
 			
@@ -244,6 +264,11 @@ int main(void)
 		/* Update button state */
 		if (button_is_available()) {
 			button_update();
+		}
+		
+		/* Process Even G1 command queue */
+		if (has_even_g1_ready) {
+			even_g1_process_queue();
 		}
 		
 		/* Reset data activity flag periodically */
@@ -259,9 +284,93 @@ int main(void)
 		if (oled_display_is_available()) {
 			display_update_counter++;
 			if (display_update_counter >= 500) {
-				int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
-				oled_display_update_status(battery_level, is_connected, rssi_dbm);
+				int8_t rssi_dbm = any_connected ? ble_transport_get_rssi() : 0;
+				oled_display_update_status(battery_level, any_connected, rssi_dbm);
 				display_update_counter = 0;
+			}
+		}
+		
+		// Mirror OLED status to Even G1 glasses every 500ms (same frequency as OLED)
+		if (has_even_g1_ready) {
+			static int even_g1_display_counter = 0;
+			even_g1_display_counter++;
+			if (even_g1_display_counter >= 500) {
+				int8_t rssi_dbm = any_connected ? ble_transport_get_rssi() : 0;
+				
+				// Create the same status text that would be displayed on OLED
+				// Get device name from connected MouthPad, otherwise use default
+				const char *full_title;
+				if (has_mouthpad) {
+					ble_device_connection_t *mouthpad = ble_multi_conn_get_mouthpad();
+					if (mouthpad && strlen(mouthpad->name) > 0) {
+						full_title = mouthpad->name;
+					} else {
+						full_title = "MouthPad";
+					}
+				} else if (has_even_g1_ready) {
+					full_title = "MouthPad^USB";  // Show default when only Even G1 connected
+				} else {
+					full_title = "MouthPad^USB";  // Show default when scanning
+				}
+				
+				char display_title[13];
+				strncpy(display_title, full_title, 12);
+				display_title[12] = '\0';
+				
+				const char *status_line = any_connected ? "Connected" : "Scanning...";
+				
+				// Battery line - always create it (empty if no battery data)
+				char battery_str[32] = "";
+				if (has_mouthpad && battery_level != 0xFF && battery_level <= 100) {
+					char battery_icon[8];
+					if (battery_level > 75) {
+						strcpy(battery_icon, "[||||]");
+					} else if (battery_level > 50) {
+						strcpy(battery_icon, "[|||.]");
+					} else if (battery_level > 25) {
+						strcpy(battery_icon, "[||..]");
+					} else if (battery_level > 10) {
+						strcpy(battery_icon, "[|...]");
+					} else {
+						strcpy(battery_icon, "[....]");
+					}
+					snprintf(battery_str, sizeof(battery_str), "%s %d%%", battery_icon, battery_level);
+				}
+				
+				// Signal line - always create it (empty if not connected), always on 4th line
+				char signal_str[32] = "";
+				if (any_connected) {
+					// Simple signal bars based on RSSI
+					const char* signal_bars;
+					if (rssi_dbm >= -50) {
+						signal_bars = "[||||]";
+					} else if (rssi_dbm >= -60) {
+						signal_bars = "[|||.]";
+					} else if (rssi_dbm >= -70) {
+						signal_bars = "[||..]";
+					} else if (rssi_dbm >= -80) {
+						signal_bars = "[|...]";
+					} else {
+						signal_bars = "[....]";
+					}
+					snprintf(signal_str, sizeof(signal_str), "%s %ddBm", signal_bars, rssi_dbm);
+				}
+				
+				// Send mirrored status to Even G1 (only if content changed)
+				static char last_even_g1_content[256] = "";
+				char current_content[256];
+				snprintf(current_content, sizeof(current_content), "%s|%s|%s|%s", 
+				        display_title, status_line, battery_str, signal_str);
+				
+				if (strcmp(current_content, last_even_g1_content) != 0) {
+					even_g1_send_text_formatted_dual_arm(display_title, status_line, 
+					                                     battery_str,  // Line 3: battery (empty if no data)
+					                                     signal_str,   // Line 4: signal (empty if not connected)
+					                                     NULL);        // Line 5: unused
+					strcpy(last_even_g1_content, current_content);
+				}
+				
+				even_g1_display_counter = 0;
 			}
 		}
 		
