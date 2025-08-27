@@ -292,12 +292,20 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 	
 	/* Extract device name first */
 	if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) != 0) {
-		/* Fallback to stored name or address */
+		/* Fallback to stored name or address-based name */
 		const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
 		if (stored_name) {
 			strncpy(device_name, stored_name, sizeof(device_name) - 1);
+			LOG_INF("Using stored device name: '%s'", device_name);
 		} else {
-			strncpy(device_name, "Unknown", sizeof(device_name) - 1);
+			/* Create a name based on device type and address */
+			char addr_str[BT_ADDR_LE_STR_LEN];
+			bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
+			
+			/* For devices passing HID filter, use a descriptive MouthPad name */
+			snprintf(device_name, sizeof(device_name) - 1, "MouthPad");
+			device_name[sizeof(device_name) - 1] = '\0';
+			LOG_INF("No advertising name found, using address-based name: '%s'", device_name);
 		}
 	}
 	
@@ -459,12 +467,26 @@ static void scan_connecting(struct bt_scan_device_info *device_info,
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
 	printk("*** SCAN CONNECTING: %s ***\n", addr);
 	
-	/* Try to get device name from stored names or scan data */
-	const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
-	if (stored_name) {
-		strncpy(device_name, stored_name, sizeof(device_name) - 1);
-	} else if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) != 0) {
-		strncpy(device_name, "Unknown", sizeof(device_name) - 1);
+	/* Use device name from transport layer (set during scan_filter_match) */
+	extern const char *ble_transport_get_device_name(void);
+	const char *transport_name = ble_transport_get_device_name();
+	if (transport_name && strlen(transport_name) > 0) {
+		strncpy(device_name, transport_name, sizeof(device_name) - 1);
+		device_name[sizeof(device_name) - 1] = '\0';
+		LOG_INF("Using device name from transport layer: '%s'", device_name);
+	} else {
+		/* Fallback: try to get device name from local storage */
+		const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
+		if (stored_name) {
+			strncpy(device_name, stored_name, sizeof(device_name) - 1);
+			device_name[sizeof(device_name) - 1] = '\0';
+			LOG_INF("Using stored device name: '%s'", device_name);
+		} else if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) != 0) {
+			/* Final fallback */
+			snprintf(device_name, sizeof(device_name) - 1, "MouthPad");
+			device_name[sizeof(device_name) - 1] = '\0';
+			LOG_INF("Using fallback device name: '%s'", device_name);
+		}
 	}
 	
 	/* Detect device type and set it in transport layer */
@@ -482,6 +504,9 @@ static void scan_connecting(struct bt_scan_device_info *device_info,
 	if (smart_scan_active) {
 		LOG_INF("Smart scan: Connection successful, disabling smart scan mode");
 		smart_scan_active = false;
+		/* Update Even G1 display to reflect new status */
+		extern void even_g1_show_current_status(void);
+		even_g1_show_current_status();
 	}
 	
 	default_conn = bt_conn_ref(conn);
@@ -727,6 +752,13 @@ int ble_central_stop_scan(void)
 	return bt_scan_stop();
 }
 
+bool ble_central_is_scanning(void)
+{
+	/* We're scanning if either smart scan or regular scan is active */
+	/* Note: background_scan_active is for RSSI updates and shouldn't affect UI */
+	return smart_scan_active;
+}
+
 struct bt_conn *ble_central_get_default_conn(void)
 {
 	return default_conn;
@@ -853,12 +885,16 @@ static bool parse_device_name_cb(struct bt_data *data, void *user_data)
 		bool found;
 	} *name_info = user_data;
 	
+	/* Debug: log all advertising data types we encounter */
+	LOG_INF("Parsing adv data type: 0x%02x, len: %d", data->type, data->data_len);
+	
 	if (data->type == BT_DATA_NAME_COMPLETE || data->type == BT_DATA_NAME_SHORTENED) {
 		/* Copy the name to our buffer */
 		size_t name_len = MIN(data->data_len, name_info->buf_len - 1);
 		memcpy(name_info->name_buf, data->data, name_len);
 		name_info->name_buf[name_len] = '\0';
 		name_info->found = true;
+		LOG_INF("Found device name in advertising data: '%s'", name_info->name_buf);
 		return false; /* Stop parsing, we found the name */
 	}
 	
@@ -874,7 +910,7 @@ static int extract_device_name_from_scan(struct bt_scan_device_info *device_info
 	}
 	
 	if (!device_info->adv_data || device_info->adv_data->len == 0) {
-		LOG_DBG("No advertising data available for device");
+		LOG_INF("No advertising data available for device");
 		return -ENOENT;
 	}
 	
@@ -882,7 +918,7 @@ static int extract_device_name_from_scan(struct bt_scan_device_info *device_info
 	strncpy(name_buf, "Unknown Device", buf_len - 1);
 	name_buf[buf_len - 1] = '\0';
 	
-	/* Use bt_data_parse to find the device name */
+	/* Try bt_data_parse first (like main branch) */
 	struct {
 		char *name_buf;
 		size_t buf_len;
@@ -893,15 +929,48 @@ static int extract_device_name_from_scan(struct bt_scan_device_info *device_info
 		.found = false
 	};
 	
-	/* bt_data_parse expects a net_buf_simple */
+	LOG_INF("Attempting bt_data_parse for device name extraction...");
 	bt_data_parse(device_info->adv_data, parse_device_name_cb, &name_info);
 	
 	if (name_info.found) {
-		// LOG_INF("Extracted device name from advertising: '%s'", name_buf);
+		LOG_INF("SUCCESS: Extracted device name from advertising: '%s'", name_buf);
 		return 0;
 	}
 	
-	LOG_DBG("No device name found in advertising data");
+	/* If bt_data_parse failed, try manual parsing to handle malformed data */
+	LOG_INF("bt_data_parse failed, trying manual parsing...");
+	const uint8_t *data = device_info->adv_data->data;
+	size_t data_len = device_info->adv_data->len;
+	
+	for (size_t i = 0; i + 1 < data_len; ) {
+		uint8_t field_len = data[i];
+		
+		/* Check bounds */
+		if (field_len == 0 || i + field_len + 1 > data_len) {
+			LOG_INF("Invalid field length %d at offset %zu, breaking", field_len, i);
+			break;
+		}
+		
+		uint8_t field_type = data[i + 1];
+		const uint8_t *field_data = &data[i + 2];
+		uint8_t field_data_len = field_len - 1;
+		
+		LOG_INF("Manual parse: field type 0x%02x, len %d", field_type, field_data_len);
+		
+		/* Check for device name fields */
+		if (field_type == BT_DATA_NAME_COMPLETE || field_type == BT_DATA_NAME_SHORTENED) {
+			size_t name_len = MIN(field_data_len, buf_len - 1);
+			memcpy(name_buf, field_data, name_len);
+			name_buf[name_len] = '\0';
+			LOG_INF("SUCCESS: Manual extraction found device name: '%s'", name_buf);
+			return 0;
+		}
+		
+		/* Move to next field */
+		i += field_len + 1;
+	}
+	
+	LOG_INF("No device name found in advertising data (tried both methods)");
 	return -ENOENT;
 }
 

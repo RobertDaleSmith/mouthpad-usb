@@ -19,65 +19,6 @@ LOG_MODULE_REGISTER(ble_multi_conn, LOG_LEVEL_INF);
 static ble_device_connection_t connections[MAX_BLE_CONNECTIONS];
 static struct k_mutex conn_mutex;
 
-/* Helper to check if advertising data contains a specific UUID */
-static bool adv_data_contains_uuid(const struct bt_data *data, const struct bt_uuid *uuid)
-{
-    if (data->type != BT_DATA_UUID16_ALL && data->type != BT_DATA_UUID16_SOME &&
-        data->type != BT_DATA_UUID128_ALL && data->type != BT_DATA_UUID128_SOME) {
-        return false;
-    }
-
-    /* Check for 16-bit UUID (HID service) */
-    if (uuid->type == BT_UUID_TYPE_16) {
-        struct bt_uuid_16 *uuid16 = (struct bt_uuid_16 *)uuid;
-        uint16_t uuid_val = uuid16->val;
-        
-        /* Iterate through UUID list in advertising data */
-        for (size_t i = 0; i + 1 < data->data_len; i += 2) {
-            uint16_t found_uuid = sys_le16_to_cpu(*((uint16_t*)&data->data[i]));
-            if (found_uuid == uuid_val) {
-                return true;
-            }
-        }
-    }
-    /* Check for 128-bit UUID (NUS service) */
-    else if (uuid->type == BT_UUID_TYPE_128) {
-        struct bt_uuid_128 *uuid128 = (struct bt_uuid_128 *)uuid;
-        
-        /* For 128-bit UUIDs, we need at least 16 bytes */
-        if (data->data_len >= 16) {
-            /* Compare 128-bit UUIDs */
-            if (memcmp(data->data, uuid128->val, 16) == 0) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-/* Check advertising data for service UUIDs */
-static bool check_adv_uuid(struct bt_data *data, void *user_data)
-{
-    struct {
-        bool has_nus;
-        bool has_hid;
-    } *result = user_data;
-
-    /* Nordic UART Service UUID */
-    static const struct bt_uuid_128 nus_uuid = BT_UUID_INIT_128(
-        BT_UUID_128_ENCODE(0x6e400001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e));
-
-    if (adv_data_contains_uuid(data, &nus_uuid.uuid)) {
-        result->has_nus = true;
-    }
-
-    if (adv_data_contains_uuid(data, BT_UUID_HIDS)) {
-        result->has_hid = true;
-    }
-    
-    return true;  /* Continue parsing */
-}
 
 int ble_multi_conn_init(void)
 {
@@ -104,7 +45,11 @@ int ble_multi_conn_add(struct bt_conn *conn, ble_device_type_t type, const char 
                 memcpy(&connections[i].addr, addr, sizeof(bt_addr_le_t));
             }
             
-            LOG_INF("Added connection %d: type=%d, name=%s", i, type, 
+            LOG_INF("Added connection %d: type=%d (%s), name=%s", i, type,
+                    type == DEVICE_TYPE_MOUTHPAD ? "MOUTHPAD" :
+                    type == DEVICE_TYPE_EVEN_G1_LEFT ? "EVEN_G1_LEFT" :
+                    type == DEVICE_TYPE_EVEN_G1_RIGHT ? "EVEN_G1_RIGHT" :
+                    type == DEVICE_TYPE_NUS_GENERIC ? "NUS_GENERIC" : "UNKNOWN",
                     name ? name : "unknown");
             k_mutex_unlock(&conn_mutex);
             return i;
@@ -196,7 +141,24 @@ int ble_multi_conn_count(void)
 
 bool ble_multi_conn_has_type(ble_device_type_t type)
 {
-    return ble_multi_conn_get_by_type(type) != NULL;
+    bool result = ble_multi_conn_get_by_type(type) != NULL;
+    
+    /* Debug logging commented out - too frequent in main loop
+    if (type == DEVICE_TYPE_MOUTHPAD) {
+        LOG_INF("DEBUG: ble_multi_conn_has_type(MOUTHPAD) = %d", result);
+        for (int i = 0; i < MAX_BLE_CONNECTIONS; i++) {
+            if (connections[i].conn) {
+                LOG_INF("  Connection %d: type=%d (%s)", i, connections[i].type,
+                        connections[i].type == DEVICE_TYPE_MOUTHPAD ? "MOUTHPAD" :
+                        connections[i].type == DEVICE_TYPE_EVEN_G1_LEFT ? "EVEN_G1_LEFT" :
+                        connections[i].type == DEVICE_TYPE_EVEN_G1_RIGHT ? "EVEN_G1_RIGHT" :
+                        connections[i].type == DEVICE_TYPE_NUS_GENERIC ? "NUS_GENERIC" : "UNKNOWN");
+            }
+        }
+    }
+    */
+    
+    return result;
 }
 
 void ble_multi_conn_set_nus_ready(struct bt_conn *conn, bool ready)
@@ -236,17 +198,6 @@ void ble_multi_conn_set_rssi(struct bt_conn *conn, int8_t rssi)
 
 ble_device_type_t ble_multi_conn_detect_device_type(const struct bt_scan_device_info *device_info, const char *name)
 {
-    struct {
-        bool has_nus;
-        bool has_hid;
-    } services = {0};
-
-    /* Parse advertising data for service UUIDs */
-    bt_data_parse(device_info->adv_data, check_adv_uuid, &services);
-    
-    LOG_DBG("Device %s - NUS: %d, HID: %d", name ? name : "Unknown", 
-            services.has_nus, services.has_hid);
-
     /* Check device name for Even G1 */
     bool is_even_g1 = false;
     if (name) {
@@ -258,12 +209,8 @@ ble_device_type_t ble_multi_conn_detect_device_type(const struct bt_scan_device_
         }
     }
 
-    /* Determine device type based on services and name */
-    if (services.has_nus && services.has_hid) {
-        LOG_INF("Detected MouthPad device (NUS+HID)");
-        return DEVICE_TYPE_MOUTHPAD;
-    } else if (is_even_g1) {  /* Even G1 detection based on name alone */
-        /* Determine if left or right arm based on device name */
+    if (is_even_g1) {
+        /* Even G1 detection based on name alone */
         /* Even G1 devices have names like "Even G1_22_L_327B9B" or "Even G1_22_R_6981C6" */
         bool is_left_arm = false;
         bool is_right_arm = false;
@@ -304,12 +251,12 @@ ble_device_type_t ble_multi_conn_detect_device_type(const struct bt_scan_device_
                 return DEVICE_TYPE_EVEN_G1_LEFT;
             }
         }
-    } else if (services.has_nus) {
-        LOG_INF("Detected generic NUS device");
-        return DEVICE_TYPE_NUS_GENERIC;
+    } else {
+        /* Since we use HID UUID filter in scanning, any non-Even G1 device that gets here
+           should be a MouthPad (has HID service). Trust the scan filter like main branch did. */
+        LOG_INF("Detected MouthPad device (passed HID UUID filter): %s", name ? name : "Unknown");
+        return DEVICE_TYPE_MOUTHPAD;
     }
-
-    return DEVICE_TYPE_UNKNOWN;
 }
 
 bool ble_multi_conn_need_even_g1_pair(void)

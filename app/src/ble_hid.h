@@ -78,6 +78,23 @@ uint8_t (*ble_hid_get_boot_mouse_cb(void))(struct bt_hogp *, struct bt_hogp_rep_
 uint8_t (*ble_hid_get_boot_kbd_cb(void))(struct bt_hogp *, struct bt_hogp_rep_info *, uint8_t, const uint8_t *);
 
 /**
+ * @brief Get the latest mouse data for display purposes
+ * 
+ * @param x Pointer to store X delta value (can be NULL)
+ * @param y Pointer to store Y delta value (can be NULL)  
+ * @param buttons Pointer to store button state (can be NULL)
+ * @return true if new mouse data is available, false otherwise
+ */
+bool ble_hid_get_mouse_data(int16_t *x, int16_t *y, uint8_t *buttons);
+
+/**
+ * @brief Check if mouse data has been updated
+ * 
+ * @return true if new mouse data is available, false otherwise
+ */
+bool ble_hid_has_mouse_data(void);
+
+/**
  * @brief Handle button events for HID functionality
  * 
  * @param button_state The button state

@@ -35,6 +35,12 @@ extern struct k_sem ep_write_sem;
 
 LOG_MODULE_REGISTER(ble_hid, LOG_LEVEL_INF);
 
+/* Mouse data tracking for Even G1 display */
+static int16_t last_mouse_x = 0;
+static int16_t last_mouse_y = 0;
+static uint8_t last_mouse_buttons = 0;
+static bool mouse_data_updated = false;
+
 /* Callback registration */
 static ble_hid_data_received_cb_t data_received_callback = NULL;
 static ble_hid_ready_cb_t ready_callback = NULL;
@@ -212,21 +218,24 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	}
 	printk("\n");
 	
-	// DEBUG: Analyze the BLE boot mouse data structure
-	if (size >= 1) {
+	// Parse and store mouse data for Even G1 display
+	if (size >= 3) {
 		uint8_t buttons = data[0] & 0x07;  // BLE boot mouse uses 3 bits for buttons
+		int8_t x_delta = (int8_t)data[1];  // X movement delta
+		int8_t y_delta = (int8_t)data[2];  // Y movement delta
+		
+		// Store the latest mouse data (deltas, not absolute position)
+		last_mouse_x = x_delta;
+		last_mouse_y = y_delta;
+		last_mouse_buttons = buttons;
+		mouse_data_updated = true;
+		
 		printk("BLE BOOT MOUSE: buttons=0x%02X (L:%c R:%c M:%c)", 
 			buttons,
 			(buttons & 0x01) ? '1' : '0',  // Left
 			(buttons & 0x02) ? '1' : '0',  // Right
 			(buttons & 0x04) ? '1' : '0'); // Middle
-		if (size >= 2) {
-			printk(" X=%d", (int8_t)data[1]);
-		}
-		if (size >= 3) {
-			printk(" Y=%d", (int8_t)data[2]);
-		}
-		printk("\n");
+		printk(" X=%d Y=%d\n", x_delta, y_delta);
 	}
 	
 	/* Forward boot mouse report directly to USB as Report ID 1 */
@@ -571,6 +580,26 @@ uint8_t (*ble_hid_get_notify_cb(void))(struct bt_hogp *, struct bt_hogp_rep_info
 uint8_t (*ble_hid_get_boot_mouse_cb(void))(struct bt_hogp *, struct bt_hogp_rep_info *, uint8_t, const uint8_t *)
 {
 	return hogp_boot_mouse_report;
+}
+
+/* Mouse data accessors for Even G1 display */
+bool ble_hid_get_mouse_data(int16_t *x, int16_t *y, uint8_t *buttons)
+{
+	if (!mouse_data_updated) {
+		return false;
+	}
+	
+	if (x) *x = last_mouse_x;
+	if (y) *y = last_mouse_y;
+	if (buttons) *buttons = last_mouse_buttons;
+	
+	mouse_data_updated = false; /* Reset flag after reading */
+	return true;
+}
+
+bool ble_hid_has_mouse_data(void)
+{
+	return mouse_data_updated;
 }
 
 uint8_t (*ble_hid_get_boot_kbd_cb(void))(struct bt_hogp *, struct bt_hogp_rep_info *, uint8_t, const uint8_t *)

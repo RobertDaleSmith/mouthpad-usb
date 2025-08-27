@@ -17,6 +17,7 @@
 #include "ble_transport.h"
 #include "ble_central.h"
 #include "ble_bas.h"
+#include "ble_hid.h"
 #include "ble_multi_conn.h"
 #include "even_g1.h"
 #include "oled_display.h"
@@ -38,6 +39,8 @@ static void button_event_callback(button_event_t event)
 		LOG_INF("=== BUTTON CLICK - STARTING SMART DEVICE SCAN ===");
 		/* Start smart scan for missing devices (MouthPad or Even G1) */
 		ble_central_start_scan_for_missing_devices();
+		/* Update Even G1 display immediately to show "Scanning..." */
+		even_g1_show_current_status();
 		break;
 		
 	case BUTTON_EVENT_DOUBLE_CLICK:
@@ -290,11 +293,11 @@ int main(void)
 			}
 		}
 		
-		// Mirror OLED status to Even G1 glasses every 500ms (same frequency as OLED)
+		// Mirror OLED status to Even G1 glasses every 2000ms (2 seconds) to prevent queue overflow
 		if (has_even_g1_ready) {
 			static int even_g1_display_counter = 0;
 			even_g1_display_counter++;
-			if (even_g1_display_counter >= 500) {
+			if (even_g1_display_counter >= 2000) {
 				int8_t rssi_dbm = any_connected ? ble_transport_get_rssi() : 0;
 				
 				// Create the same status text that would be displayed on OLED
@@ -317,7 +320,17 @@ int main(void)
 				strncpy(display_title, full_title, 12);
 				display_title[12] = '\0';
 				
-				const char *status_line = any_connected ? "Connected" : "Scanning...";
+				/* Determine status line based on MouthPad connection and scanning state */
+				const char *status_line;
+				if (has_mouthpad) {
+					status_line = "Connected";
+				} else if (ble_central_is_scanning()) {
+					status_line = "Scanning...";  /* Actively scanning for devices */
+				} else if (has_even_g1_ready) {
+					status_line = "Ready";  /* Even G1 connected but no MouthPad */
+				} else {
+					status_line = "Scanning...";  /* Nothing connected, default state */
+				}
 				
 				// Battery line - always create it (empty if no battery data)
 				char battery_str[32] = "";
@@ -353,21 +366,44 @@ int main(void)
 					} else {
 						signal_bars = "[....]";
 					}
-					snprintf(signal_str, sizeof(signal_str), "%s %ddBm", signal_bars, rssi_dbm);
+					snprintf(signal_str, sizeof(signal_str), "%s %d dBm", signal_bars, rssi_dbm);
 				}
 				
-				// Send mirrored status to Even G1 (only if content changed)
-				static char last_even_g1_content[256] = "";
-				char current_content[256];
-				snprintf(current_content, sizeof(current_content), "%s|%s|%s|%s", 
-				        display_title, status_line, battery_str, signal_str);
+				// Mouse data line - show latest X/Y deltas if available
+				char mouse_str[32] = "";
+				if (has_mouthpad) {
+					int16_t mouse_x, mouse_y;
+					uint8_t mouse_buttons;
+					if (ble_hid_get_mouse_data(&mouse_x, &mouse_y, &mouse_buttons)) {
+						// Show mouse deltas and button state
+						char btn_str[8] = "";
+						if (mouse_buttons & 0x01) strcat(btn_str, "L");
+						if (mouse_buttons & 0x02) strcat(btn_str, "R");
+						if (mouse_buttons & 0x04) strcat(btn_str, "M");
+						if (strlen(btn_str) == 0) strcpy(btn_str, "-");
+						
+						snprintf(mouse_str, sizeof(mouse_str), "X:%d Y:%d %s", mouse_x, mouse_y, btn_str);
+					}
+				}
 				
-				if (strcmp(current_content, last_even_g1_content) != 0) {
+				// Send mirrored status to Even G1 (only if content changed and rate limited)
+				static char last_even_g1_content[256] = "";
+				static int64_t last_even_g1_update_time = 0;
+				char current_content[256];
+				snprintf(current_content, sizeof(current_content), "%s|%s|%s|%s|%s", 
+				        display_title, status_line, battery_str, signal_str, mouse_str);
+				
+				int64_t current_time = k_uptime_get();
+				bool content_changed = strcmp(current_content, last_even_g1_content) != 0;
+				bool rate_limit_ok = (current_time - last_even_g1_update_time) >= 1000; // 1 second minimum between updates
+				
+				if (content_changed && rate_limit_ok) {
 					even_g1_send_text_formatted_dual_arm(display_title, status_line, 
 					                                     battery_str,  // Line 3: battery (empty if no data)
 					                                     signal_str,   // Line 4: signal (empty if not connected)
-					                                     NULL);        // Line 5: unused
+					                                     mouse_str);   // Line 5: mouse data (empty if no movement)
 					strcpy(last_even_g1_content, current_content);
+					last_even_g1_update_time = current_time;
 				}
 				
 				even_g1_display_counter = 0;

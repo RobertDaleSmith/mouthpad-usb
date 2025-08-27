@@ -483,6 +483,10 @@ static void ble_hid_discovery_complete_cb(void)
 	extern void buzzer_connected(void);
 	buzzer_connected();
 	
+	/* Update Even G1 status display - MouthPad is now fully connected */
+	extern void even_g1_show_current_status(void);
+	even_g1_show_current_status();
+	
 	/* Start Battery Service discovery after HID is complete */
 	ble_bas_discover(ble_central_get_default_conn());
 }
@@ -537,12 +541,20 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 	ble_device_type_t device_type = ble_transport_get_device_type();
 	const char *device_name = ble_transport_get_device_name();
 	
+	LOG_INF("Device connected: type=%d, name=%s", device_type, device_name ? device_name : "NULL");
+	
 	int slot = ble_multi_conn_add(conn, device_type, device_name);
 	if (slot < 0) {
 		LOG_ERR("Failed to add connection to multi-conn manager: %d", slot);
 		/* Continue anyway for backward compatibility */
 	} else {
 		LOG_INF("Added connection to multi-conn slot %d", slot);
+		
+		/* Update Even G1 status display when device connects (with small delay for stability) */
+		extern void even_g1_show_current_status(void);
+		/* Use work queue to delay status update slightly */
+		k_sleep(K_MSEC(100));
+		even_g1_show_current_status();
 		
 		/* Register connection with Even G1 module if it's an Even G1 device */
 		if (device_type == DEVICE_TYPE_EVEN_G1_LEFT) {
@@ -718,10 +730,13 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	nus_discovery_complete = false;
 	fully_connected = false;
 	
-	/* Reset device name and type to default */
-	strncpy(connected_device_name, "MouthPad USB", sizeof(connected_device_name) - 1);
-	connected_device_name[sizeof(connected_device_name) - 1] = '\0';
-	pending_device_type = DEVICE_TYPE_UNKNOWN;
+	/* Reset device name and type to default - only for MouthPad disconnections */
+	if (device && device->type == DEVICE_TYPE_MOUTHPAD) {
+		LOG_INF("Resetting device name/type for MouthPad disconnection");
+		strncpy(connected_device_name, "MouthPad USB", sizeof(connected_device_name) - 1);
+		connected_device_name[sizeof(connected_device_name) - 1] = '\0';
+		pending_device_type = DEVICE_TYPE_UNKNOWN;
+	}
 	
 	// Reset battery service state
 	ble_bas_reset();

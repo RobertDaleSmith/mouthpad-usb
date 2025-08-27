@@ -18,6 +18,7 @@ int ble_central_init(void);
 int ble_central_start_scan(void);
 int ble_central_start_scan_for_missing_devices(void);
 int ble_central_stop_scan(void);
+bool ble_central_is_scanning(void);
 
 /* Connection management */
 struct bt_conn *ble_central_get_default_conn(void);

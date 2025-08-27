@@ -10,6 +10,7 @@
 #include "ble_multi_conn.h"
 #include "ble_bas.h"
 #include "ble_transport.h"
+#include "ble_central.h"
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
@@ -825,9 +826,8 @@ void even_g1_show_current_status(void)
     }
     
     bool has_mouthpad = ble_multi_conn_has_type(DEVICE_TYPE_MOUTHPAD);
-    bool any_connected = has_mouthpad || even_g1_is_ready();
     uint8_t battery_level = ble_bas_get_battery_level();
-    int8_t rssi_dbm = any_connected ? ble_transport_get_rssi() : 0;
+    int8_t rssi_dbm = has_mouthpad ? ble_transport_get_rssi() : 0;
 
     /* Build status display using same logic as main loop */
     const char *full_title;
@@ -846,7 +846,19 @@ void even_g1_show_current_status(void)
     strncpy(display_title, full_title, 12);
     display_title[12] = '\0';
     
-    const char *status_line = any_connected ? "Connected" : "Scanning...";
+    /* Determine status line based on MouthPad connection state and scanning state */
+    const char *status_line;
+    if (has_mouthpad) {
+        status_line = "Connected";
+    } else if (ble_central_is_scanning()) {
+        status_line = "Scanning...";
+    } else {
+        /* When no MouthPad connected and not scanning, show Ready */
+        status_line = "Ready";
+    }
+    
+    LOG_INF("Even G1 status debug: has_mouthpad=%d, scanning=%d, status=%s", 
+            has_mouthpad, ble_central_is_scanning(), status_line);
     
     /* Battery line - always create it (empty if no battery data) */
     char battery_str[32] = "";
@@ -868,7 +880,7 @@ void even_g1_show_current_status(void)
     
     /* Signal line - always create it (empty if not connected) */
     char signal_str[32] = "";
-    if (any_connected) {
+    if (has_mouthpad) {
         const char* signal_bars;
         if (rssi_dbm >= -50) {
             signal_bars = "[||||]";
@@ -881,7 +893,7 @@ void even_g1_show_current_status(void)
         } else {
             signal_bars = "[....]";
         }
-        snprintf(signal_str, sizeof(signal_str), "%s %ddBm", signal_bars, rssi_dbm);
+        snprintf(signal_str, sizeof(signal_str), "%s %d dBm", signal_bars, rssi_dbm);
     }
     
     LOG_INF("Showing current status on Even G1: %s | %s", display_title, status_line);
