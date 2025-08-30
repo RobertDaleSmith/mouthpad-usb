@@ -160,6 +160,15 @@ bool even_g1_is_ready(void)
             g1_state.left_security_ready && g1_state.right_security_ready);
 }
 
+bool even_g1_is_dashboard_open(void)
+{
+    bool state;
+    k_mutex_lock(&g1_mutex, K_FOREVER);
+    state = g1_state.dashboard_open;
+    k_mutex_unlock(&g1_mutex);
+    return state;
+}
+
 void even_g1_nus_discovered(struct bt_conn *conn)
 {
     k_mutex_lock(&g1_mutex, K_FOREVER);
@@ -333,13 +342,33 @@ void even_g1_nus_data_received(struct bt_conn *conn, const uint8_t *data, uint16
             /* Handle touch events and status events */
             switch (data[1]) {
             case EVEN_G1_EVENT_SINGLE_TAP:
-                LOG_INF("Single tap detected");
+                LOG_INF("TouchBar single tap detected from %s arm", arm);
                 break;
-            case EVEN_G1_EVENT_DOUBLE_TAP:
-                LOG_INF("Double tap detected");
+            case EVEN_G1_EVENT_DOUBLE_TAP_CLOSE:
+                LOG_INF("TouchBar double tap (close) detected from %s arm", arm);
+                break;
+            case EVEN_G1_EVENT_DASHBOARD_CLOSE:
+                LOG_INF("Dashboard CLOSED (head tilt down) from %s arm", arm);
+                k_mutex_lock(&g1_mutex, K_FOREVER);
+                g1_state.dashboard_open = false;
+                k_mutex_unlock(&g1_mutex);
+                LOG_INF("Dashboard state: CLOSED - switching to minimal display");
+                break;
+            case EVEN_G1_EVENT_DASHBOARD_OPEN:
+                LOG_INF("Dashboard OPENED (head tilt up) from %s arm", arm);
+                k_mutex_lock(&g1_mutex, K_FOREVER);
+                g1_state.dashboard_open = true;
+                k_mutex_unlock(&g1_mutex);
+                LOG_INF("Dashboard state: OPEN - switching to full display");
+                break;
+            case EVEN_G1_EVENT_TRIPLE_TAP_ON:
+                LOG_INF("TouchBar triple tap (silent mode ON) detected from %s arm", arm);
+                break;
+            case EVEN_G1_EVENT_TRIPLE_TAP_OFF:
+                LOG_INF("TouchBar triple tap (silent mode OFF) detected from %s arm", arm);
                 break;
             case EVEN_G1_EVENT_LONG_PRESS:
-                LOG_INF("Long press detected - mic activation");
+                LOG_INF("TouchBar long press detected from %s arm - mic activation", arm);
                 /* Could respond with mic enable if needed */
                 break;
             case 0x06:
@@ -868,6 +897,7 @@ void even_g1_show_current_status(void)
     bool has_mouthpad = ble_multi_conn_has_type(DEVICE_TYPE_MOUTHPAD);
     uint8_t battery_level = ble_bas_get_battery_level();
     int8_t rssi_dbm = has_mouthpad ? ble_transport_get_rssi() : 0;
+    bool dashboard_open = even_g1_is_dashboard_open();
 
     /* Build status display using same logic as main loop */
     const char *full_title;
@@ -936,13 +966,25 @@ void even_g1_show_current_status(void)
         snprintf(signal_str, sizeof(signal_str), "%s %d dBm", signal_bars, rssi_dbm);
     }
     
-    LOG_INF("Showing current status on Even G1: %s | %s", display_title, status_line);
+    LOG_INF("Showing current status on Even G1: %s | %s (dashboard: %s)", 
+            display_title, status_line, dashboard_open ? "OPEN" : "CLOSED");
     
-    /* Send status to Even G1 displays */
-    even_g1_send_text_formatted_dual_arm(display_title, status_line, 
-                                         battery_str,  /* Line 3: battery (empty if no data) */
-                                         signal_str,   /* Line 4: signal (empty if not connected) */
-                                         NULL);        /* Line 5: unused */
+    /* Send different content based on dashboard state */
+    if (dashboard_open) {
+        /* Dashboard OPEN: Show full status with battery and signal */
+        LOG_INF("Dashboard OPEN - showing full status display");
+        even_g1_send_text_formatted_dual_arm(display_title, status_line, 
+                                             battery_str,  /* Line 3: battery (empty if no data) */
+                                             signal_str,   /* Line 4: signal (empty if not connected) */
+                                             NULL);        /* Line 5: unused */
+    } else {
+        /* Dashboard CLOSED: Show minimal status - just name and status */
+        LOG_INF("Dashboard CLOSED - showing minimal display");
+        even_g1_send_text_formatted_dual_arm(display_title, status_line, 
+                                             "",           /* Line 3: empty */
+                                             "",           /* Line 4: empty */
+                                             NULL);        /* Line 5: unused */
+    }
 }
 
 static void keepalive_handler(struct k_work *work)

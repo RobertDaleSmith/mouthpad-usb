@@ -371,3 +371,105 @@ int usb_hid_send_release_all(void)
 	LOG_INF("HID release-all reports sent successfully");
 	return 0;
 }
+
+/**
+ * @brief Send mouse left click (press and release)
+ * 
+ * @return 0 on success, negative error code on failure
+ */
+int usb_hid_send_left_click(void)
+{
+	int ret;
+	
+	if (hid_dev == NULL) {
+		LOG_ERR("USB HID device not initialized");
+		return -ENODEV;
+	}
+	
+	LOG_INF("Sending left click");
+	
+	/* Report ID 1: Left button press */
+	uint8_t press_report[] = {
+		0x01,  /* Report ID 1 */
+		0x01,  /* Left button pressed (bit 0) */
+		0x00   /* No wheel movement */
+	};
+	
+	/* Report ID 1: Button release */
+	uint8_t release_report[] = {
+		0x01,  /* Report ID 1 */
+		0x00,  /* No buttons pressed */
+		0x00   /* No wheel movement */
+	};
+	
+	/* Send press */
+	ret = usb_hid_send_report(press_report, sizeof(press_report));
+	if (ret != 0) {
+		LOG_ERR("Failed to send left click press (err %d)", ret);
+		return ret;
+	}
+	
+	/* Small delay for natural click timing */
+	k_msleep(10);
+	
+	/* Send release */
+	ret = usb_hid_send_report(release_report, sizeof(release_report));
+	if (ret != 0) {
+		LOG_ERR("Failed to send left click release (err %d)", ret);
+		return ret;
+	}
+	
+	LOG_INF("Left click sent successfully");
+	return 0;
+}
+
+/**
+ * @brief Send mouse right click (press and release)
+ * 
+ * @return 0 on success, negative error code on failure
+ */
+int usb_hid_send_right_click(void)
+{
+	int ret;
+	
+	if (hid_dev == NULL) {
+		LOG_ERR("USB HID device not initialized");
+		return -ENODEV;
+	}
+	
+	LOG_INF("Sending right click");
+	
+	/* Report ID 1: Right button press */
+	uint8_t press_report[] = {
+		0x01,  /* Report ID 1 */
+		0x02,  /* Right button pressed (bit 1) */
+		0x00   /* No wheel movement */
+	};
+	
+	/* Report ID 1: Button release */
+	uint8_t release_report[] = {
+		0x01,  /* Report ID 1 */
+		0x00,  /* No buttons pressed */
+		0x00   /* No wheel movement */
+	};
+	
+	/* Send press */
+	ret = usb_hid_send_report(press_report, sizeof(press_report));
+	if (ret != 0) {
+		LOG_ERR("Failed to send right click press (err %d)", ret);
+		return ret;
+	}
+	
+	/* Small delay for natural click timing */
+	k_msleep(10);
+	
+	/* Send release */
+	ret = usb_hid_send_report(release_report, sizeof(release_report));
+	if (ret != 0) {
+		LOG_ERR("Failed to send right click release (err %d)", ret);
+		return ret;
+	}
+	
+	LOG_INF("Right click sent successfully");
+	return 0;
+}

@@ -24,7 +24,8 @@
 /* Even G1 Events (0xF5 followed by event code) */
 #define EVEN_G1_EVENT_DOUBLE_TAP_CLOSE 0x00  /* Close features/turn off display */
 #define EVEN_G1_EVENT_SINGLE_TAP       0x01
-#define EVEN_G1_EVENT_DOUBLE_TAP       0x02  /* Observed double tap */
+#define EVEN_G1_EVENT_DASHBOARD_CLOSE  0x02  /* Dashboard closes (head tilt down) */
+#define EVEN_G1_EVENT_DASHBOARD_OPEN   0x03  /* Dashboard opens (head tilt up) */
 #define EVEN_G1_EVENT_TRIPLE_TAP_ON    0x04  /* Toggle silent mode on */
 #define EVEN_G1_EVENT_TRIPLE_TAP_OFF   0x05  /* Toggle silent mode off */
 #define EVEN_G1_EVENT_STATUS_09         0x09  /* Unknown status */
@@ -87,6 +88,9 @@ typedef struct {
     uint8_t queue_tail;           /* Next slot to add command */
     uint8_t queue_count;          /* Number of commands in queue */
     even_g1_command_t *current_cmd; /* Currently processing command */
+    
+    /* Dashboard state */
+    bool dashboard_open;          /* true = dashboard open (0x03), false = dashboard closed (0x02) */
 } even_g1_state_t;
 
 /* Initialization and connection management */
@@ -97,6 +101,9 @@ int even_g1_disconnect_left(void);
 int even_g1_disconnect_right(void);
 bool even_g1_is_connected(void);
 bool even_g1_is_ready(void);
+
+/* Dashboard state management */
+bool even_g1_is_dashboard_open(void);
 
 /* NUS service callbacks */
 void even_g1_nus_discovered(struct bt_conn *conn);

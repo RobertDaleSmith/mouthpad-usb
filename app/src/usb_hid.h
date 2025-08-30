@@ -40,4 +40,18 @@ int usb_hid_send_report(const uint8_t *data, uint16_t len);
  */
 int usb_hid_send_release_all(void);
 
+/**
+ * @brief Send mouse left click (press and release)
+ *
+ * @return 0 on success, negative error code on failure
+ */
+int usb_hid_send_left_click(void);
+
+/**
+ * @brief Send mouse right click (press and release)
+ *
+ * @return 0 on success, negative error code on failure
+ */
+int usb_hid_send_right_click(void);
+
 #endif /* USB_H */
