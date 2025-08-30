@@ -20,12 +20,13 @@
 #define EVEN_G1_OPCODE_MIC      0x0E
 #define EVEN_G1_OPCODE_MIC_DATA 0xF1
 #define EVEN_G1_OPCODE_EVENT    0xF5
+#define EVEN_G1_OPCODE_HEARTBEAT 0x25
 
 /* Even G1 Events (0xF5 followed by event code) */
 #define EVEN_G1_EVENT_DOUBLE_TAP_CLOSE 0x00  /* Close features/turn off display */
 #define EVEN_G1_EVENT_SINGLE_TAP       0x01
-#define EVEN_G1_EVENT_DASHBOARD_CLOSE  0x02  /* Dashboard closes (head tilt down) */
-#define EVEN_G1_EVENT_DASHBOARD_OPEN   0x03  /* Dashboard opens (head tilt up) */
+#define EVEN_G1_EVENT_DASHBOARD_CLOSE  0x03  /* Dashboard closes (head tilt down) */
+#define EVEN_G1_EVENT_DASHBOARD_OPEN   0x02  /* Dashboard opens (head tilt up) */
 #define EVEN_G1_EVENT_TRIPLE_TAP_ON    0x04  /* Toggle silent mode on */
 #define EVEN_G1_EVENT_TRIPLE_TAP_OFF   0x05  /* Toggle silent mode off */
 #define EVEN_G1_EVENT_STATUS_09         0x09  /* Unknown status */
@@ -91,6 +92,10 @@ typedef struct {
     
     /* Dashboard state */
     bool dashboard_open;          /* true = dashboard open (0x03), false = dashboard closed (0x02) */
+    
+    /* Heartbeat state */
+    uint8_t heartbeat_sequence;   /* Rolling sequence number for heartbeats */
+    int64_t last_activity_time;   /* Timestamp of last data sent to Even G1 */
 } even_g1_state_t;
 
 /* Initialization and connection management */

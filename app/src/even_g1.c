@@ -35,6 +35,9 @@ static void queue_fail_command(void);
 static void init_sequence_handler(struct k_work *work);
 static void keepalive_handler(struct k_work *work);
 static int send_ack_to_arm(struct bt_conn *conn);
+static int send_heartbeat_command(void);
+static int send_heartbeat_to_left(const uint8_t *data, uint16_t len);
+static int send_heartbeat_to_right(const uint8_t *data, uint16_t len);
 static int send_mic_stop_command(void);
 
 int even_g1_init(void)
@@ -43,6 +46,9 @@ int even_g1_init(void)
     memset(&g1_state, 0, sizeof(g1_state));
     k_work_init_delayable(&init_sequence_work, init_sequence_handler);
     k_work_init_delayable(&keepalive_work, keepalive_handler);
+    
+    /* Initialize activity timestamp to current time */
+    g1_state.last_activity_time = k_uptime_get();
     
     LOG_INF("Even G1 module initialized");
     return 0;
@@ -440,13 +446,44 @@ static int send_to_left(const uint8_t *data, uint16_t len)
         return -ENOTCONN;
     }
     
-    return ble_nus_multi_client_send_data(g1_state.left_conn, data, len);
+    int ret = ble_nus_multi_client_send_data(g1_state.left_conn, data, len);
+    if (ret == 0) {
+        /* Update activity timestamp on successful send */
+        g1_state.last_activity_time = k_uptime_get();
+    }
+    return ret;
 }
 
 static int send_to_right(const uint8_t *data, uint16_t len)
 {
     if (!g1_state.right_conn || !g1_state.right_ready) {
         LOG_WRN("Even G1 right arm not ready");
+        return -ENOTCONN;
+    }
+    
+    int ret = ble_nus_multi_client_send_data(g1_state.right_conn, data, len);
+    if (ret == 0) {
+        /* Update activity timestamp on successful send */
+        g1_state.last_activity_time = k_uptime_get();
+    }
+    return ret;
+}
+
+/* Heartbeat-specific send functions that don't update activity timestamp */
+static int send_heartbeat_to_left(const uint8_t *data, uint16_t len)
+{
+    if (!g1_state.left_conn || !g1_state.left_ready) {
+        LOG_WRN("Even G1 left arm not ready for heartbeat");
+        return -ENOTCONN;
+    }
+    
+    return ble_nus_multi_client_send_data(g1_state.left_conn, data, len);
+}
+
+static int send_heartbeat_to_right(const uint8_t *data, uint16_t len)
+{
+    if (!g1_state.right_conn || !g1_state.right_ready) {
+        LOG_WRN("Even G1 right arm not ready for heartbeat");
         return -ENOTCONN;
     }
     
@@ -994,10 +1031,19 @@ static void keepalive_handler(struct k_work *work)
         return;
     }
     
-    LOG_DBG("Even G1 heartbeat timer triggered");
+    LOG_DBG("Even G1 keepalive timer triggered");
     
-    /* Heartbeat timer - no need to send duplicate messages since main loop */
-    /* handles status mirroring every 500ms with proper change detection */
+    /* Check time since last activity (any data sent to Even G1) */
+    int64_t current_time = k_uptime_get();
+    int64_t time_since_activity = current_time - g1_state.last_activity_time;
+    
+    /* Send heartbeat if no activity for more than 6 seconds */
+    if (time_since_activity > 6000) {
+        LOG_INF("No Even G1 activity for %lld ms - sending heartbeat", time_since_activity);
+        send_heartbeat_command();
+    } else {
+        LOG_DBG("Recent Even G1 activity (%lld ms ago) - heartbeat not needed", time_since_activity);
+    }
     
     /* Reschedule heartbeat (8 seconds like official app) */
     k_work_reschedule(&keepalive_work, K_SECONDS(8));
@@ -1010,6 +1056,44 @@ static int send_ack_to_arm(struct bt_conn *conn)
                      (conn == g1_state.right_conn) ? "RIGHT" : "UNKNOWN";
     LOG_DBG("Acknowledging event from %s arm (no response sent)", arm);
     return 0;
+}
+
+static int send_heartbeat_command(void)
+{
+    if (!even_g1_is_ready()) {
+        LOG_DBG("Even G1 not ready, cannot send heartbeat");
+        return -ENOTCONN;
+    }
+
+    /* Increment heartbeat sequence */
+    g1_state.heartbeat_sequence = (g1_state.heartbeat_sequence + 1) % 0xFF;
+    
+    /* Create heartbeat packet based on official Even G1 app format:
+     * [0x25, length_low, length_high, sequence, 0x04, sequence] */
+    uint8_t heartbeat[] = {
+        EVEN_G1_OPCODE_HEARTBEAT,    /* 0x25 */
+        0x06,                        /* Length low byte (6 bytes total) */
+        0x00,                        /* Length high byte */
+        g1_state.heartbeat_sequence, /* Sequence number */
+        0x04,                        /* Heartbeat identifier */
+        g1_state.heartbeat_sequence  /* Sequence number (repeated) */
+    };
+
+    LOG_DBG("Sending heartbeat (seq=%d) to both arms", g1_state.heartbeat_sequence);
+    
+    /* Send to both arms like the official app (heartbeats don't count as activity) */
+    int left_err = send_heartbeat_to_left(heartbeat, sizeof(heartbeat));
+    int right_err = send_heartbeat_to_right(heartbeat, sizeof(heartbeat));
+    
+    if (left_err != 0) {
+        LOG_WRN("Failed to send heartbeat to left arm: %d", left_err);
+    }
+    if (right_err != 0) {
+        LOG_WRN("Failed to send heartbeat to right arm: %d", right_err);
+    }
+    
+    /* Consider successful if at least one arm received it */
+    return (left_err == 0 || right_err == 0) ? 0 : -EIO;
 }
 
 static int send_mic_stop_command(void)
