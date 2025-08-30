@@ -116,7 +116,7 @@ int even_g1_disconnect_left(void)
         LOG_INF("Even G1 left arm disconnected");
     }
     
-    /* Cancel keepalive if no arms connected */
+    /* Cancel heartbeat if no arms connected */
     if (!g1_state.left_conn && !g1_state.right_conn) {
         k_work_cancel_delayable(&keepalive_work);
     }
@@ -139,7 +139,7 @@ int even_g1_disconnect_right(void)
         LOG_INF("Even G1 right arm disconnected");
     }
     
-    /* Cancel keepalive if no arms connected */
+    /* Cancel heartbeat if no arms connected */
     if (!g1_state.left_conn && !g1_state.right_conn) {
         k_work_cancel_delayable(&keepalive_work);
     }
@@ -234,8 +234,8 @@ void even_g1_security_changed(struct bt_conn *conn, bt_security_t level)
     if (even_g1_is_ready()) {
         LOG_INF("Both Even G1 arms fully ready (MTU + NUS + Security), starting init sequence");
         k_work_schedule(&init_sequence_work, K_MSEC(100));
-        /* Start keepalive timer */
-        k_work_schedule(&keepalive_work, K_SECONDS(15));
+        /* Start heartbeat timer (8 seconds like official app) */
+        k_work_schedule(&keepalive_work, K_SECONDS(8));
     }
     
     k_mutex_unlock(&g1_mutex);
@@ -257,9 +257,18 @@ void even_g1_nus_data_received(struct bt_conn *conn, const uint8_t *data, uint16
     switch (data[0]) {
     case EVEN_G1_OPCODE_TEXT:
         /* This is an ACK/response from the glasses for text commands */
-        LOG_INF("Even G1 0x4E TEXT ACK from %s", arm);
-        /* Reset keepalive timer on any activity */
-        k_work_reschedule(&keepalive_work, K_SECONDS(15));
+        if (len >= 4) {
+            LOG_INF("Even G1 0x4E ACK from %s: seq=%02x status=%02x pkg=%02x/%02x", 
+                    arm, data[1], data[2], data[3], data[4]);
+            /* Check if this is a success ACK (0xC9 in byte 1) */
+            if (data[1] != 0xC9) {
+                LOG_WRN("Even G1 ACK with non-success status: 0x%02x", data[1]);
+            }
+        } else {
+            LOG_INF("Even G1 0x4E TEXT ACK from %s (short packet, len=%d)", arm, len);
+        }
+        /* Reset heartbeat timer on any activity */
+        k_work_reschedule(&keepalive_work, K_SECONDS(8));
         
         /* Handle ACKs using queue-based system */
         k_mutex_lock(&g1_mutex, K_FOREVER);
@@ -321,7 +330,7 @@ void even_g1_nus_data_received(struct bt_conn *conn, const uint8_t *data, uint16
             }
             k_mutex_unlock(&g1_mutex);
             
-            /* Handle touch events */
+            /* Handle touch events and status events */
             switch (data[1]) {
             case EVEN_G1_EVENT_SINGLE_TAP:
                 LOG_INF("Single tap detected");
@@ -333,8 +342,23 @@ void even_g1_nus_data_received(struct bt_conn *conn, const uint8_t *data, uint16
                 LOG_INF("Long press detected - mic activation");
                 /* Could respond with mic enable if needed */
                 break;
+            case 0x06:
+                LOG_INF("Even G1 status event 0x06 from %s", arm);
+                break;
+            case 0x09:
+                LOG_INF("Even G1 status event 0x09 from %s", arm);
+                break;
+            case 0x0a:
+                LOG_INF("Even G1 status event 0x0a from %s", arm);
+                break;
+            case 0x11:
+                LOG_INF("Even G1 status event 0x11 from %s", arm);
+                break;
+            case 0x12:
+                LOG_INF("Even G1 status event 0x12 from %s", arm);
+                break;
             default:
-                LOG_INF("Unknown Even G1 event: 0x%02x from %s (might be status/error)", data[1], arm);
+                LOG_INF("Unknown Even G1 event: 0x%02x from %s", data[1], arm);
                 break;
             }
         }
@@ -350,15 +374,15 @@ void even_g1_nus_data_received(struct bt_conn *conn, const uint8_t *data, uint16
         
     case EVEN_G1_OPCODE_MIC_DATA:
         LOG_WRN("Unexpected mic audio data from %s (%d bytes) - mic should not be active!", arm, len);
-        /* Reset keepalive timer on any activity */
-        k_work_reschedule(&keepalive_work, K_SECONDS(15));
+        /* Reset heartbeat timer on any activity */
+        k_work_reschedule(&keepalive_work, K_SECONDS(8));
         /* Don't try to stop mic - we shouldn't have started it in the first place */
         break;
         
     default:
         LOG_INF("Unknown opcode 0x%02x from %s", data[0], arm);
-        /* Reset keepalive timer on any activity */
-        k_work_reschedule(&keepalive_work, K_SECONDS(15));
+        /* Reset heartbeat timer on any activity */
+        k_work_reschedule(&keepalive_work, K_SECONDS(8));
         
         /* Also treat unknown opcodes as potential ACKs if we're waiting */
         k_mutex_lock(&g1_mutex, K_FOREVER);
@@ -408,9 +432,20 @@ static int queue_add_command(even_g1_cmd_type_t type, const uint8_t *packet, uin
 {
     k_mutex_lock(&g1_mutex, K_FOREVER);
     
+    /* If queue is getting full, drop the oldest pending command to make room */
+    if (g1_state.queue_count >= EVEN_G1_MAX_QUEUE_SIZE - 1) {
+        LOG_WRN("Even G1 command queue near full (%d/%d), dropping oldest command", 
+                g1_state.queue_count, EVEN_G1_MAX_QUEUE_SIZE);
+        /* Drop oldest queued command (not the current one) */
+        if (g1_state.queue_count > 0) {
+            g1_state.queue_head = (g1_state.queue_head + 1) % EVEN_G1_MAX_QUEUE_SIZE;
+            g1_state.queue_count--;
+        }
+    }
+    
     if (g1_state.queue_count >= EVEN_G1_MAX_QUEUE_SIZE) {
         k_mutex_unlock(&g1_mutex);
-        LOG_ERR("Even G1 command queue full");
+        LOG_ERR("Even G1 command queue still full after cleanup");
         return -ENOMEM;
     }
     
@@ -470,6 +505,9 @@ static void queue_fail_command(void)
     }
     
     k_mutex_unlock(&g1_mutex);
+    
+    /* Process next command in queue */
+    even_g1_process_queue();
 }
 
 int even_g1_queue_command(even_g1_cmd_type_t type, const uint8_t *packet, uint16_t packet_len, bool dual_arm)
@@ -489,7 +527,7 @@ void even_g1_process_queue(void)
     /* Check for timeout on current command */
     if (g1_state.current_cmd) {
         uint32_t elapsed = k_uptime_get_32() - g1_state.current_cmd->timestamp;
-        if (elapsed > 5000) { /* 5 second timeout */
+        if (elapsed > 2000) { /* 2 second timeout - fail faster to prevent queue buildup */
             LOG_ERR("Command timeout: type=%d, state=%d", 
                     g1_state.current_cmd->type, g1_state.current_cmd->state);
             k_mutex_unlock(&g1_mutex);
@@ -630,6 +668,8 @@ int even_g1_send_text_dual_arm(const char *text)
     memcpy(&packet[9], text, text_len);
     
     LOG_INF("Sending dual-arm text to Even G1: '%s'", text);
+    LOG_INF("Text packet details: seq=%02x total=%02x current=%02x newscreen=%02x",
+            packet[1], packet[2], packet[3], packet[4]);
     LOG_HEXDUMP_DBG(packet, 9 + text_len, "Dual-arm text packet");
     
     /* Use queue-based system for left→ACK→right flow */
@@ -912,38 +952,22 @@ static void keepalive_handler(struct k_work *work)
         return;
     }
     
-    LOG_DBG("Even G1 keepalive timer triggered");
+    LOG_DBG("Even G1 heartbeat timer triggered");
     
-    /* Keepalive timer - no need to send duplicate messages since main loop */
+    /* Heartbeat timer - no need to send duplicate messages since main loop */
     /* handles status mirroring every 500ms with proper change detection */
     
-    /* Reschedule keepalive */
-    k_work_reschedule(&keepalive_work, K_SECONDS(15));
+    /* Reschedule heartbeat (8 seconds like official app) */
+    k_work_reschedule(&keepalive_work, K_SECONDS(8));
 }
 
 static int send_ack_to_arm(struct bt_conn *conn)
 {
-    /* Send a simple ACK packet - use text opcode with minimal data */
-    uint8_t ack_packet[] = {
-        EVEN_G1_OPCODE_TEXT,  /* Opcode */
-        0x00,                 /* Sequence */
-        0x01,                 /* Total packages */
-        0x01,                 /* Current package */
-        0x00,                 /* No new screen */
-        0x00, 0x00,          /* Char pos */
-        0x01,                 /* Current page */
-        0x01                  /* Max page */
-    };
-    
-    if (conn == g1_state.left_conn && g1_state.left_ready) {
-        LOG_DBG("Sending ACK to left arm");
-        return send_to_left(ack_packet, sizeof(ack_packet));
-    } else if (conn == g1_state.right_conn && g1_state.right_ready) {
-        LOG_DBG("Sending ACK to right arm");
-        return send_to_right(ack_packet, sizeof(ack_packet));
-    }
-    
-    return -ENOTCONN;
+    /* Don't send ACKs that might confuse the glasses - just log receipt */
+    const char *arm = (conn == g1_state.left_conn) ? "LEFT" : 
+                     (conn == g1_state.right_conn) ? "RIGHT" : "UNKNOWN";
+    LOG_DBG("Acknowledging event from %s arm (no response sent)", arm);
+    return 0;
 }
 
 static int send_mic_stop_command(void)
