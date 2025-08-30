@@ -298,7 +298,7 @@ int main(void)
 			static int even_g1_display_counter = 0;
 			even_g1_display_counter++;
 			if (even_g1_display_counter >= 2000) {
-				int8_t rssi_dbm = any_connected ? ble_transport_get_rssi() : 0;
+				int8_t rssi_dbm = has_mouthpad ? ble_transport_get_rssi() : 0;
 				
 				// Create the same status text that would be displayed on OLED
 				// Get device name from connected MouthPad, otherwise use default
@@ -352,7 +352,7 @@ int main(void)
 				
 				// Signal line - always create it (empty if not connected), always on 4th line
 				char signal_str[32] = "";
-				if (any_connected) {
+				if (has_mouthpad) {
 					// Simple signal bars based on RSSI
 					const char* signal_bars;
 					if (rssi_dbm >= -50) {

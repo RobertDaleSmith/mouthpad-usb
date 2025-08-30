@@ -1001,6 +1001,9 @@ void even_g1_show_current_status(void)
             signal_bars = "[....]";
         }
         snprintf(signal_str, sizeof(signal_str), "%s %d dBm", signal_bars, rssi_dbm);
+        LOG_DBG("MouthPad connected - signal_str: '%s'", signal_str);
+    } else {
+        LOG_DBG("No MouthPad connected - signal_str remains empty: '%s'", signal_str);
     }
     
     LOG_INF("Showing current status on Even G1: %s | %s (dashboard: %s)", 
@@ -1010,6 +1013,7 @@ void even_g1_show_current_status(void)
     if (dashboard_open) {
         /* Dashboard OPEN: Show full status with battery and signal */
         LOG_INF("Dashboard OPEN - showing full status display");
+        LOG_DBG("Display lines: L1='%s' L2='%s' L3='%s' L4='%s'", display_title, status_line, battery_str, signal_str);
         even_g1_send_text_formatted_dual_arm(display_title, status_line, 
                                              battery_str,  /* Line 3: battery (empty if no data) */
                                              signal_str,   /* Line 4: signal (empty if not connected) */
@@ -1017,6 +1021,7 @@ void even_g1_show_current_status(void)
     } else {
         /* Dashboard CLOSED: Show minimal status - just name and status */
         LOG_INF("Dashboard CLOSED - showing minimal display");
+        LOG_DBG("Display lines: L1='%s' L2='%s' L3='' L4=''", display_title, status_line);
         even_g1_send_text_formatted_dual_arm(display_title, status_line, 
                                              "",           /* Line 3: empty */
                                              "",           /* Line 4: empty */
