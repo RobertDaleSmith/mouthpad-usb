@@ -204,11 +204,17 @@ int main(void)
 			data_activity = true;  // Mark data activity
 			
 			// Send complete command when we get newline
-			if (c == '\n' || c == '\r' || cdc_pos >= UART_BUF_SIZE) {
+			int expected_len = cdc_buffer[0];
+			if (cdc_pos >= UART_BUF_SIZE) {
+				LOG_ERR("CDC buffer overflow");
+				cdc_pos = 0;
+			}
+
+			if (cdc_pos == expected_len + 1) {
 				if (cdc_pos > 1) { // Don't send empty commands
 					if (ble_transport_is_nus_ready()) {
 						LOG_INF("Sending command (%d bytes): %.*s", cdc_pos, cdc_pos, cdc_buffer);
-						err = ble_transport_send_nus_data(cdc_buffer, cdc_pos);
+						err = ble_transport_send_nus_data(&cdc_buffer[1], cdc_pos - 1);
 						if (err) {
 							LOG_ERR("CDC→NUS FAILED (err %d)", err);
 						} else {
