@@ -101,7 +101,7 @@ int mouthpad_nus_data_received_callback(const uint8_t *data, uint16_t len)
 	message.message_body.pass_through_to_app.data.size = len;
 	memcpy(message.message_body.pass_through_to_app.data.bytes, data, len);
 
-	return usb_cdc_send_proto_message(message);
+	return usb_cdc_send_proto_message_async(message);
 }
 
 
@@ -256,13 +256,14 @@ int main(void)
 							mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
 							message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_connection_status_tag;
 							message.message_body.connection_status.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
-							// if (is_connected) {
-							// 	message.message_body.connection_status.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_CONNECTED;
-							// } else {
+							if (is_connected) {
+								message.message_body.connection_status.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_CONNECTED;
+							} else {
+								message.message_body.connection_status.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
 								
-							// }
+							}
 						
-							usb_cdc_send_proto_message(message);							
+							usb_cdc_send_proto_message_async(message);							
 						}
 						break;
 					case mouthware_message_MouthpadAppToUsbMessageDestination_MOUTHPAD_USB_MESSAGE_DESTINATION_MOUTHPAD:
