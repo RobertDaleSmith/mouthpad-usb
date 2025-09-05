@@ -221,6 +221,7 @@ int main(void)
 		bool is_connected = ble_transport_is_connected();
 		bool ble_data_activity = ble_transport_has_data_activity();
 		uint8_t battery_level = ble_bas_get_battery_level();		
+		int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
 		
 		// Check for data from USB CDC and send to NUS
 		static uint8_t cdc_buffer[UART_BUF_SIZE];
@@ -248,29 +249,31 @@ int main(void)
 
 				switch (message.destination) {
 					case mouthware_message_MouthpadAppToUsbMessageDestination_MOUTHPAD_USB_MESSAGE_DESTINATION_DONGLE:
-						if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_ble_connection_command_tag) {
-
-
-						}
-						else if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_connection_status_request_tag) {
+						if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_connection_status_request_tag) {
 							mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
-							message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_connection_status_tag;
-							message.message_body.connection_status.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
+							message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_connection_status_response_tag;
+							message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
 							if (is_connected) {
-								message.message_body.connection_status.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_CONNECTED;
+								message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_CONNECTED;
 							} else {
-								message.message_body.connection_status.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
+								message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
 								
 							}
 						
 							usb_cdc_send_proto_message_async(message);							
 						}
+						else if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_rssi_request_tag) {
+							mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
+							message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_rssi_status_response_tag;
+							message.message_body.rssi_status_response.rssi = rssi_dbm;
+							usb_cdc_send_proto_message_async(message);							
+						}
 						break;
 					case mouthware_message_MouthpadAppToUsbMessageDestination_MOUTHPAD_USB_MESSAGE_DESTINATION_MOUTHPAD:
-						if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_pass_through_to_mouthpad_tag) {
+						if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_pass_through_to_mouthpad_request_tag) {
 							if (ble_transport_is_nus_ready()) {
 								LOG_INF("Sending command (%d bytes): %.*s", cdc_pos, cdc_pos, cdc_buffer);
-								err = ble_transport_send_nus_data(&message.message_body.pass_through_to_mouthpad.data.bytes, message.message_body.pass_through_to_mouthpad.data.size);
+								err = ble_transport_send_nus_data(&message.message_body.pass_through_to_mouthpad_request.data.bytes, message.message_body.pass_through_to_mouthpad_request.data.size);
 								if (err) {
 									LOG_ERR("CDC→NUS FAILED (err %d)", err);
 								} else {
@@ -335,7 +338,6 @@ int main(void)
 		if (oled_display_is_available()) {
 			display_update_counter++;
 			if (display_update_counter >= 500) {
-				int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
 				oled_display_update_status(battery_level, is_connected, rssi_dbm);
 				display_update_counter = 0;
 			}
