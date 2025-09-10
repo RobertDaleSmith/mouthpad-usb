@@ -20,6 +20,9 @@
 #include "buzzer.h"
 #include "leds.h"
 #include "button.h"
+#include "MouthpadUsb.pb.h"
+#include "pb_decode.h"
+#include "pb_encode.h"
 
 #define LOG_MODULE_NAME mouthpad_usb
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -76,6 +79,29 @@ static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
 	} else {
 		LOG_DBG("HID client not ready - waiting for service discovery");
 	}
+}
+
+int usb_cdc_send_proto_message(mouthware_message_UsbDongleToMouthpadAppMessage message)
+{
+	uint8_t dataPacket[1024];
+	pb_ostream_t stream = pb_ostream_from_buffer(dataPacket, sizeof(dataPacket));
+	if (!pb_encode(&stream, mouthware_message_UsbDongleToMouthpadAppMessage_fields, &message)) {
+		LOG_ERR("Encoding failed: %s\n", PB_GET_ERROR(&stream));
+		return -1;
+	}
+	return usb_cdc_send_data(dataPacket, stream.bytes_written);
+}
+
+int mouthpad_nus_data_received_callback(const uint8_t *data, uint16_t len)
+{
+	LOG_INF("Mouthpad NUS data received: %d bytes", len);
+	// take binary data received via BLE, wrap it in a UsbDongleToMouthpadAppMessage and send it to the USB CDC
+	mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
+	message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_pass_through_to_app_tag;
+	message.message_body.pass_through_to_app.data.size = len;
+	memcpy(message.message_body.pass_through_to_app.data.bytes, data, len);
+
+	return usb_cdc_send_proto_message_async(message);
 }
 
 
@@ -136,7 +162,7 @@ int main(void)
 	LOG_INF("BLE Transport initialized successfully");
 
 	/* Register USB callbacks with BLE Transport */
-	ble_transport_register_usb_cdc_callback((usb_cdc_send_cb_t)usb_cdc_send_data);
+	ble_transport_register_usb_cdc_callback((usb_cdc_send_cb_t)mouthpad_nus_data_received_callback);
 	ble_transport_register_usb_hid_callback(usb_hid_data_callback);
 
 	/* Start bridging */
@@ -191,6 +217,12 @@ int main(void)
 	for (;;) {
 		/* USB CDC ↔ BLE NUS Bridge */
 		
+		/* Check BLE connection status and data activity */
+		bool is_connected = ble_transport_is_connected();
+		bool ble_data_activity = ble_transport_has_data_activity();
+		uint8_t battery_level = ble_bas_get_battery_level();		
+		int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
+		
 		// Check for data from USB CDC and send to NUS
 		static uint8_t cdc_buffer[UART_BUF_SIZE];
 		static int cdc_pos = 0;
@@ -203,29 +235,76 @@ int main(void)
 			cdc_pos++;
 			data_activity = true;  // Mark data activity
 			
-			// Send complete command when we get newline
-			if (c == '\n' || c == '\r' || cdc_pos >= UART_BUF_SIZE) {
-				if (cdc_pos > 1) { // Don't send empty commands
-					if (ble_transport_is_nus_ready()) {
-						LOG_INF("Sending command (%d bytes): %.*s", cdc_pos, cdc_pos, cdc_buffer);
-						err = ble_transport_send_nus_data(cdc_buffer, cdc_pos);
-						if (err) {
-							LOG_ERR("CDC→NUS FAILED (err %d)", err);
-						} else {
-							LOG_INF("Command sent successfully");
+			int expected_len = cdc_buffer[0];
+			if (cdc_pos >= UART_BUF_SIZE) {
+				LOG_ERR("CDC buffer overflow");
+				cdc_pos = 0;
+			}
+
+			if (cdc_pos == expected_len + 1) {
+				// decode the byte string as 
+				mouthware_message_MouthpadAppToUsbMessage message;
+				pb_istream_t stream = pb_istream_from_buffer(&cdc_buffer[1], cdc_pos - 1);
+				pb_decode(&stream, mouthware_message_MouthpadAppToUsbMessage_fields, &message);
+
+				switch (message.destination) {
+					case mouthware_message_MouthpadAppToUsbMessageDestination_MOUTHPAD_USB_MESSAGE_DESTINATION_DONGLE:
+						if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_connection_status_request_tag) {
+							mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
+							message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_connection_status_response_tag;
+							message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
+							if (is_connected) {
+								message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_CONNECTED;
+							} else {
+								message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
+								
+							}
+						
+							usb_cdc_send_proto_message_async(message);							
 						}
-					} else {
-						LOG_DBG("NUS client not ready - waiting for service discovery");
-					}
+						else if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_rssi_request_tag) {
+							mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
+							message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_rssi_status_response_tag;
+							message.message_body.rssi_status_response.rssi = rssi_dbm;
+							usb_cdc_send_proto_message_async(message);							
+						}
+						break;
+					case mouthware_message_MouthpadAppToUsbMessageDestination_MOUTHPAD_USB_MESSAGE_DESTINATION_MOUTHPAD:
+						if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_pass_through_to_mouthpad_request_tag) {
+							if (ble_transport_is_nus_ready()) {
+								LOG_INF("Sending command (%d bytes): %.*s", cdc_pos, cdc_pos, cdc_buffer);
+								err = ble_transport_send_nus_data(&message.message_body.pass_through_to_mouthpad_request.data.bytes, message.message_body.pass_through_to_mouthpad_request.data.size);
+								if (err) {
+									LOG_ERR("CDC→NUS FAILED (err %d)", err);
+								} else {
+									LOG_INF("Command sent successfully");
+								}
+							}
+						} else {
+							// Return error indicating invalid message
+						}
+						break;
+					default:
+						LOG_ERR("Invalid destination: %d", message.destination);
+						break;
 				}
+
+				// if (cdc_pos > 1) { // Don't send empty commands
+				// 	if (ble_transport_is_nus_ready()) {
+				// 		LOG_INF("Sending command (%d bytes): %.*s", cdc_pos, cdc_pos, cdc_buffer);
+				// 		err = ble_transport_send_nus_data(&cdc_buffer[1], cdc_pos - 1);
+				// 		if (err) {
+				// 			LOG_ERR("CDC→NUS FAILED (err %d)", err);
+				// 		} else {
+				// 			LOG_INF("Command sent successfully");
+				// 		}
+				// 	} else {
+				// 		LOG_DBG("NUS client not ready - waiting for service discovery");
+				// 	}
+				// }
 				cdc_pos = 0; // Reset buffer
 			}
 		}
-		
-		/* Check BLE connection status and data activity */
-		bool is_connected = ble_transport_is_connected();
-		bool ble_data_activity = ble_transport_has_data_activity();
-		uint8_t battery_level = ble_bas_get_battery_level();
 		
 		/* Update LED state based on connection and activity */
 		if (leds_is_available()) {
@@ -259,7 +338,6 @@ int main(void)
 		if (oled_display_is_available()) {
 			display_update_counter++;
 			if (display_update_counter >= 500) {
-				int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
 				oled_display_update_status(battery_level, is_connected, rssi_dbm);
 				display_update_counter = 0;
 			}

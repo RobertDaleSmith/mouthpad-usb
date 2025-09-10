@@ -13,6 +13,8 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/drivers/uart.h>
+#include "MouthpadUsb.pb.h"
+#include "pb_encode.h"
 
 LOG_MODULE_REGISTER(usb_cdc, LOG_LEVEL_INF);
 
@@ -22,9 +24,45 @@ static const struct device *cdc_acm_dev;
 /* Work structures for UART handling */
 static struct k_work_delayable uart_work;
 
+/* Work structures for async USB CDC message sending */
+static struct k_work usb_cdc_async_work;
+
 /* FIFOs for UART data */
 static K_FIFO_DEFINE(fifo_uart_tx_data);
 static K_FIFO_DEFINE(fifo_uart_rx_data);
+
+/* FIFO for async USB CDC message sending */
+static K_FIFO_DEFINE(fifo_usb_cdc_async_data);
+
+/* Data structure for async USB CDC message sending */
+struct usb_cdc_async_data_t {
+	void *fifo_reserved;
+	mouthware_message_UsbDongleToMouthpadAppMessage message;
+};
+
+/* Work handler for async USB CDC message sending */
+static void usb_cdc_async_work_handler(struct k_work *work)
+{
+	struct usb_cdc_async_data_t *async_data;
+	
+	/* Get message from FIFO */
+	async_data = k_fifo_get(&fifo_usb_cdc_async_data, K_NO_WAIT);
+	if (!async_data) {
+		return;
+	}
+	
+	/* Send the message synchronously (this will be quick) */
+	uint8_t dataPacket[1024];
+	pb_ostream_t stream = pb_ostream_from_buffer(dataPacket, sizeof(dataPacket));
+	if (!pb_encode(&stream, mouthware_message_UsbDongleToMouthpadAppMessage_fields, &async_data->message)) {
+		LOG_ERR("Async encoding failed: %s\n", PB_GET_ERROR(&stream));
+	} else {
+		usb_cdc_send_data(dataPacket, stream.bytes_written);
+	}
+	
+	/* Free the async data */
+	k_free(async_data);
+}
 
 /* Calculate CRC-16 (CCITT) for data integrity checking */
 uint16_t calculate_crc16(const uint8_t *data, uint16_t len)
@@ -203,6 +241,9 @@ int usb_cdc_init(void)
 		return -ENODEV;
 	}
 	
+	/* Initialize work queue for async message sending */
+	k_work_init(&usb_cdc_async_work, usb_cdc_async_work_handler);
+	
 	/* Note: USB subsystem will be initialized by USB HID later */
 	LOG_INF("USB CDC: Device ready: %s", cdc_acm_dev->name);
 	LOG_INF("USB CDC: Initialization successful");
@@ -277,4 +318,28 @@ int usb_cdc_receive_data(uint8_t *buffer, uint16_t max_len)
 const struct device *usb_cdc_get_uart_device(void)
 {
 	return cdc_acm_dev;
+}
+
+/* Send USB CDC proto message asynchronously (non-blocking) */
+int usb_cdc_send_proto_message_async(mouthware_message_UsbDongleToMouthpadAppMessage message)
+{
+	struct usb_cdc_async_data_t *async_data;
+	
+	/* Allocate memory for async data */
+	async_data = k_malloc(sizeof(struct usb_cdc_async_data_t));
+	if (!async_data) {
+		LOG_ERR("Failed to allocate memory for async USB CDC message");
+		return -ENOMEM;
+	}
+	
+	/* Copy the message */
+	async_data->message = message;
+	
+	/* Put message in FIFO */
+	k_fifo_put(&fifo_usb_cdc_async_data, async_data);
+	
+	/* Submit work to work queue */
+	k_work_submit(&usb_cdc_async_work);
+	
+	return 0;
 }

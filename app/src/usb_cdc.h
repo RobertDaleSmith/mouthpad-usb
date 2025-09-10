@@ -31,6 +31,11 @@ int usb_cdc_init(void);
 int usb_cdc_send_data(const uint8_t *data, uint16_t len);
 int usb_cdc_receive_data(uint8_t *buffer, uint16_t max_len);
 
+#include "MouthpadUsb.pb.h"
+
+/* Async USB CDC proto message sending (non-blocking) */
+int usb_cdc_send_proto_message_async(mouthware_message_UsbDongleToMouthpadAppMessage message);
+
 /* CRC calculation for packet framing */
 uint16_t calculate_crc16(const uint8_t *data, uint16_t len);
 

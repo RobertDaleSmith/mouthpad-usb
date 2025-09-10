@@ -8,6 +8,11 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(mouthpad_usb)
 
+target_include_directories(app PRIVATE 
+  src/mouthpad-proto/nanopb
+  src/mouthpad-proto/src/C
+)
+
 # NORDIC SDK APP START
   target_sources(app PRIVATE
     src/ble_transport.c
@@ -22,5 +27,9 @@ project(mouthpad_usb)
     src/leds.c
     src/button.c
     src/main.c
+    src/mouthpad-proto/src/C/MouthpadUsb.pb.c
+    src/mouthpad-proto/nanopb/pb_common.c
+    src/mouthpad-proto/nanopb/pb_decode.c
+    src/mouthpad-proto/nanopb/pb_encode.c
   )
 # NORDIC SDK APP END
