@@ -135,9 +135,9 @@ int button_update(void)
     uint32_t current_time = k_uptime_get_32();
     
     /* Log when pin state changes or periodically */
-    if (pin_state != last_pin_state || (current_time - last_debug_time) > 1000) {
-        // LOG_INF("BUTTON DEBUG: pin=%d, raw=%d, debounced=%d, state=%d", 
-        //         pin_state, button_pressed_raw, button_pressed_debounced, button_state);
+    if (pin_state != last_pin_state || (current_time - last_debug_time) > 5000) {
+        LOG_INF("BUTTON DEBUG: pin=%d, raw=%d, debounced=%d, state=%d", 
+                pin_state, button_pressed_raw, button_pressed_debounced, button_state);
         last_pin_state = pin_state;
         last_debug_time = current_time;
     }
@@ -240,6 +240,11 @@ static void process_button_state_machine(void)
             button_state = BUTTON_STATE_IDLE;
             LOG_DBG("Button released after hold");
         }
+        break;
+        
+    case BUTTON_STATE_RELEASED:
+        /* This state is currently unused - go back to idle */
+        button_state = BUTTON_STATE_IDLE;
         break;
     }
 }

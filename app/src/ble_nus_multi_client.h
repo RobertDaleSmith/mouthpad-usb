@@ -14,6 +14,7 @@
 
 /* Callback function types */
 typedef void (*ble_nus_multi_data_received_cb_t)(struct bt_conn *conn, const uint8_t *data, uint16_t len);
+typedef void (*ble_nus_multi_data_sent_cb_t)(struct bt_conn *conn, uint8_t err);
 typedef void (*ble_nus_multi_discovery_complete_cb_t)(struct bt_conn *conn);
 typedef void (*ble_nus_multi_mtu_exchange_cb_t)(struct bt_conn *conn, uint16_t mtu);
 
@@ -40,6 +41,7 @@ int ble_nus_multi_client_exchange_mtu(struct bt_conn *conn);
 
 /* Register callbacks */
 void ble_nus_multi_client_register_data_received_cb(ble_nus_multi_data_received_cb_t cb);
+void ble_nus_multi_client_register_data_sent_cb(ble_nus_multi_data_sent_cb_t cb);
 void ble_nus_multi_client_register_discovery_complete_cb(ble_nus_multi_discovery_complete_cb_t cb);
 void ble_nus_multi_client_register_mtu_exchange_cb(ble_nus_multi_mtu_exchange_cb_t cb);
 

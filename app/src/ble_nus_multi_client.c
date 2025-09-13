@@ -45,6 +45,7 @@ static bool discovery_in_progress = false;
 
 /* Callback functions for external modules */
 static ble_nus_multi_data_received_cb_t data_received_cb;
+static ble_nus_multi_data_sent_cb_t data_sent_cb;
 static ble_nus_multi_discovery_complete_cb_t discovery_complete_cb;
 static ble_nus_multi_mtu_exchange_cb_t mtu_exchange_cb;
 
@@ -125,6 +126,11 @@ static void nus_data_sent(struct bt_nus_client *nus, uint8_t err, const uint8_t 
         LOG_ERR("NUS send error %d for connection %p", err, nus_conn->conn);
     } else {
         LOG_DBG("NUS data sent successfully: %d bytes to %p", len, nus_conn->conn);
+    }
+    
+    /* Call external data sent callback if registered */
+    if (data_sent_cb) {
+        data_sent_cb(nus_conn->conn, err);
     }
 }
 
@@ -396,6 +402,11 @@ int ble_nus_multi_client_exchange_mtu(struct bt_conn *conn)
 void ble_nus_multi_client_register_data_received_cb(ble_nus_multi_data_received_cb_t cb)
 {
     data_received_cb = cb;
+}
+
+void ble_nus_multi_client_register_data_sent_cb(ble_nus_multi_data_sent_cb_t cb)
+{
+    data_sent_cb = cb;
 }
 
 void ble_nus_multi_client_register_discovery_complete_cb(ble_nus_multi_discovery_complete_cb_t cb)

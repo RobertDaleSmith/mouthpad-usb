@@ -12,7 +12,7 @@ init:
 	west update
 
 # Build the project (default to xiao_ble, can override with BOARD=)
-BOARD ?= xiao_ble
+BOARD ?= adafruit_feather_nrf52840
 build:
 	west build -b $(BOARD) app --pristine=always
 

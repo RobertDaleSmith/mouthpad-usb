@@ -34,18 +34,20 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 /* Button event callback function */
 static void button_event_callback(button_event_t event)
 {
+	LOG_INF("*** BUTTON EVENT RECEIVED: %d ***", event);
 	switch (event) {
 	case BUTTON_EVENT_CLICK:
-		LOG_INF("=== BUTTON CLICK - STARTING SMART DEVICE SCAN ===");
+		LOG_INF("=== BUTTON CLICK - TOGGLE DISPLAY MODE ===");
+		/* Toggle between bitmap and text display modes */
+		even_g1_toggle_display_mode();
+		break;
+		
+	case BUTTON_EVENT_DOUBLE_CLICK:
+		LOG_INF("=== BUTTON DOUBLE CLICK - STARTING SMART DEVICE SCAN ===");
 		/* Start smart scan for missing devices (MouthPad or Even G1) */
 		ble_central_start_scan_for_missing_devices();
 		/* Update Even G1 display immediately to show "Scanning..." */
 		even_g1_show_current_status();
-		break;
-		
-	case BUTTON_EVENT_DOUBLE_CLICK:
-		LOG_INF("=== BUTTON DOUBLE CLICK ===");
-		/* TODO: Add double-click functionality */
 		break;
 		
 	case BUTTON_EVENT_HOLD:

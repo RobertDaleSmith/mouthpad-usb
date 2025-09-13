@@ -68,7 +68,7 @@
 		buzzer-pwm = &pwm1;
 		led-strip = &neopixel;
 		led0 = &neopixel;  /* Make led0 alias point to neopixel for HAS_NEOPIXEL detection */
-		sw0 = &button0;    /* Use existing Feather user button */
+		sw0 = &button0;    /* Ensure sw0 alias is available */
 	};
 	
 	buzzer {
