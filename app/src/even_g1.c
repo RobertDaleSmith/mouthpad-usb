@@ -46,6 +46,7 @@ static int send_mic_stop_command(void);
 
 /* Bitmap transmission functions */
 static int even_g1_send_next_bitmap_packet(void);
+static void even_g1_send_pipelined_packets(void);
 static int even_g1_send_bitmap_end(void);
 static int even_g1_send_bitmap_crc(void);
 static void even_g1_abort_bitmap_transmission(void);
@@ -94,6 +95,21 @@ int even_g1_connect_left(struct bt_conn *conn)
     
     LOG_INF("Even G1 left arm connected");
     
+    /* Request faster connection parameters for bitmap transmission */
+    struct bt_le_conn_param fast_params = {
+        .interval_min = 6,     /* 7.5ms - ABSOLUTE MINIMUM for BLE spec */
+        .interval_max = 6,     /* 7.5ms - LOCK to minimum for maximum speed */
+        .latency = 0,          /* No latency for speed */
+        .timeout = 400         /* 4 seconds timeout */
+    };
+    
+    int err = bt_conn_le_param_update(conn, &fast_params);
+    if (err) {
+        LOG_WRN("Failed to request fast connection params for left arm: %d", err);
+    } else {
+        LOG_INF("Requested ULTRA-FAST connection params for left arm (7.5ms LOCKED interval)");
+    }
+    
     k_mutex_unlock(&g1_mutex);
     return 0;
 }
@@ -117,6 +133,21 @@ int even_g1_connect_right(struct bt_conn *conn)
     g1_state.right_mtu = 0;
     
     LOG_INF("Even G1 right arm connected");
+    
+    /* Request faster connection parameters for bitmap transmission */
+    struct bt_le_conn_param fast_params = {
+        .interval_min = 6,     /* 7.5ms - ABSOLUTE MINIMUM for BLE spec */
+        .interval_max = 6,     /* 7.5ms - LOCK to minimum for maximum speed */
+        .latency = 0,          /* No latency for speed */
+        .timeout = 400         /* 4 seconds timeout */
+    };
+    
+    int err = bt_conn_le_param_update(conn, &fast_params);
+    if (err) {
+        LOG_WRN("Failed to request fast connection params for right arm: %d", err);
+    } else {
+        LOG_INF("Requested ULTRA-FAST connection params for right arm (7.5ms LOCKED interval)");
+    }
     
     /* If both arms are now connected, start initialization sequence */
     if (g1_state.left_conn && g1_state.right_conn) {
@@ -508,14 +539,12 @@ void even_g1_nus_data_received(struct bt_conn *conn, const uint8_t *data, uint16
                     g1_state.bitmap_right_end_acked = true;
                 }
                 
-                /* Check if both arms have acknowledged end command */
+                /* OPTIMIZATION: CRC is now sent immediately, no need to wait */
+                k_mutex_unlock(&g1_mutex);
                 if (g1_state.bitmap_left_end_acked && g1_state.bitmap_right_end_acked) {
-                    LOG_INF("✅ Both arms acknowledged end command - NOW sending CRC");
-                    k_mutex_unlock(&g1_mutex);
-                    even_g1_send_bitmap_crc();
+                    LOG_INF("✅ Both arms acknowledged end command (CRC already sent)");
                 } else {
-                    k_mutex_unlock(&g1_mutex);
-                    LOG_INF("⏳ Waiting for other arm to acknowledge end command...");
+                    LOG_INF("⏳ End command ACK received (CRC already sent)");
                 }
             } else {
                 LOG_WRN("Bitmap end command failed on %s arm: status=0x%02X", arm, status);
@@ -1590,7 +1619,7 @@ int even_g1_send_bmp_file(const uint8_t *bmp_data, size_t bmp_size)
     
     /* No exit command needed - proceed directly with bitmap transmission */
     LOG_INF("Starting bitmap transmission to both arms");
-    k_sleep(K_MSEC(100));
+    /* k_sleep(K_MSEC(100)); -- REMOVED: No delay needed */
     
     /* Calculate total packets needed for FULL BMP FILE */
     uint16_t total_packets = (bmp_size + EVEN_G1_BITMAP_PACKET_SIZE - 1) / EVEN_G1_BITMAP_PACKET_SIZE;
@@ -1630,8 +1659,9 @@ int even_g1_send_bmp_file(const uint8_t *bmp_data, size_t bmp_size)
     
     k_mutex_unlock(&g1_mutex);
     
-    /* Start sending packets directly - preparation command causes BLE disconnections */
-    return even_g1_send_next_bitmap_packet();
+    /* Start pipelined transmission for maximum speed */
+    even_g1_send_pipelined_packets();
+    return 0;
 }
 
 static int even_g1_send_next_bitmap_packet(void)
@@ -1701,22 +1731,22 @@ static int even_g1_send_next_bitmap_packet(void)
     g1_state.bitmap_left_retry_count = 0;
     g1_state.bitmap_right_retry_count = 0;
     
-    /* Send sequentially: left arm first, then right arm after callback */
-    /* This avoids simultaneous identical packets which may confuse Even G1 firmware */
+    /* Send to both arms with tiny delay to prevent BLE congestion */
     int left_err = send_to_left(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
     if (left_err != 0) {
         LOG_WRN("Failed to queue bitmap packet to left arm: %d", left_err);
         g1_state.bitmap_left_pending = false;
-        
-        /* If left failed, try right immediately */
-        int right_err = send_to_right(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
-        if (right_err != 0) {
-            LOG_WRN("Failed to queue bitmap packet to right arm: %d", right_err);
-            g1_state.bitmap_right_pending = false;
-        }
     }
     
-    /* Right arm will be sent after left arm callback completes */
+    /* Tiny delay to prevent BLE stack congestion - 1ms */
+    k_sleep(K_USEC(500));  /* 0.5ms micro-delay */
+    
+    /* Send to right arm with micro-delay to ensure clean transmission */
+    int right_err = send_to_right(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
+    if (right_err != 0) {
+        LOG_WRN("Failed to queue bitmap packet to right arm: %d", right_err);
+        g1_state.bitmap_right_pending = false;
+    }
     
     k_mutex_unlock(&g1_mutex);
     
@@ -1760,9 +1790,10 @@ static int even_g1_send_bitmap_end(void)
     
     k_mutex_unlock(&g1_mutex);
     
-    /* Send sequentially: left arm first */
+    /* Send to both arms with ZERO delay for maximum speed */
     int left_err = ble_nus_multi_client_send_data(g1_state.left_conn, end_packet, packet_len);
-    /* Right arm will be sent after left arm callback - don't send now */
+    /* k_sleep(K_USEC(500)); -- REMOVED: Zero delay for speed */
+    int right_err = ble_nus_multi_client_send_data(g1_state.right_conn, end_packet, packet_len);
     
     if (left_err != 0) {
         k_mutex_lock(&g1_mutex, K_FOREVER);
@@ -1771,15 +1802,11 @@ static int even_g1_send_bitmap_end(void)
         LOG_ERR("Failed to send bitmap end to left arm: %d", left_err);
     }
     
-    if (left_err != 0) {
-        /* Try right arm immediately if left failed */
-        int right_err = ble_nus_multi_client_send_data(g1_state.right_conn, end_packet, packet_len);
-        if (right_err != 0) {
-            k_mutex_lock(&g1_mutex, K_FOREVER);
-            g1_state.bitmap_right_pending = false;
-            k_mutex_unlock(&g1_mutex);
-            LOG_ERR("Failed to send bitmap end to right arm: %d", right_err);
-        }
+    if (right_err != 0) {
+        k_mutex_lock(&g1_mutex, K_FOREVER);
+        g1_state.bitmap_right_pending = false;
+        k_mutex_unlock(&g1_mutex);
+        LOG_ERR("Failed to send bitmap end to right arm: %d", right_err);
     }
     
     if (left_err != 0 && !g1_state.bitmap_left_pending && !g1_state.bitmap_right_pending) {
@@ -1826,23 +1853,23 @@ static int even_g1_send_bitmap_crc(void)
     
     k_mutex_unlock(&g1_mutex);
     
-    /* Send sequentially: left arm first */
+    /* Send to both arms with ZERO delay for maximum speed */
     int left_err = ble_nus_multi_client_send_data(g1_state.left_conn, crc_packet, packet_len);
+    /* k_sleep(K_USEC(500)); -- REMOVED: Zero delay for speed */
+    int right_err = ble_nus_multi_client_send_data(g1_state.right_conn, crc_packet, packet_len);
     
     if (left_err != 0) {
         k_mutex_lock(&g1_mutex, K_FOREVER);
         g1_state.bitmap_left_pending = false;
         k_mutex_unlock(&g1_mutex);
         LOG_ERR("Failed to send bitmap CRC to left arm: %d", left_err);
-        
-        /* Try right arm immediately if left failed */
-        int right_err = ble_nus_multi_client_send_data(g1_state.right_conn, crc_packet, packet_len);
-        if (right_err != 0) {
-            k_mutex_lock(&g1_mutex, K_FOREVER);
-            g1_state.bitmap_right_pending = false;
-            k_mutex_unlock(&g1_mutex);
-            LOG_ERR("Failed to send bitmap CRC to right arm: %d", right_err);
-        }
+    }
+    
+    if (right_err != 0) {
+        k_mutex_lock(&g1_mutex, K_FOREVER);
+        g1_state.bitmap_right_pending = false;
+        k_mutex_unlock(&g1_mutex);
+        LOG_ERR("Failed to send bitmap CRC to right arm: %d", right_err);
     }
     
     if (left_err != 0 && !g1_state.bitmap_left_pending && !g1_state.bitmap_right_pending) {
@@ -1930,8 +1957,8 @@ static bool send_activation_cmd_with_retry(const uint8_t *data, uint8_t len, con
             k_sleep(K_MSEC(backoff_ms));
         }
         
+        /* Send to both arms in parallel without delay for better performance */
         int left_ret = ble_nus_multi_client_send_data(g1_state.left_conn, data, len);
-        k_sleep(K_MSEC(200));  /* Give BLE stack time between arms */
         int right_ret = ble_nus_multi_client_send_data(g1_state.right_conn, data, len);
         
         if (left_ret == 0 && right_ret == 0) {
@@ -1974,63 +2001,45 @@ static void even_g1_bitmap_send_callback(struct bt_conn *conn, uint8_t err)
     
     k_mutex_lock(&g1_mutex, K_FOREVER);
     
-    /* Check which arm completed */
+    /* OPTIMAL CALLBACK: Fast processing with minimal overhead */
     if (conn == g1_state.left_conn) {
         if (err) {
+            LOG_DBG("Left arm error %d (retry internally)", err);
             g1_state.bitmap_left_retry_count++;
-            LOG_WRN("Bitmap packet send to left arm failed (retry %d/%d): %d", 
-                    g1_state.bitmap_left_retry_count, EVEN_G1_MAX_PACKET_RETRIES, err);
-            
             if (g1_state.bitmap_left_retry_count <= EVEN_G1_MAX_PACKET_RETRIES) {
-                /* Retry sending to left arm */
+                /* Quick retry */
                 int retry_err = send_to_left(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
                 if (retry_err != 0) {
-                    LOG_ERR("Failed to retry bitmap packet to left arm: %d", retry_err);
-                    g1_state.bitmap_left_pending = false;  /* Give up on left arm */
+                    g1_state.bitmap_left_pending = false;
                 }
             } else {
-                LOG_ERR("Left arm exceeded max retries, giving up");
                 g1_state.bitmap_left_pending = false;
             }
         } else {
             g1_state.bitmap_left_pending = false;
-            LOG_DBG("Bitmap packet sent to left arm successfully");
-            
-            /* Left arm succeeded - now send to right arm sequentially */
-            if (g1_state.bitmap_right_pending) {
-                int right_err = send_to_right(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
-                if (right_err != 0) {
-                    LOG_WRN("Failed to send bitmap packet to right arm after left success: %d", right_err);
-                    g1_state.bitmap_right_pending = false;
-                }
-            }
         }
     } else if (conn == g1_state.right_conn) {
         if (err) {
+            LOG_DBG("Right arm error %d (retry internally)", err);
             g1_state.bitmap_right_retry_count++;
-            LOG_WRN("Bitmap packet send to right arm failed (retry %d/%d): %d", 
-                    g1_state.bitmap_right_retry_count, EVEN_G1_MAX_PACKET_RETRIES, err);
-            
             if (g1_state.bitmap_right_retry_count <= EVEN_G1_MAX_PACKET_RETRIES) {
-                /* Retry sending to right arm */
+                /* Quick retry */
                 int retry_err = send_to_right(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
                 if (retry_err != 0) {
-                    LOG_ERR("Failed to retry bitmap packet to right arm: %d", retry_err);
-                    g1_state.bitmap_right_pending = false;  /* Give up on right arm */
+                    g1_state.bitmap_right_pending = false;
                 }
             } else {
-                LOG_ERR("Right arm exceeded max retries, giving up");
                 g1_state.bitmap_right_pending = false;
             }
         } else {
             g1_state.bitmap_right_pending = false;
-            LOG_DBG("Bitmap packet sent to right arm successfully");
         }
     }
     
-    /* If both arms have completed, continue transmission */
+    /* Continue immediately when both arms complete - NO delays in callback */
     if (!g1_state.bitmap_left_pending && !g1_state.bitmap_right_pending && g1_state.bitmap_in_progress) {
         k_mutex_unlock(&g1_mutex);
+        /* IMMEDIATE continuation - this is the key to speed */
         even_g1_continue_bitmap_transmission();
     } else {
         k_mutex_unlock(&g1_mutex);
@@ -2051,21 +2060,15 @@ static void even_g1_continue_bitmap_transmission(void)
     
     k_mutex_unlock(&g1_mutex);
     
-    /* Add delay between packets to prevent BLE congestion */
-    /* This gives the BLE stack time to process each packet */
-    if (packets_sent > 0 && packets_sent < packets_total) {
-        k_sleep(K_MSEC(20));  /* 20ms between packets = ~1 second for 51 packets */
-    }
-    
     /* Check which phase we're in */
     if (packets_sent == packets_total) {
         /* Just finished last data packet, send end command */
         LOG_INF("All bitmap packets sent, sending end command");
         even_g1_send_bitmap_end();
     } else if (packets_sent == packets_total + 1) {
-        /* Just finished sending end command - wait for ACK */
-        LOG_INF("End command sent, waiting for ACK from both arms before sending CRC");
-        /* CRC will be sent when both arms ACK the end command */
+        /* Just finished sending end command - send CRC immediately without waiting for ACKs */
+        LOG_INF("End command sent, sending CRC immediately (no ACK wait)");
+        even_g1_send_bitmap_crc();
     } else if (packets_sent >= packets_total + 2) {
         /* CRC phase completed - waiting for both arms to validate */
         LOG_INF("CRC sent, waiting for validation from both arms");
@@ -2082,9 +2085,100 @@ static void even_g1_continue_bitmap_transmission(void)
             even_g1_show_current_status();
         }
     } else {
-        /* Still sending data packets - continue immediately via callback-based flow control */
-        even_g1_send_next_bitmap_packet();
+        /* OPTIMIZED TRANSMISSION: Faster single-packet flow with reduced delays */
+        /* This reduces callback serialization while respecting BLE buffer limits */
+        even_g1_send_pipelined_packets();
     }
+}
+
+static void even_g1_send_pipelined_packets(void)
+{
+    /* OPTIMAL SINGLE-PACKET TRANSMISSION:
+     * Based on buffer exhaustion analysis, BLE NUS can only handle 1 packet at a time.
+     * The key to speed is MINIMAL delays while respecting this fundamental constraint.
+     * Use immediate scheduling with ultra-fast ARM switching for maximum throughput.
+     */
+    
+    k_mutex_lock(&g1_mutex, K_FOREVER);
+    
+    if (!g1_state.bitmap_in_progress) {
+        k_mutex_unlock(&g1_mutex);
+        return;
+    }
+    
+    uint16_t packets_sent = g1_state.bitmap_packets_sent;
+    uint16_t packets_total = g1_state.bitmap_packets_total;
+    
+    if (packets_sent >= packets_total) {
+        k_mutex_unlock(&g1_mutex);
+        return;
+    }
+    
+    /* Send ONE packet with optimal timing - this is the BLE limit */
+    uint16_t packet_index = packets_sent;
+    uint32_t data_offset = packet_index * EVEN_G1_BITMAP_PACKET_SIZE;
+    uint16_t packet_data_size = MIN(EVEN_G1_BITMAP_PACKET_SIZE, g1_state.bitmap_size - data_offset);
+    
+    /* Create packet in state buffer for async transmission */
+    uint16_t packet_len = 0;
+    
+    /* Packet header: [0x15, sequence] */
+    g1_state.bitmap_current_packet[packet_len++] = EVEN_G1_OPCODE_BITMAP;
+    g1_state.bitmap_current_packet[packet_len++] = packet_index & 0xFF;  /* 0-based sequence */
+    
+    /* First packet includes address */
+    if (packet_index == 0) {
+        const uint8_t address[] = EVEN_G1_BITMAP_ADDRESS;
+        memcpy(&g1_state.bitmap_current_packet[packet_len], address, sizeof(address));
+        packet_len += sizeof(address);
+    }
+    
+    /* Copy bitmap data */
+    memcpy(&g1_state.bitmap_current_packet[packet_len], &g1_state.bitmap_data[data_offset], packet_data_size);
+    packet_len += packet_data_size;
+    g1_state.bitmap_current_packet_len = packet_len;
+    
+    LOG_DBG("🏃 RAPID: packet %d/%d (%d bytes)", packet_index + 1, packets_total, packet_len);
+    
+    g1_state.bitmap_packets_sent++;
+    
+    /* Mark both arms as pending and reset retry counters */
+    g1_state.bitmap_left_pending = true;
+    g1_state.bitmap_right_pending = true;
+    g1_state.bitmap_left_retry_count = 0;
+    g1_state.bitmap_right_retry_count = 0;
+    
+    k_mutex_unlock(&g1_mutex);
+    
+    /* OPTIMAL: Send to both arms with absolute minimal delay */
+    int left_err = send_to_left(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
+    if (left_err != 0) {
+        LOG_DBG("Left arm queue full: %d (expected)", left_err);
+        k_mutex_lock(&g1_mutex, K_FOREVER);
+        g1_state.bitmap_left_pending = false;
+        k_mutex_unlock(&g1_mutex);
+    }
+    
+    /* ZERO-DELAY: NO sleep between arms for maximum speed!
+     * The BLE stack will handle any collision internally.
+     * This pushes transmission to theoretical maximum. */
+    /* k_sleep(K_USEC(25)); -- REMOVED for MAXIMUM SPEED */
+    
+    int right_err = send_to_right(g1_state.bitmap_current_packet, g1_state.bitmap_current_packet_len);
+    if (right_err != 0) {
+        LOG_DBG("Right arm queue full: %d (expected)", right_err);
+        k_mutex_lock(&g1_mutex, K_FOREVER);
+        g1_state.bitmap_right_pending = false;
+        k_mutex_unlock(&g1_mutex);
+    }
+    
+    /* If both arms failed immediately, this indicates the BLE buffer constraint */
+    if (left_err != 0 && right_err != 0) {
+        LOG_DBG("Both arms busy - BLE flow control active");
+        /* Don't abort - let callbacks handle retry when buffers free */
+    }
+    
+    /* Callback will handle continuation when BLE buffers are ready */
 }
 
 /* ========================================
