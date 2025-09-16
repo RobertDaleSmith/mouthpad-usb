@@ -1,8 +1,10 @@
 #include "usb_hid.h"
 
 #include <string.h>
+#include <stdio.h>
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_mac.h"
 #include "tinyusb.h"
 #include "class/hid/hid_device.h"
 
@@ -50,11 +52,12 @@ enum {
     STRID_HID,
 };
 
+static char serial_str[2 * 6 + 1];
 static const char *string_desc[] = {
     (const char[]){0x09, 0x04},
-    "Augmental",
-    "MouthPad USB Bridge",
-    "0001",
+    "Augmental.Tech",
+    "MouthPad^USB",
+    serial_str,
     "MouthPad CDC",
     "MouthPad HID"
 };
@@ -67,8 +70,8 @@ static const tusb_desc_device_t mouthpad_device_descriptor = {
     .bDeviceSubClass = 0x00,
     .bDeviceProtocol = 0x00,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
-    .idVendor = 0x1209,
-    .idProduct = 0x805A,
+    .idVendor = 0x1915,
+    .idProduct = 0xEEEE,
     .bcdDevice = 0x0100,
     .iManufacturer = 0x01,
     .iProduct = 0x02,
@@ -86,6 +89,11 @@ static bool s_usb_ready;
 
 void usb_hid_init(void)
 {
+    uint8_t mac[6] = {0};
+    ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
+    snprintf(serial_str, sizeof(serial_str), "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
     const tinyusb_config_t tusb_cfg = {
         .device_descriptor = &mouthpad_device_descriptor,
         .external_phy = false,
