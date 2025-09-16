@@ -19,6 +19,9 @@ ESP32-S3 and an external antenna.
 # Activate ESP-IDF with the pinned Python environment
 . ./env.sh
 
+# (First time only) fetch TinyUSB device stack component
+idf.py add-dependency espressif/esp_tinyusb^1.4.2
+
 # Build the firmware (defaults to target esp32s3)
 make build
 
@@ -35,7 +38,10 @@ bytes for readability; adjust the helper in `main/main.c` if full reports are ne
 ## Expected Output
 
 Once powered, the firmware scans continuously. When a BLE HID device is detected, the logs show the peer
-address, connection events, and all incoming HID reports alongside their RSSI value. Use these logs to
-compare signal strength under different antenna setups. If you need richer diagnostics, cross-reference
-the upstream `esp_hid_host` README for optional features (battery events, Classic Bluetooth) that can be
-re-enabled here as needed.
+address, connection events, and HID reports alongside their RSSI value. Connected reports are forwarded
+verbatim to the TinyUSB HID interface using the same descriptor and report IDs as the nRF firmware, so a
+host sees identical mouse/consumer-control behaviour. A CDC ACM interface is enumerated in parallel and
+serves as the default console (the device now appears as both a HID mouse and USB serial port). Use these
+logs to compare signal strength under different antenna setups. If you need richer diagnostics, cross-
+reference the upstream `esp_hid_host` README for optional features (battery events, Classic Bluetooth)
+that can be re-enabled here as needed.

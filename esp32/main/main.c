@@ -16,7 +16,8 @@
 #include "esp_hid_common.h"
 #include "esp_hidh.h"
 #include "esp_hidh_gattc.h"
-#include "esp_hid_gap.h"
+#include "ble_transport.h"
+#include "usb_hid.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 
@@ -151,6 +152,11 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                      esp_hid_usage_str(param->input.usage), param->input.report_id);
             log_report(param->input.data, param->input.length);
             schedule_rssi_poll();
+            if (usb_hid_ready()) {
+                usb_hid_send_report(param->input.report_id,
+                                         param->input.data,
+                                         param->input.length);
+            }
         }
         break;
     case ESP_HIDH_FEATURE_EVENT:
@@ -178,11 +184,11 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
     }
 }
 
-static esp_hid_scan_result_t *choose_best_result(esp_hid_scan_result_t *results)
+static ble_transport_scan_result_t *choose_best_result(ble_transport_scan_result_t *results)
 {
-    esp_hid_scan_result_t *best = NULL;
+    ble_transport_scan_result_t *best = NULL;
     int best_rssi = -128;
-    for (esp_hid_scan_result_t *r = results; r != NULL; r = r->next) {
+    for (ble_transport_scan_result_t *r = results; r != NULL; r = r->next) {
         ESP_LOGI(TAG, "Found %s device RSSI=%d name=%s",
                  r->transport == ESP_HID_TRANSPORT_BLE ? "BLE" : "BT",
                  r->rssi,
@@ -199,12 +205,12 @@ static void scan_task(void *args)
 {
     (void)args;
     size_t results_len = 0;
-    esp_hid_scan_result_t *results = NULL;
+    ble_transport_scan_result_t *results = NULL;
     ESP_LOGI(TAG, "Scanning for BLE HID devices...");
-    esp_hid_scan(5, &results_len, &results);
+    ble_transport_scan(5, &results_len, &results);
     ESP_LOGI(TAG, "Scan complete, %u result(s)", (unsigned)results_len);
     if (results) {
-        esp_hid_scan_result_t *target = choose_best_result(results);
+        ble_transport_scan_result_t *target = choose_best_result(results);
         if (target) {
             ESP_LOGI(TAG, "Connecting to best result RSSI=%d", target->rssi);
             esp_hidh_dev_t *dev = esp_hidh_dev_open(target->bda, target->transport, target->ble.addr_type);
@@ -216,7 +222,7 @@ static void scan_task(void *args)
         } else {
             ESP_LOGI(TAG, "No BLE HID results found");
         }
-        esp_hid_scan_results_free(results);
+        ble_transport_scan_results_free(results);
     }
     vTaskDelete(NULL);
 }
@@ -234,9 +240,11 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    ESP_ERROR_CHECK(esp_hid_gap_init(HID_HOST_MODE));
+    usb_hid_init();
 
-    esp_hid_gap_set_user_ble_callback(gap_callback);
+    ESP_ERROR_CHECK(ble_transport_init(HID_HOST_MODE));
+
+    ble_transport_set_user_ble_callback(gap_callback);
 
     ESP_ERROR_CHECK(esp_ble_gattc_register_callback(esp_hidh_gattc_event_handler));
 
