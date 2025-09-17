@@ -39,6 +39,12 @@ ESP32_PORT=/dev/cu.usbserial-0001 make monitor
 targets run in the ESP-IDF environment. Override `IDF_PATH` when ESP-IDF lives
 elsewhere.
 
+### Status LED
+
+The single user LED on the XIAO ESP32-S3 (GPIO 21) behaves like the nRF build:
+- slow blink while scanning for a MouthPad
+- solid on when connected, with a quick off/on pulse whenever USB HID traffic is forwarded
+
 ### Entering DFU without the BOOT button
 
 Open the TinyUSB CDC console (e.g., `screen /dev/cu.usbmodemXXXX 115200`) and send

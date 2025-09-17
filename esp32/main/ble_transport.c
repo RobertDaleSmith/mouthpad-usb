@@ -326,16 +326,11 @@ static void handle_bt_device_result(struct disc_res_param *disc_res)
 
     for (int i = 0; i < disc_res->num_prop; i++) {
         esp_bt_gap_dev_prop_t *prop = &disc_res->prop[i];
-        if (prop->type != ESP_BT_GAP_DEV_PROP_EIR) {
-            GAP_DBG_PRINTF(", %s: ", gap_bt_prop_type_names[prop->type]);
-        }
         if (prop->type == ESP_BT_GAP_DEV_PROP_BDNAME) {
             name = (uint8_t *)prop->val;
             name_len = strlen((const char *)name);
-            GAP_DBG_PRINTF("%s", (const char *)name);
         } else if (prop->type == ESP_BT_GAP_DEV_PROP_RSSI) {
             rssi = *((int8_t *)prop->val);
-            GAP_DBG_PRINTF("%d", rssi);
         } else if (prop->type == ESP_BT_GAP_DEV_PROP_COD) {
             memcpy(&codv, prop->val, sizeof(uint32_t));
             GAP_DBG_PRINTF("major: %s, minor: %d, service: 0x%03x", esp_hid_cod_major_str(cod->major), cod->minor, cod->service);
@@ -351,9 +346,9 @@ static void handle_bt_device_result(struct disc_res_param *disc_res)
                 if (data && len == ESP_UUID_LEN_16) {
                     uuid.len = ESP_UUID_LEN_16;
                     uuid.uuid.uuid16 = data[0] + (data[1] << 8);
-                    GAP_DBG_PRINTF(", "); ble_transport_print_uuid(&uuid);
-                    break;
-                }
+            GAP_DBG_PRINTF(", "); ble_transport_print_uuid(&uuid);
+            break;
+        }
 
                 data = esp_bt_gap_resolve_eir_data((uint8_t *)prop->val, ESP_BT_EIR_TYPE_CMPL_32BITS_UUID, &len);
                 if (data == NULL) {
@@ -446,15 +441,15 @@ static void handle_ble_device_result(struct ble_scan_result_evt_param *scan_rst)
         name[adv_name_len] = 0;
     }
 
-    GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", ", ESP_BD_ADDR_HEX(scan_rst->bda));
-    GAP_DBG_PRINTF("RSSI: %d, ", scan_rst->rssi);
-    GAP_DBG_PRINTF("UUID: 0x%04x, ", uuid);
-    GAP_DBG_PRINTF("APPEARANCE: 0x%04x, ", appearance);
-    GAP_DBG_PRINTF("ADDR_TYPE: '%s'", ble_transport_addr_type_str(scan_rst->ble_addr_type));
     if (adv_name_len) {
-        GAP_DBG_PRINTF(", NAME: '%s'", name);
+        GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", RSSI: %d, UUID: 0x%04x, APPEARANCE: 0x%04x, ADDR_TYPE: '%s', NAME: '%s'\n",
+                       ESP_BD_ADDR_HEX(scan_rst->bda),
+                       scan_rst->rssi,
+                       uuid,
+                       appearance,
+                       ble_transport_addr_type_str(scan_rst->ble_addr_type),
+                       name);
     }
-    GAP_DBG_PRINTF("\n");
 
     if (uuid == ESP_GATT_UUID_HID_SVC) {
         add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi);
@@ -580,10 +575,9 @@ static void ble_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_p
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
         esp_ble_gap_cb_param_t *scan_result = (esp_ble_gap_cb_param_t *)param;
         switch (scan_result->scan_rst.search_evt) {
-        case ESP_GAP_SEARCH_INQ_RES_EVT: {
+        case ESP_GAP_SEARCH_INQ_RES_EVT:
             handle_ble_device_result(&scan_result->scan_rst);
             break;
-        }
         case ESP_GAP_SEARCH_INQ_CMPL_EVT:
             ESP_LOGV(TAG, "BLE GAP EVENT SCAN DONE: %d", scan_result->scan_rst.num_resps);
             SEND_BLE_CB();

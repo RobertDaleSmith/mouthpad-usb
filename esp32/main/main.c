@@ -20,6 +20,7 @@
 #include "usb_hid.h"
 #include "bootloader_trigger.h"
 #include "ble_bas.h"
+#include "leds.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 
@@ -147,6 +148,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                 start_rssi_timer();
             }
             ble_bas_reset();
+            leds_set_state(LED_STATE_CONNECTED);
         }
         break;
     case ESP_HIDH_BATTERY_EVENT:
@@ -167,6 +169,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                                          param->input.data,
                                          param->input.length);
             }
+            leds_notify_activity();
         }
         break;
     case ESP_HIDH_FEATURE_EVENT:
@@ -187,6 +190,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
             esp_hidh_dev_free(param->close.dev);
         }
         ble_bas_reset();
+        leds_set_state(LED_STATE_SCANNING);
         start_scan_task();
         break;
     default:
@@ -200,10 +204,12 @@ static ble_transport_scan_result_t *choose_best_result(ble_transport_scan_result
     ble_transport_scan_result_t *best = NULL;
     int best_rssi = -128;
     for (ble_transport_scan_result_t *r = results; r != NULL; r = r->next) {
-        ESP_LOGI(TAG, "Found %s device RSSI=%d name=%s",
-                 r->transport == ESP_HID_TRANSPORT_BLE ? "BLE" : "BT",
-                 r->rssi,
-                 r->name ? r->name : "<unknown>");
+        if (r->name) {
+            ESP_LOGI(TAG, "Found %s device RSSI=%d name=%s",
+                     r->transport == ESP_HID_TRANSPORT_BLE ? "BLE" : "BT",
+                     r->rssi,
+                     r->name);
+        }
         if (r->transport == ESP_HID_TRANSPORT_BLE && r->rssi > best_rssi) {
             best = r;
             best_rssi = r->rssi;
@@ -215,31 +221,46 @@ static ble_transport_scan_result_t *choose_best_result(ble_transport_scan_result
 static void scan_task(void *args)
 {
     (void)args;
-    size_t results_len = 0;
-    ble_transport_scan_result_t *results = NULL;
-    ESP_LOGI(TAG, "Scanning for BLE HID devices...");
-    ble_transport_scan(5, &results_len, &results);
-    ESP_LOGI(TAG, "Scan complete, %u result(s)", (unsigned)results_len);
-    if (results) {
-        ble_transport_scan_result_t *target = choose_best_result(results);
+    while (true) {
+        size_t results_len = 0;
+        ble_transport_scan_result_t *results = NULL;
+
+        ESP_LOGI(TAG, "Scanning for BLE HID devices...");
+        ble_transport_scan(5, &results_len, &results);
+        ESP_LOGI(TAG, "Scan window complete, %u result(s)", (unsigned)results_len);
+
+        ble_transport_scan_result_t *target = NULL;
+        if (results) {
+            target = choose_best_result(results);
+        }
+
         if (target) {
             ESP_LOGI(TAG, "Connecting to best result RSSI=%d", target->rssi);
             esp_hidh_dev_t *dev = esp_hidh_dev_open(target->bda, target->transport, target->ble.addr_type);
             if (!dev) {
-                ESP_LOGW(TAG, "Failed to initiate connection");
+                ESP_LOGW(TAG, "Failed to initiate connection, continuing scan");
             } else {
                 ESP_LOGI(TAG, "Connection requested");
+                ble_transport_scan_results_free(results);
+                break;
             }
         } else {
-            ESP_LOGI(TAG, "No BLE HID results found");
+            ESP_LOGI(TAG, "No named BLE HID results found, continuing scan");
         }
-        ble_transport_scan_results_free(results);
+
+        if (results) {
+            ble_transport_scan_results_free(results);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
+
     vTaskDelete(NULL);
 }
 
 static void start_scan_task(void)
 {
+    leds_set_state(LED_STATE_SCANNING);
     xTaskCreate(scan_task, "hid_scan", 4096, NULL, 2, NULL);
 }
 
@@ -249,6 +270,13 @@ void app_main(void)
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
+    }
+
+    esp_err_t led_err = leds_init();
+    if (led_err != ESP_OK) {
+        ESP_LOGW(TAG, "LED init failed: %s", esp_err_to_name(led_err));
+    } else {
+        leds_set_state(LED_STATE_SCANNING);
     }
 
     ESP_ERROR_CHECK(ble_bas_init());
