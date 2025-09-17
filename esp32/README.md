@@ -13,6 +13,14 @@ ESP32-S3 and an external antenna.
 3. Optional: adjust defaults in `sdkconfig.defaults` for scan timing, stack size, or other HID host
    parameters mirrored from the upstream example.
 
+## Hardware
+
+- Seeed Studio XIAO ESP32-S3 dev board [[amazon](https://www.amazon.com/gp/product/B0BYSB66S5)]
+- External 2.4 GHz antenna with MHF4/IPX-to-SMA pigtail adaptor [[amazon](https://www.amazon.com/gp/product/B07R21LN5P)]
+
+Attach the pigtail to the XIAO’s on-board antenna connector. The built-in single-colour user LED on GPIO 21 provides
+status feedback (slow blink while scanning, solid on when connected, quick pulses on HID traffic).
+
 ## Build, Flash, and Monitor
 
 ```bash
