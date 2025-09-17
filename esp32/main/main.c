@@ -19,6 +19,7 @@
 #include "ble_transport.h"
 #include "usb_hid.h"
 #include "bootloader_trigger.h"
+#include "ble_bas.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 
@@ -145,6 +146,14 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                 schedule_rssi_poll();
                 start_rssi_timer();
             }
+            ble_bas_reset();
+        }
+        break;
+    case ESP_HIDH_BATTERY_EVENT:
+        if (param->battery.status == ESP_OK) {
+            ble_bas_handle_level(param->battery.level);
+        } else {
+            ESP_LOGW(TAG, "Battery event error: %d", param->battery.status);
         }
         break;
     case ESP_HIDH_INPUT_EVENT:
@@ -177,6 +186,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
         if (param->close.dev) {
             esp_hidh_dev_free(param->close.dev);
         }
+        ble_bas_reset();
         start_scan_task();
         break;
     default:
@@ -241,6 +251,7 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
+    ESP_ERROR_CHECK(ble_bas_init());
     bootloader_trigger_init();
 
     usb_hid_init();

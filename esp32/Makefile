@@ -34,7 +34,10 @@ set-target:
 build: set-target
 	$(IDF_PY) build
 
-flash: build
+flash:
+	$(IDF_PY) $(IDF_PORT_ARG) -b $(ESP32_BAUD) flash
+
+build-flash: build
 	$(IDF_PY) $(IDF_PORT_ARG) -b $(ESP32_BAUD) flash
 
 monitor:
