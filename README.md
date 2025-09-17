@@ -188,7 +188,8 @@ This project includes GitHub Actions that automatically build and test your code
 2. Create a feature branch
 3. Make your changes
 4. Test thoroughly using one of the build methods
-5. Submit a pull request
+5. Review the [Repository Guidelines](AGENTS.md) for coding, testing, and PR expectations
+6. Submit a pull request
 
 ## 📄 License
 
