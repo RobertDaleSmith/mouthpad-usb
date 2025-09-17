@@ -22,6 +22,9 @@ ESP32-S3 and an external antenna.
 # (First time only) fetch TinyUSB device stack component
 idf.py add-dependency espressif/esp_tinyusb^1.4.2
 
+# Initialise ESP-IDF for this shell
+make init
+
 # Build the firmware (defaults to target esp32s3)
 make build
 
@@ -31,6 +34,19 @@ ESP32_PORT=/dev/cu.usbserial-0001 make flash
 # Attach a serial monitor (Ctrl+] to quit)
 ESP32_PORT=/dev/cu.usbserial-0001 make monitor
 ```
+
+`make init` sources `$(IDF_PATH)/export.sh` (default `~/esp-idf`) so subsequent
+targets run in the ESP-IDF environment. Override `IDF_PATH` when ESP-IDF lives
+elsewhere.
+
+### Entering DFU without the BOOT button
+
+Open the TinyUSB CDC console (e.g., `screen /dev/cu.usbmodemXXXX 115200`) and send
+`dfu` followed by Enter. Close the terminal so the port is free. The firmware
+reboots, hands USB back to the ROM loader, and enumerates as the USB-Serial/JTAG
+download port. Run `idf.py flash` (or `make flash`) against that port—because the
+flasher no longer tries to reset before flashing, the ROM stays available until
+the transfer completes, after which the application restarts normally.
 
 `make flash-monitor` combines flashing and monitoring for quicker cycles. Reports are truncated to 32
 bytes for readability; adjust the helper in `main/main.c` if full reports are needed.

@@ -55,7 +55,7 @@ enum {
 static char serial_str[2 * 6 + 1];
 static const char *string_desc[] = {
     (const char[]){0x09, 0x04},
-    "Augmental.Tech",
+    "Augmental Tech",
     "MouthPad^USB",
     serial_str,
     "MouthPad CDC",

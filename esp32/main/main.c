@@ -18,6 +18,7 @@
 #include "esp_hidh_gattc.h"
 #include "ble_transport.h"
 #include "usb_hid.h"
+#include "bootloader_trigger.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 
@@ -239,6 +240,8 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    bootloader_trigger_init();
 
     usb_hid_init();
 
