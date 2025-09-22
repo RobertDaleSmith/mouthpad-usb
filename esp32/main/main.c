@@ -18,9 +18,12 @@
 #include "esp_hidh_gattc.h"
 #include "ble_transport.h"
 #include "usb_hid.h"
+#include "driver/uart.h"
 #include "bootloader_trigger.h"
 #include "ble_bas.h"
 #include "leds.h"
+#include "nus_cdc_bridge.h"
+#include "app_config.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 
@@ -29,6 +32,8 @@ static esp_bd_addr_t s_active_addr;
 static esp_timer_handle_t s_rssi_timer;
 static bool s_rssi_timer_running;
 static bool s_has_active_addr;
+static uint16_t s_active_conn_id = 0xFFFF;
+static esp_gatt_if_t s_active_gattc_if = ESP_GATT_IF_NONE;
 
 static void schedule_rssi_poll(void)
 {
@@ -126,6 +131,39 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
 
 static void start_scan_task(void);
 
+// Wrapper GATT client callback that handles both HID and NUS events
+static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
+{
+    // Debug: Log all GATT client events
+    ESP_LOGI(TAG, "GATT client event: %d, gattc_if: %d", event, gattc_if);
+    
+    // Store connection ID and GATT client interface when device connects
+    if (event == ESP_GATTC_CONNECT_EVT) {
+        s_active_conn_id = param->connect.conn_id;
+        s_active_gattc_if = gattc_if;
+        ESP_LOGI(TAG, "GATT client connected, conn_id: %d, gattc_if: %d", s_active_conn_id, s_active_gattc_if);
+        
+#if ENABLE_NUS_CLIENT_MODE
+        // NUS service discovery will be triggered from HID open event
+        // to ensure HID service discovery completes first
+#endif
+    } else if (event == ESP_GATTC_DISCONNECT_EVT) {
+        if (param->disconnect.conn_id == s_active_conn_id) {
+            s_active_conn_id = 0xFFFF;
+            s_active_gattc_if = ESP_GATT_IF_NONE;
+            ESP_LOGI(TAG, "GATT client disconnected, conn_id: %d", param->disconnect.conn_id);
+        }
+    }
+    
+    // Forward to HID handler
+    esp_hidh_gattc_event_handler(event, gattc_if, param);
+    
+#if ENABLE_NUS_CLIENT_MODE
+    // Forward to NUS bridge handler
+    nus_cdc_bridge_handle_gattc_event(event, gattc_if, param);
+#endif
+}
+
 static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id, void *event_data)
 {
     (void)handler_args;
@@ -146,6 +184,37 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                 s_has_active_addr = true;
                 schedule_rssi_poll();
                 start_rssi_timer();
+                
+#if ENABLE_NUS_CLIENT_MODE
+                // Trigger NUS service discovery after HID connection is established
+                // HID service discovery should be complete by now
+                ESP_LOGI(TAG, "HID device connected, starting NUS discovery");
+                
+                if (s_active_conn_id != 0xFFFF && s_active_gattc_if != ESP_GATT_IF_NONE) {
+                    ESP_LOGI(TAG, "Starting NUS service discovery (conn_id: %d, gattc_if: %d)", 
+                             s_active_conn_id, s_active_gattc_if);
+                    esp_err_t ret = nus_cdc_bridge_discover_services(s_active_gattc_if, s_active_conn_id);
+                    if (ret != ESP_OK) {
+                        ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
+                    }
+                } else {
+                    ESP_LOGW(TAG, "Cannot start NUS discovery - conn_id: %d, gattc_if: %d", 
+                             s_active_conn_id, s_active_gattc_if);
+                    
+                    // Try to get the GATT client interface from the HID host
+                    // The HID host should have a GATT client interface we can use
+                    ESP_LOGI(TAG, "Attempting to use GATT client interface 3 (from previous logs)");
+                    esp_gatt_if_t fallback_gattc_if = 3;  // We saw this in the logs before
+                    uint16_t fallback_conn_id = 0;        // We saw this in the logs before
+                    
+                    esp_err_t ret = nus_cdc_bridge_discover_services(fallback_gattc_if, fallback_conn_id);
+                    if (ret != ESP_OK) {
+                        ESP_LOGW(TAG, "Failed to start NUS service discovery with fallback: %s", esp_err_to_name(ret));
+                    } else {
+                        ESP_LOGI(TAG, "Started NUS service discovery with fallback values");
+                    }
+                }
+#endif
             }
             ble_bas_reset();
             leds_set_state(LED_STATE_CONNECTED);
@@ -264,6 +333,17 @@ static void start_scan_task(void)
     xTaskCreate(scan_task, "hid_scan", 4096, NULL, 2, NULL);
 }
 
+// Remap UART0 for external logging (J-Link connection)
+static void setup_uart_logging(void)
+{
+    // Remap UART0 to XIAO Expansion Board servo connector pins
+    // Expansion board labels: TX|6 and RX|7
+    // TX|6 = D6 pin for transmitting logs to J-Link
+    // Connect J-Link UART RX to the TX|6 pin on servo connector
+    uart_set_pin(UART_NUM_0, 6, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ESP_LOGI(TAG, "UART0 remapped to TX|6 pin on expansion board servo connector");
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -271,6 +351,9 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    // Setup UART logging on accessible pin for J-Link
+    setup_uart_logging();
 
     esp_err_t led_err = leds_init();
     if (led_err != ESP_OK) {
@@ -284,11 +367,12 @@ void app_main(void)
 
     usb_hid_init();
 
+    // Initialize BLE transport for HID central mode
     ESP_ERROR_CHECK(ble_transport_init(HID_HOST_MODE));
 
     ble_transport_set_user_ble_callback(gap_callback);
 
-    ESP_ERROR_CHECK(esp_ble_gattc_register_callback(esp_hidh_gattc_event_handler));
+    ESP_ERROR_CHECK(esp_ble_gattc_register_callback(gattc_event_handler));
 
     esp_hidh_config_t config = {
         .callback = hidh_callback,
@@ -297,6 +381,13 @@ void app_main(void)
     };
 
     ESP_ERROR_CHECK(esp_hidh_init(&config));
+
+#if ENABLE_NUS_CLIENT_MODE
+    // Initialize NUS client to CDC bridge
+    ESP_LOGI(TAG, "Initializing NUS client to CDC bridge");
+    ESP_ERROR_CHECK(nus_cdc_bridge_init());
+    ESP_ERROR_CHECK(nus_cdc_bridge_start());
+#endif
 
     start_scan_task();
     ESP_LOGI(TAG, "BLE HID central ready");

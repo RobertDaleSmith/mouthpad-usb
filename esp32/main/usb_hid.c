@@ -114,7 +114,12 @@ void usb_hid_init(void)
         return;
     }
 
-    ESP_ERROR_CHECK(usb_cdc_init());
+    // Initialize CDC with minimal configuration for HID mode
+    usb_cdc_config_t cdc_config = {
+        .data_received_cb = NULL,
+        .data_sent_cb = NULL,
+    };
+    ESP_ERROR_CHECK(usb_cdc_init(&cdc_config));
 }
 
 bool usb_hid_ready(void)
