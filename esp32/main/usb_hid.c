@@ -61,8 +61,14 @@ enum {
 
 static char serial_str[2 * 6 + 1];
 static const char *string_desc[] = {
-    (const char[]){0x09, 0x04}, "Augmental Tech", "MouthPad^USB", serial_str,
-    "MouthPad CDC 0",           "MouthPad CDC 1", "MouthPad HID"};
+  (const char[]){0x09, 0x04},
+  "Augmental Tech",
+  "MouthPad^USB",
+  serial_str,
+  "MouthPad^NUS",
+  "MouthPad^CDC",
+  "MouthPad^HID"
+};
 
 #define TUD_CDC_DESCRIPTOR_NO_NOTIF(_itfnum, _stridx, _epout, _epin, _epsize)  \
   /* Interface Association */                                                  \
