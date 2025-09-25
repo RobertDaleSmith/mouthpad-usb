@@ -23,6 +23,7 @@
 #include "ble_bas.h"
 #include "leds.h"
 #include "nus_cdc_bridge.h"
+#include "ble_nus_client.h"
 #include "app_config.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
@@ -34,6 +35,7 @@ static bool s_rssi_timer_running;
 static bool s_has_active_addr;
 static uint16_t s_active_conn_id = 0xFFFF;
 static esp_gatt_if_t s_active_gattc_if = ESP_GATT_IF_NONE;
+static esp_gatt_if_t s_nus_gattc_if = ESP_GATT_IF_NONE;  // Separate interface for NUS
 
 static void schedule_rssi_poll(void)
 {
@@ -134,8 +136,20 @@ static void start_scan_task(void);
 // Wrapper GATT client callback that handles both HID and NUS events
 static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
-    // Debug: Log all GATT client events
+    // Debug: Log all GATT client events with more detail
     ESP_LOGI(TAG, "GATT client event: %d, gattc_if: %d", event, gattc_if);
+
+    // Log registration events in detail
+    if (event == ESP_GATTC_REG_EVT) {
+        ESP_LOGI(TAG, "GATTC_REG_EVT: app_id=%d, status=%d, gattc_if=%d",
+                 param->reg.app_id, param->reg.status, gattc_if);
+
+        // Store the NUS GATT interface when it registers
+        if (param->reg.app_id == 1 && param->reg.status == ESP_GATT_OK) {
+            s_nus_gattc_if = gattc_if;
+            ESP_LOGI(TAG, "NUS GATT client registered with interface: %d", s_nus_gattc_if);
+        }
+    }
     
     // Store connection ID and GATT client interface when device connects
     if (event == ESP_GATTC_CONNECT_EVT) {
@@ -155,13 +169,51 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         }
     }
     
-    // Forward to HID handler
-    esp_hidh_gattc_event_handler(event, gattc_if, param);
-    
+    // Route events: Send ALL events to HID first, then also send NUS-related events to NUS handler
+    ESP_LOGI(TAG, "Routing: gattc_if=%d, event=%d", gattc_if, event);
+
+    // Route events based on separate GATT interfaces
+    if (gattc_if == s_nus_gattc_if) {
+        // This is a NUS event on the dedicated NUS GATT interface
 #if ENABLE_NUS_CLIENT_MODE
-    // Forward to NUS bridge handler
-    nus_cdc_bridge_handle_gattc_event(event, gattc_if, param);
+        ESP_LOGI(TAG, "Routing GATT event %d to NUS handler (gattc_if=%d)", event, gattc_if);
+        nus_cdc_bridge_handle_gattc_event(event, gattc_if, param);
 #endif
+    } else {
+        // This is a HID event (or registration event)
+        ESP_LOGI(TAG, "Routing GATT event %d to HID handler (gattc_if=%d)", event, gattc_if);
+        esp_hidh_gattc_event_handler(event, gattc_if, param);
+
+        // For registration events, also forward to NUS if it's app_id 1
+        if (event == ESP_GATTC_REG_EVT && param->reg.app_id == 1) {
+#if ENABLE_NUS_CLIENT_MODE
+            ESP_LOGI(TAG, "Also routing NUS registration event to NUS handler");
+            nus_cdc_bridge_handle_gattc_event(event, gattc_if, param);
+#endif
+        }
+
+#if ENABLE_NUS_CLIENT_MODE
+        // Also forward service discovery events to NUS handler when NUS discovery is active
+        // Service discovery events come back on the original connection interface, not the discovery interface
+        if (s_nus_gattc_if != ESP_GATT_IF_NONE && s_active_conn_id != 0xFFFF) {
+            if (event == ESP_GATTC_SEARCH_RES_EVT || event == ESP_GATTC_SEARCH_CMPL_EVT) {
+                ESP_LOGI(TAG, "Also routing service discovery event %d to NUS handler", event);
+                nus_cdc_bridge_handle_gattc_event(event, s_nus_gattc_if, param);
+            }
+        }
+#endif
+    }
+}
+
+static void nus_discovery_timer_callback(void* arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "Starting delayed NUS service discovery using separate NUS interface (conn_id: %d, nus_gattc_if: %d)",
+             s_active_conn_id, s_nus_gattc_if);
+    esp_err_t ret = nus_cdc_bridge_discover_services(s_nus_gattc_if, s_active_conn_id);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
+    }
 }
 
 static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id, void *event_data)
@@ -184,35 +236,47 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                 s_has_active_addr = true;
                 schedule_rssi_poll();
                 start_rssi_timer();
-                
+
 #if ENABLE_NUS_CLIENT_MODE
+                // Set the server BD address for NUS client so it can open its own connection
+                ble_nus_client_set_server_bda(bda);
                 // Trigger NUS service discovery after HID connection is established
-                // HID service discovery should be complete by now
-                ESP_LOGI(TAG, "HID device connected, starting NUS discovery");
-                
-                if (s_active_conn_id != 0xFFFF && s_active_gattc_if != ESP_GATT_IF_NONE) {
-                    ESP_LOGI(TAG, "Starting NUS service discovery (conn_id: %d, gattc_if: %d)", 
-                             s_active_conn_id, s_active_gattc_if);
-                    esp_err_t ret = nus_cdc_bridge_discover_services(s_active_gattc_if, s_active_conn_id);
-                    if (ret != ESP_OK) {
-                        ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
+                // Add delay to ensure HID service discovery fully completes first
+                ESP_LOGI(TAG, "HID device connected, scheduling delayed NUS discovery");
+                ESP_LOGI(TAG, "s_active_conn_id=%d, s_nus_gattc_if=%d", s_active_conn_id, s_nus_gattc_if);
+
+                if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
+                    // Create a timer to start NUS discovery after a short delay
+                    static esp_timer_handle_t nus_discovery_timer = NULL;
+
+                    // Clean up any existing timer
+                    if (nus_discovery_timer != NULL) {
+                        esp_timer_stop(nus_discovery_timer);
+                        esp_timer_delete(nus_discovery_timer);
+                        nus_discovery_timer = NULL;
+                    }
+
+                    const esp_timer_create_args_t timer_args = {
+                        .callback = nus_discovery_timer_callback,
+                        .arg = NULL,
+                        .name = "nus_discovery_delay"
+                    };
+
+                    esp_err_t ret = esp_timer_create(&timer_args, &nus_discovery_timer);
+                    if (ret == ESP_OK) {
+                        // Start timer for 2 second delay to allow HID discovery to complete
+                        ret = esp_timer_start_once(nus_discovery_timer, 2000000); // 2 seconds in microseconds
+                        if (ret != ESP_OK) {
+                            ESP_LOGW(TAG, "Failed to start NUS discovery delay timer: %s", esp_err_to_name(ret));
+                        } else {
+                            ESP_LOGI(TAG, "NUS discovery scheduled in 2 seconds");
+                        }
+                    } else {
+                        ESP_LOGW(TAG, "Failed to create NUS discovery delay timer: %s", esp_err_to_name(ret));
                     }
                 } else {
-                    ESP_LOGW(TAG, "Cannot start NUS discovery - conn_id: %d, gattc_if: %d", 
-                             s_active_conn_id, s_active_gattc_if);
-                    
-                    // Try to get the GATT client interface from the HID host
-                    // The HID host should have a GATT client interface we can use
-                    ESP_LOGI(TAG, "Attempting to use GATT client interface 3 (from previous logs)");
-                    esp_gatt_if_t fallback_gattc_if = 3;  // We saw this in the logs before
-                    uint16_t fallback_conn_id = 0;        // We saw this in the logs before
-                    
-                    esp_err_t ret = nus_cdc_bridge_discover_services(fallback_gattc_if, fallback_conn_id);
-                    if (ret != ESP_OK) {
-                        ESP_LOGW(TAG, "Failed to start NUS service discovery with fallback: %s", esp_err_to_name(ret));
-                    } else {
-                        ESP_LOGI(TAG, "Started NUS service discovery with fallback values");
-                    }
+                    ESP_LOGW(TAG, "Cannot start NUS discovery - conn_id: %d, nus_gattc_if: %d",
+                             s_active_conn_id, s_nus_gattc_if);
                 }
 #endif
             }
@@ -383,6 +447,11 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_hidh_init(&config));
 
 #if ENABLE_NUS_CLIENT_MODE
+    // Register a separate GATT app for NUS (app_id 1)
+    // The ESP HID library has already registered app_id 0
+    ESP_LOGI(TAG, "Registering separate NUS GATT client app (app_id=1)");
+    ESP_ERROR_CHECK(esp_ble_gattc_app_register(1));
+
     // Initialize NUS client to CDC bridge
     ESP_LOGI(TAG, "Initializing NUS client to CDC bridge");
     ESP_ERROR_CHECK(nus_cdc_bridge_init());

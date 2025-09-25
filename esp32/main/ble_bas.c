@@ -2,7 +2,7 @@
 
 #include "esp_log.h"
 
-#define TAG "ble_bas"
+#define TAG "BLE_BAS"
 
 static bool s_ready;
 static uint8_t s_battery_level;

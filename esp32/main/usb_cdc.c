@@ -16,7 +16,7 @@
 
 #include "bootloader_trigger.h"
 
-static const char *TAG = "usb_cdc";
+static const char *TAG = "USB_CDC";
 
 #define CDC_PACKET_MAX_LEN 64
 #define CDC_PACKET_HEADER_LEN 4 // Start markers (2) + length (2)

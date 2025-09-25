@@ -115,16 +115,33 @@ esp_err_t ble_nus_client_discover_services(esp_gatt_if_t gattc_if, uint16_t conn
     
     nus_gattc_if = gattc_if;
     nus_conn_id = conn_id;
-    nus_connected = true;
+    nus_connected = false;  // Don't set to true until service is actually discovered
     nus_service_discovered = false;
     nus_tx_notify_enabled = false;
 
-    // Start service discovery
-    esp_err_t ret = esp_ble_gattc_search_service(nus_gattc_if, nus_conn_id, &nus_service_uuid);
+    // Start service discovery on the dedicated NUS GATT interface
+    // First open connection on NUS interface using stored BD address, then search for services
+    ESP_LOGI(TAG, "Starting NUS service discovery on dedicated NUS GATT interface...");
+
+    // Use the stored server BD address from the HID connection
+    if (nus_server_bda[0] == 0 && nus_server_bda[1] == 0 && nus_server_bda[2] == 0 &&
+        nus_server_bda[3] == 0 && nus_server_bda[4] == 0 && nus_server_bda[5] == 0) {
+        ESP_LOGE(TAG, "Server BD address not available, cannot open NUS GATT connection");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Opening GATT connection on NUS interface to %02x:%02x:%02x:%02x:%02x:%02x",
+             nus_server_bda[0], nus_server_bda[1], nus_server_bda[2],
+             nus_server_bda[3], nus_server_bda[4], nus_server_bda[5]);
+
+    // Open connection on NUS GATT interface
+    esp_err_t ret = esp_ble_gattc_open(nus_gattc_if, nus_server_bda, BLE_ADDR_TYPE_PUBLIC, true);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start service discovery: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to open GATT connection: %s", esp_err_to_name(ret));
         return ret;
     }
+
+    ESP_LOGI(TAG, "Opened GATT connection on NUS interface, service discovery will start in OPEN event");
 
     if (nus_config.connected_cb) {
         nus_config.connected_cb();
@@ -175,6 +192,14 @@ uint16_t ble_nus_client_get_conn_id(void)
     return nus_conn_id;
 }
 
+void ble_nus_client_set_server_bda(const esp_bd_addr_t bda)
+{
+    memcpy(nus_server_bda, bda, sizeof(esp_bd_addr_t));
+    ESP_LOGI(TAG, "Set server BD address: %02x:%02x:%02x:%02x:%02x:%02x",
+             nus_server_bda[0], nus_server_bda[1], nus_server_bda[2],
+             nus_server_bda[3], nus_server_bda[4], nus_server_bda[5]);
+}
+
 void ble_nus_client_debug_status(void)
 {
     ESP_LOGI(TAG, "=== NUS CLIENT STATUS ===");
@@ -193,6 +218,7 @@ void ble_nus_client_debug_status(void)
 
 void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
+    ESP_LOGI(TAG, "=== NUS GATT EVENT: %d on gattc_if: %d ===", event, gattc_if);
     switch (event) {
     case ESP_GATTC_REG_EVT:
         ESP_LOGI(TAG, "GATT client registered, app_id: %d", param->reg.app_id);
@@ -203,6 +229,21 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
         ESP_LOGI(TAG, "GATT client connected, conn_id: %d", param->connect.conn_id);
         // Store the server's BD address for later use
         memcpy(nus_server_bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+        break;
+
+    case ESP_GATTC_OPEN_EVT:
+        ESP_LOGI(TAG, "GATT connection opened on NUS interface, conn_id: %d, status: %d",
+                 param->open.conn_id, param->open.status);
+
+        if (param->open.status == ESP_GATT_OK && param->open.conn_id == nus_conn_id) {
+            ESP_LOGI(TAG, "Starting service discovery on opened NUS GATT connection");
+            esp_err_t ret = esp_ble_gattc_search_service(nus_gattc_if, nus_conn_id, NULL);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to start service discovery: %s", esp_err_to_name(ret));
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to open GATT connection: status=%d", param->open.status);
+        }
         break;
 
     case ESP_GATTC_DISCONNECT_EVT:
@@ -318,8 +359,11 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
                 if (nus_char_tx_handle != 0 && nus_char_rx_handle != 0) {
                     ESP_LOGI(TAG, "NUS service configured - TX: %d, RX: %d",
                              nus_char_tx_handle, nus_char_rx_handle);
+                    nus_connected = true;  // Now we can set this to true - service is fully discovered
+                    ESP_LOGI(TAG, "NUS client fully connected and ready for data transmission");
                 } else {
                     ESP_LOGW(TAG, "Failed to find all NUS characteristics");
+                    nus_connected = false;
                 }
             } else {
                 ESP_LOGE(TAG, "Failed to get characteristics: %d", status);

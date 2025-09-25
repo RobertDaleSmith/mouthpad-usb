@@ -84,6 +84,13 @@ uint16_t ble_nus_client_get_conn_id(void);
 void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 
 /**
+ * @brief Set the server BD address for NUS connection
+ *
+ * @param bda Bluetooth device address
+ */
+void ble_nus_client_set_server_bda(const esp_bd_addr_t bda);
+
+/**
  * @brief Print debug status of NUS client
  */
 void ble_nus_client_debug_status(void);
