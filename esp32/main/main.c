@@ -25,6 +25,7 @@
 #include "nus_cdc_bridge.h"
 #include "ble_nus_client.h"
 #include "app_config.h"
+#include "button.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 
@@ -360,6 +361,57 @@ static void start_scan_task(void)
     xTaskCreate(scan_task, "hid_scan", 4096, NULL, 2, NULL);
 }
 
+// Button event handler
+static void button_event_handler(button_event_t event)
+{
+    switch (event) {
+        case BUTTON_EVENT_SINGLE_CLICK:
+            ESP_LOGI(TAG, "Button single click detected");
+            break;
+
+        case BUTTON_EVENT_DOUBLE_CLICK:
+            ESP_LOGI(TAG, "Button double click detected");
+            break;
+
+        case BUTTON_EVENT_LONG_PRESS:
+            ESP_LOGI(TAG, "Button long press detected - clearing BLE bonds");
+
+            // Get number of bonded devices
+            int bond_dev_num = esp_ble_get_bond_device_num();
+            ESP_LOGI(TAG, "Number of bonded devices: %d", bond_dev_num);
+
+            if (bond_dev_num > 0) {
+                // Get list of bonded devices
+                esp_ble_bond_dev_t *bond_dev_list = malloc(sizeof(esp_ble_bond_dev_t) * bond_dev_num);
+                if (bond_dev_list) {
+                    esp_ble_get_bond_device_list(&bond_dev_num, bond_dev_list);
+
+                    // Remove each bonded device
+                    for (int i = 0; i < bond_dev_num; i++) {
+                        ESP_LOGI(TAG, "Removing bond for device " ESP_BD_ADDR_STR,
+                                ESP_BD_ADDR_HEX(bond_dev_list[i].bd_addr));
+                        esp_err_t ret = esp_ble_remove_bond_device(bond_dev_list[i].bd_addr);
+                        if (ret != ESP_OK) {
+                            ESP_LOGW(TAG, "Failed to remove bond: %s", esp_err_to_name(ret));
+                        }
+                    }
+
+                    free(bond_dev_list);
+                    ESP_LOGI(TAG, "All BLE bonds cleared");
+                } else {
+                    ESP_LOGE(TAG, "Failed to allocate memory for bond device list");
+                }
+            } else {
+                ESP_LOGI(TAG, "No bonded devices to clear");
+            }
+            break;
+
+        default:
+            ESP_LOGW(TAG, "Unknown button event: %d", event);
+            break;
+    }
+}
+
 // Remap UART0 for external logging (J-Link connection)
 static void setup_uart_logging(void)
 {
@@ -387,6 +439,12 @@ void app_main(void)
         ESP_LOGW(TAG, "LED init failed: %s", esp_err_to_name(led_err));
     } else {
         leds_set_state(LED_STATE_SCANNING);
+    }
+
+    // Initialize button module
+    esp_err_t button_err = button_init(button_event_handler);
+    if (button_err != ESP_OK) {
+        ESP_LOGW(TAG, "Button init failed: %s", esp_err_to_name(button_err));
     }
 
     ESP_ERROR_CHECK(ble_bas_init());
