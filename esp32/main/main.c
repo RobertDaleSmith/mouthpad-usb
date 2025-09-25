@@ -66,7 +66,7 @@ static void start_rssi_timer(void)
         };
         ESP_ERROR_CHECK(esp_timer_create(&args, &s_rssi_timer));
     }
-    ESP_ERROR_CHECK(esp_timer_start_periodic(s_rssi_timer, 2 * 1000 * 1000));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_rssi_timer, 10 * 1000 * 1000));
     s_rssi_timer_running = true;
 }
 
@@ -136,8 +136,7 @@ static void start_scan_task(void);
 // Wrapper GATT client callback that handles both HID and NUS events
 static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
-    // Debug: Log all GATT client events with more detail
-    ESP_LOGI(TAG, "GATT client event: %d, gattc_if: %d", event, gattc_if);
+    // Fast path: process GATT events without per-event logging
 
     // Log registration events in detail
     if (event == ESP_GATTC_REG_EVT) {
@@ -169,19 +168,14 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         }
     }
     
-    // Route events: Send ALL events to HID first, then also send NUS-related events to NUS handler
-    ESP_LOGI(TAG, "Routing: gattc_if=%d, event=%d", gattc_if, event);
-
-    // Route events based on separate GATT interfaces
+    // Route events based on separate GATT interfaces (fast path - no logging)
     if (gattc_if == s_nus_gattc_if) {
         // This is a NUS event on the dedicated NUS GATT interface
 #if ENABLE_NUS_CLIENT_MODE
-        ESP_LOGI(TAG, "Routing GATT event %d to NUS handler (gattc_if=%d)", event, gattc_if);
         nus_cdc_bridge_handle_gattc_event(event, gattc_if, param);
 #endif
     } else {
         // This is a HID event (or registration event)
-        ESP_LOGI(TAG, "Routing GATT event %d to HID handler (gattc_if=%d)", event, gattc_if);
         esp_hidh_gattc_event_handler(event, gattc_if, param);
 
         // For registration events, also forward to NUS if it's app_id 1
@@ -202,17 +196,6 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
             }
         }
 #endif
-    }
-}
-
-static void nus_discovery_timer_callback(void* arg)
-{
-    (void)arg;
-    ESP_LOGI(TAG, "Starting delayed NUS service discovery using separate NUS interface (conn_id: %d, nus_gattc_if: %d)",
-             s_active_conn_id, s_nus_gattc_if);
-    esp_err_t ret = nus_cdc_bridge_discover_services(s_nus_gattc_if, s_active_conn_id);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
     }
 }
 
@@ -240,39 +223,17 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
 #if ENABLE_NUS_CLIENT_MODE
                 // Set the server BD address for NUS client so it can open its own connection
                 ble_nus_client_set_server_bda(bda);
-                // Trigger NUS service discovery after HID connection is established
-                // Add delay to ensure HID service discovery fully completes first
-                ESP_LOGI(TAG, "HID device connected, scheduling delayed NUS discovery");
+                // Trigger NUS service discovery immediately - no delay needed with separate GATT instances
+                ESP_LOGI(TAG, "HID device connected, starting immediate NUS discovery");
                 ESP_LOGI(TAG, "s_active_conn_id=%d, s_nus_gattc_if=%d", s_active_conn_id, s_nus_gattc_if);
 
                 if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
-                    // Create a timer to start NUS discovery after a short delay
-                    static esp_timer_handle_t nus_discovery_timer = NULL;
-
-                    // Clean up any existing timer
-                    if (nus_discovery_timer != NULL) {
-                        esp_timer_stop(nus_discovery_timer);
-                        esp_timer_delete(nus_discovery_timer);
-                        nus_discovery_timer = NULL;
-                    }
-
-                    const esp_timer_create_args_t timer_args = {
-                        .callback = nus_discovery_timer_callback,
-                        .arg = NULL,
-                        .name = "nus_discovery_delay"
-                    };
-
-                    esp_err_t ret = esp_timer_create(&timer_args, &nus_discovery_timer);
-                    if (ret == ESP_OK) {
-                        // Start timer for 2 second delay to allow HID discovery to complete
-                        ret = esp_timer_start_once(nus_discovery_timer, 2000000); // 2 seconds in microseconds
-                        if (ret != ESP_OK) {
-                            ESP_LOGW(TAG, "Failed to start NUS discovery delay timer: %s", esp_err_to_name(ret));
-                        } else {
-                            ESP_LOGI(TAG, "NUS discovery scheduled in 2 seconds");
-                        }
+                    ESP_LOGI(TAG, "Starting NUS service discovery using separate NUS interface");
+                    esp_err_t ret = nus_cdc_bridge_discover_services(s_nus_gattc_if, s_active_conn_id);
+                    if (ret != ESP_OK) {
+                        ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
                     } else {
-                        ESP_LOGW(TAG, "Failed to create NUS discovery delay timer: %s", esp_err_to_name(ret));
+                        ESP_LOGI(TAG, "NUS discovery started successfully on separate GATT interface");
                     }
                 } else {
                     ESP_LOGW(TAG, "Cannot start NUS discovery - conn_id: %d, nus_gattc_if: %d",
@@ -293,16 +254,15 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
         break;
     case ESP_HIDH_INPUT_EVENT:
         if (param->input.dev) {
-            ESP_LOGI(TAG, "Input report (usage=%s, id=%u)",
-                     esp_hid_usage_str(param->input.usage), param->input.report_id);
-            log_report(param->input.data, param->input.length);
-            schedule_rssi_poll();
+            // Fast path: Send HID report immediately with minimal processing
             if (usb_hid_ready()) {
                 usb_hid_send_report(param->input.report_id,
                                          param->input.data,
                                          param->input.length);
             }
+            // Non-critical operations moved after the report sending
             leds_notify_activity();
+            // RSSI is now only polled via timer (every 10s) to reduce log spam
         }
         break;
     case ESP_HIDH_FEATURE_EVENT:
@@ -359,7 +319,8 @@ static void scan_task(void *args)
         ble_transport_scan_result_t *results = NULL;
 
         ESP_LOGI(TAG, "Scanning for BLE HID devices...");
-        ble_transport_scan(5, &results_len, &results);
+        // Use minimum scan window (1 second) - API doesn't support sub-second scans
+        ble_transport_scan(1, &results_len, &results);
         ESP_LOGI(TAG, "Scan window complete, %u result(s)", (unsigned)results_len);
 
         ble_transport_scan_result_t *target = NULL;
@@ -368,6 +329,7 @@ static void scan_task(void *args)
         }
 
         if (target) {
+            ESP_LOGI(TAG, "Found BLE device RSSI=%d name=%s", target->rssi, target->name);
             ESP_LOGI(TAG, "Connecting to best result RSSI=%d", target->rssi);
             esp_hidh_dev_t *dev = esp_hidh_dev_open(target->bda, target->transport, target->ble.addr_type);
             if (!dev) {
@@ -385,7 +347,8 @@ static void scan_task(void *args)
             ble_transport_scan_results_free(results);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // Minimize delay between scans for fastest discovery
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
     vTaskDelete(NULL);
@@ -440,7 +403,7 @@ void app_main(void)
 
     esp_hidh_config_t config = {
         .callback = hidh_callback,
-        .event_stack_size = 4096,
+        .event_stack_size = 8192,  // Increased stack size for better performance
         .callback_arg = NULL,
     };
 

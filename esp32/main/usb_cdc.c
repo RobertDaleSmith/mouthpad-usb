@@ -120,13 +120,8 @@ uint16_t usb_cdc_calculate_crc16(const uint8_t *data, uint16_t len) {
 }
 
 static void process_packet_data(const uint8_t *data, uint16_t len) {
-  ESP_LOGI(TAG, "=== CDC PACKET RECEIVED ===");
-  ESP_LOGI(TAG, "Data: %.*s", len, data);
-  ESP_LOGI(TAG, "Callback: %p", s_cdc_config.data_received_cb);
-
-  // Call the data received callback
+  // Fast path: just forward the data without verbose logging
   if (s_cdc_config.data_received_cb) {
-    ESP_LOGI(TAG, "Calling data received callback");
     s_cdc_config.data_received_cb(data, len);
   } else {
     ESP_LOGW(TAG, "No data received callback set!");
@@ -150,8 +145,7 @@ static void process_bridge_line(void) {
   }
 
   if (s_cdc_config.data_received_cb) {
-    ESP_LOGI(TAG, "Forwarding bridge line to NUS: %.*s", (int)(end - start),
-             &s_bridge_cmd_buf[start]);
+    // Forward to NUS without verbose logging during streaming
     s_cdc_config.data_received_cb((uint8_t *)&s_bridge_cmd_buf[start],
                                   (uint16_t)(end - start));
   } else {
@@ -499,14 +493,10 @@ esp_err_t usb_cdc_update_callbacks(const usb_cdc_config_t *config) {
     return ESP_ERR_INVALID_ARG;
   }
 
-  ESP_LOGI(TAG, "=== UPDATING CDC CALLBACKS ===");
-  ESP_LOGI(TAG, "New data_received_cb: %p", config->data_received_cb);
-  ESP_LOGI(TAG, "New data_sent_cb: %p", config->data_sent_cb);
-
   // Update the stored configuration
   s_cdc_config = *config;
 
-  ESP_LOGI(TAG, "CDC callbacks updated successfully");
+  ESP_LOGD(TAG, "CDC callbacks updated successfully");
   return ESP_OK;
 }
 

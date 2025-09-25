@@ -218,7 +218,7 @@ void ble_nus_client_debug_status(void)
 
 void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
-    ESP_LOGI(TAG, "=== NUS GATT EVENT: %d on gattc_if: %d ===", event, gattc_if);
+    // Fast path: process events without verbose logging
     switch (event) {
     case ESP_GATTC_REG_EVT:
         ESP_LOGI(TAG, "GATT client registered, app_id: %d", param->reg.app_id);

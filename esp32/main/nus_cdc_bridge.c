@@ -29,9 +29,7 @@ static void nus_client_data_received_cb(const uint8_t *data, uint16_t len)
         return;
     }
 
-    ESP_LOGI(TAG, "NUS -> CDC: Forwarding %d bytes with framing", len);
-
-    // Use the same packet framing as nRF version
+    // Forward to CDC without verbose logging during streaming
     esp_err_t ret = usb_cdc_send_data(data, len);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to send data to CDC: %s", esp_err_to_name(ret));
@@ -60,22 +58,18 @@ static void nus_client_disconnected_cb(void)
 // Callback functions for CDC events
 static void cdc_data_received_cb(const uint8_t *data, uint16_t len)
 {
-    ESP_LOGI(TAG, "=== CDC DATA RECEIVED ===");
-    ESP_LOGI(TAG, "Data: %.*s", len, data);
-    ESP_LOGI(TAG, "Bridge active: %d, NUS connected: %d", s_bridge_active, s_nus_connected);
-    
+    // Fast path: forward data without verbose logging during streaming
     if (!s_bridge_active) {
         ESP_LOGW(TAG, "Bridge not active, dropping %d bytes", len);
         return;
     }
-    
+
     if (!s_nus_connected) {
         ESP_LOGW(TAG, "NUS not connected, dropping %d bytes", len);
         return;
     }
 
-    ESP_LOGI(TAG, "CDC -> NUS: Forwarding %d bytes", len);
-    
+    // Forward to NUS silently
     esp_err_t ret = ble_nus_client_send_data(data, len);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to send data to NUS client: %s", esp_err_to_name(ret));
