@@ -222,7 +222,7 @@ static void add_bt_scan_result(esp_bd_addr_t bda, esp_bt_cod_t *cod, esp_bt_uuid
 #endif
 
 #if CONFIG_BT_BLE_ENABLED
-static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi)
+static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi, uint8_t *mfg_data, uint8_t mfg_data_len)
 {
     if (find_scan_result(bda, ble_scan_results)) {
         ESP_LOGW(TAG, "Result already exists!");
@@ -441,18 +441,40 @@ static void handle_ble_device_result(struct ble_scan_result_evt_param *scan_rst)
         name[adv_name_len] = 0;
     }
 
+    // Extract manufacturer data
+    uint8_t mfg_data_len = 0;
+    uint8_t *mfg_data = esp_ble_resolve_adv_data_by_type(scan_rst->ble_adv,
+                                                scan_rst->adv_data_len + scan_rst->scan_rsp_len,
+                                                ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
+                                                &mfg_data_len);
+
     if (adv_name_len) {
-        GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", RSSI: %d, UUID: 0x%04x, APPEARANCE: 0x%04x, ADDR_TYPE: '%s', NAME: '%s'\n",
+        GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", RSSI: %d, UUID: 0x%04x, APPEARANCE: 0x%04x, ADDR_TYPE: '%s', NAME: '%s'",
                        ESP_BD_ADDR_HEX(scan_rst->bda),
                        scan_rst->rssi,
                        uuid,
                        appearance,
                        ble_transport_addr_type_str(scan_rst->ble_addr_type),
                        name);
+
+        // Log manufacturer data if present
+        if (mfg_data && mfg_data_len >= 2) {
+            uint16_t company_id = mfg_data[0] | (mfg_data[1] << 8);
+            GAP_DBG_PRINTF(", MFG_DATA: Company=0x%04X", company_id);
+            if (mfg_data_len > 2) {
+                GAP_DBG_PRINTF(" Data=[");
+                for (int i = 2; i < mfg_data_len; i++) {
+                    GAP_DBG_PRINTF("%02X", mfg_data[i]);
+                    if (i < mfg_data_len - 1) GAP_DBG_PRINTF(" ");
+                }
+                GAP_DBG_PRINTF("]");
+            }
+        }
+        GAP_DBG_PRINTF("\n");
     }
 
     if (uuid == ESP_GATT_UUID_HID_SVC) {
-        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi);
+        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi, mfg_data, mfg_data_len);
     }
 }
 #endif /* CONFIG_BT_BLE_ENABLED */
@@ -860,7 +882,7 @@ static void handle_ble_device_result(const struct ble_gap_disc_desc *disc)
             ((adv_name_len > 0 && memcmp("ESP BLE HID2", adv_name, adv_name_len) == 0) ||
             (adv_name_len > 0 && memcmp("ESP Mouse", adv_name, adv_name_len) == 0) ||
             (adv_name_len > 0 && memcmp("ESP Keyboard", adv_name, adv_name_len) == 0))) {
-            add_ble_scan_result(disc->addr.val, disc->addr.type, appearance, adv_name, adv_name_len, disc->rssi);
+            add_ble_scan_result(disc->addr.val, disc->addr.type, appearance, adv_name, adv_name_len, disc->rssi, NULL, 0);
             break;
         }
     }
