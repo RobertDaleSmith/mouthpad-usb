@@ -414,13 +414,13 @@ void ble_device_info_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_
                             current_device_info.pnp_id.product_version = (param->read.value[6] << 8) | param->read.value[5];
                             current_device_info.has_pnp_id = true;
 
-                            const char* vendor_source = (current_device_info.pnp_id.vendor_id_source == 0x01) ? "Bluetooth SIG" :
-                                                       (current_device_info.pnp_id.vendor_id_source == 0x02) ? "USB Forum" : "Unknown";
-                            ESP_LOGI(TAG, "PnP ID: Source=%s, VID=0x%04X, PID=0x%04X, Ver=0x%04X",
-                                     vendor_source,
-                                     current_device_info.pnp_id.vendor_id,
-                                     current_device_info.pnp_id.product_id,
-                                     current_device_info.pnp_id.product_version);
+                            // const char* vendor_source = (current_device_info.pnp_id.vendor_id_source == 0x01) ? "Bluetooth SIG" :
+                            //                            (current_device_info.pnp_id.vendor_id_source == 0x02) ? "USB Forum" : "Unknown";
+                            // ESP_LOGI(TAG, "PnP ID: Source=%s, VID=0x%04X, PID=0x%04X, Ver=0x%04X",
+                            //          vendor_source,
+                            //          current_device_info.pnp_id.vendor_id,
+                            //          current_device_info.pnp_id.product_id,
+                            //          current_device_info.pnp_id.product_version);
                         } else {
                             ESP_LOGW(TAG, "PnP ID data too short (%d bytes, expected 7)", param->read.value_len);
                         }

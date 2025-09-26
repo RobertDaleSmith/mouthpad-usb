@@ -448,33 +448,55 @@ static void handle_ble_device_result(struct ble_scan_result_evt_param *scan_rst)
                                                 ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
                                                 &mfg_data_len);
 
-    if (adv_name_len) {
-        GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", RSSI: %d, UUID: 0x%04x, APPEARANCE: 0x%04x, ADDR_TYPE: '%s', NAME: '%s'",
+    // For HID devices, show detailed advertisement packet data
+    if (uuid == ESP_GATT_UUID_HID_SVC) {
+        ESP_LOGI(TAG, "=== HID DEVICE ADVERTISEMENT PACKET ===");
+        ESP_LOGI(TAG, "BDA: " ESP_BD_ADDR_STR ", RSSI: %d, ADDR_TYPE: '%s'",
+                 ESP_BD_ADDR_HEX(scan_rst->bda),
+                 scan_rst->rssi,
+                 ble_transport_addr_type_str(scan_rst->ble_addr_type));
+
+        if (adv_name_len) {
+            ESP_LOGI(TAG, "NAME: '%s' (len=%d)", name, adv_name_len);
+        } else {
+            ESP_LOGI(TAG, "NAME: (no name advertised)");
+        }
+
+        ESP_LOGI(TAG, "UUID: 0x%04x (HID Service)", uuid);
+        ESP_LOGI(TAG, "APPEARANCE: 0x%04x", appearance);
+
+        // Log manufacturer data if present
+        if (mfg_data && mfg_data_len >= 2) {
+            uint16_t company_id = mfg_data[0] | (mfg_data[1] << 8);
+            ESP_LOGI(TAG, "MFG_DATA found: Company=0x%04X, Length=%d", company_id, mfg_data_len);
+            if (mfg_data_len > 2) {
+                ESP_LOG_BUFFER_HEX_LEVEL(TAG, mfg_data + 2, mfg_data_len - 2, ESP_LOG_INFO);
+            }
+        } else {
+            ESP_LOGI(TAG, "MFG_DATA: None");
+        }
+
+        // Show raw advertisement data
+        ESP_LOGI(TAG, "Raw ADV data (%d bytes):", scan_rst->adv_data_len);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, scan_rst->ble_adv, scan_rst->adv_data_len, ESP_LOG_INFO);
+
+        if (scan_rst->scan_rsp_len > 0) {
+            ESP_LOGI(TAG, "Raw SCAN_RSP data (%d bytes):", scan_rst->scan_rsp_len);
+            ESP_LOG_BUFFER_HEX_LEVEL(TAG, scan_rst->ble_adv + scan_rst->adv_data_len, scan_rst->scan_rsp_len, ESP_LOG_INFO);
+        }
+
+        ESP_LOGI(TAG, "==========================================");
+
+        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi, mfg_data, mfg_data_len);
+    } else if (adv_name_len) {
+        // For non-HID devices, keep the original debug output
+        GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", RSSI: %d, UUID: 0x%04x, APPEARANCE: 0x%04x, ADDR_TYPE: '%s', NAME: '%s'\n",
                        ESP_BD_ADDR_HEX(scan_rst->bda),
                        scan_rst->rssi,
                        uuid,
                        appearance,
                        ble_transport_addr_type_str(scan_rst->ble_addr_type),
                        name);
-
-        // Log manufacturer data if present
-        if (mfg_data && mfg_data_len >= 2) {
-            uint16_t company_id = mfg_data[0] | (mfg_data[1] << 8);
-            GAP_DBG_PRINTF(", MFG_DATA: Company=0x%04X", company_id);
-            if (mfg_data_len > 2) {
-                GAP_DBG_PRINTF(" Data=[");
-                for (int i = 2; i < mfg_data_len; i++) {
-                    GAP_DBG_PRINTF("%02X", mfg_data[i]);
-                    if (i < mfg_data_len - 1) GAP_DBG_PRINTF(" ");
-                }
-                GAP_DBG_PRINTF("]");
-            }
-        }
-        GAP_DBG_PRINTF("\n");
-    }
-
-    if (uuid == ESP_GATT_UUID_HID_SVC) {
-        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi, mfg_data, mfg_data_len);
     }
 }
 #endif /* CONFIG_BT_BLE_ENABLED */

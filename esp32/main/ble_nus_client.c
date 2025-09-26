@@ -327,7 +327,6 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
                     ESP_LOGI(TAG, "NUS service configured - TX: %d, RX: %d",
                              nus_char_tx_handle, nus_char_rx_handle);
                     nus_connected = true;  // Now we can set this to true - service is fully discovered
-                    ESP_LOGI(TAG, "NUS client fully connected and ready for data transmission");
                 } else {
                     ESP_LOGW(TAG, "Failed to find all NUS characteristics");
                     nus_connected = false;
