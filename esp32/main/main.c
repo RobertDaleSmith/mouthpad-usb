@@ -23,7 +23,7 @@
 #include "ble_bas.h"
 #include "leds.h"
 #include "nus_cdc_bridge.h"
-#include "ble_nus_client.h"
+#include "ble_nus.h"
 #include "app_config.h"
 #include "button.h"
 #include "ble_device_info.h"

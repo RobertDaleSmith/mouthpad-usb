@@ -1,5 +1,5 @@
 #include "nus_cdc_bridge.h"
-#include "ble_nus_client.h"
+#include "ble_nus.h"
 #include "usb_cdc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"

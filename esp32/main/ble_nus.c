@@ -1,4 +1,4 @@
-#include "ble_nus_client.h"
+#include "ble_nus.h"
 #include "esp_log.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gattc_api.h"
