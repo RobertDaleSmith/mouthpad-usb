@@ -1,4 +1,4 @@
-#include "nus_cdc_bridge.h"
+#include "ble_transport.h"
 #include "ble_nus.h"
 #include "usb_cdc.h"
 #include "esp_log.h"
@@ -7,7 +7,7 @@
 #include "freertos/queue.h"
 #include "string.h"
 
-static const char *TAG = "NUS_CDC_BRIDGE";
+static const char *TAG = "BLE_TRANSPORT";
 
 // Bridge state
 static bool s_bridge_active = false;
@@ -83,7 +83,7 @@ static void cdc_data_sent_cb(esp_err_t status)
     }
 }
 
-esp_err_t nus_cdc_bridge_init(void)
+esp_err_t ble_transport_init(void)
 {
     ESP_LOGI(TAG, "Initializing NUS client to CDC bridge");
 
@@ -118,7 +118,7 @@ esp_err_t nus_cdc_bridge_init(void)
     return ESP_OK;
 }
 
-esp_err_t nus_cdc_bridge_start(void)
+esp_err_t ble_transport_start(void)
 {
     if (s_bridge_active) {
         ESP_LOGW(TAG, "Bridge already active");
@@ -138,7 +138,7 @@ esp_err_t nus_cdc_bridge_start(void)
     return ESP_OK;
 }
 
-esp_err_t nus_cdc_bridge_stop(void)
+esp_err_t ble_transport_stop(void)
 {
     if (!s_bridge_active) {
         ESP_LOGW(TAG, "Bridge not active");
@@ -155,12 +155,12 @@ esp_err_t nus_cdc_bridge_stop(void)
     return ESP_OK;
 }
 
-bool nus_cdc_bridge_is_active(void)
+bool ble_transport_is_active(void)
 {
     return s_bridge_active;
 }
 
-esp_err_t nus_cdc_bridge_discover_services(esp_gatt_if_t gattc_if, uint16_t conn_id)
+esp_err_t ble_transport_discover_services(esp_gatt_if_t gattc_if, uint16_t conn_id)
 {
     if (!s_bridge_active) {
         ESP_LOGW(TAG, "Bridge not active");
@@ -171,7 +171,7 @@ esp_err_t nus_cdc_bridge_discover_services(esp_gatt_if_t gattc_if, uint16_t conn
     return ble_nus_client_discover_services(gattc_if, conn_id);
 }
 
-void nus_cdc_bridge_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
+void ble_transport_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
     if (s_bridge_active) {
         ble_nus_client_handle_gattc_event(event, gattc_if, param);
