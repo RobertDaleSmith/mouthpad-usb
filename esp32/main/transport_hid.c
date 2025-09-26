@@ -100,6 +100,17 @@ void transport_hid_clear_device(void)
     memset(s_active_addr, 0, sizeof(s_active_addr));
 }
 
+void transport_hid_handle_disconnect(void)
+{
+    ESP_LOGI(TAG, "Handling HID device disconnect - releasing stuck inputs");
+
+    // Release any stuck HID inputs to prevent buttons/movement from being stuck
+    usb_hid_release_all();
+
+    // Clear the device state
+    transport_hid_clear_device();
+}
+
 esp_err_t transport_hid_handle_input(uint8_t report_id, const uint8_t *data, uint16_t length)
 {
     if (!s_bridge_active) {

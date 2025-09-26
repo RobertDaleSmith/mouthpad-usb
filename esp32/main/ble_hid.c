@@ -76,6 +76,7 @@ void ble_hid_client_handle_event(void *handler_args, esp_event_base_t base, int3
             if (bda) {
                 log_addr(bda);
             }
+            ESP_LOGI(TAG, "============================");
 
             // Update state
             s_active_dev = param->open.dev;

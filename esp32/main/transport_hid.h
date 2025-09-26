@@ -51,6 +51,14 @@ esp_err_t transport_hid_set_device(esp_hidh_dev_t *dev, const uint8_t *bda);
 void transport_hid_clear_device(void);
 
 /**
+ * @brief Handle device disconnection and release all stuck inputs
+ *
+ * This function releases any stuck HID inputs (buttons, movement, scroll)
+ * by sending neutral reports to USB HID. Call when BLE device disconnects.
+ */
+void transport_hid_handle_disconnect(void);
+
+/**
  * @brief Handle HID input report (called from BLE HID client)
  *
  * @param report_id HID report ID

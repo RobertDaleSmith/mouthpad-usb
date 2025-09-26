@@ -70,11 +70,13 @@ typedef struct ble_central_scan_result_s {
         struct {
             esp_ble_addr_type_t addr_type;
             uint16_t appearance;
+            bool has_nus_uuid;
         } ble;
     #else
         struct {
             uint8_t addr_type;
             uint16_t appearance;
+            bool has_nus_uuid;
         } ble;
     #endif
     };

@@ -26,8 +26,89 @@
 #include "nimble/ble.h"
 #include "host/ble_sm.h"
 #define BLE_HID_SVC_UUID 0x1812          /* HID Service*/
+
+// Nordic UART Service UUID: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+// In little-endian format for advertisement data
+static const uint8_t nus_uuid_128[] = {
+    0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
+    0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e
+};
+
+// Helper function to detect NUS UUID in advertisement data
+static bool detect_nus_uuid(const uint8_t *adv_data, uint16_t adv_len, uint16_t scan_rsp_len)
+{
+    // Check for complete 128-bit service UUIDs (0x07)
+    uint8_t uuid_len = 0;
+    uint8_t *uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+                                                          ESP_BLE_AD_TYPE_128SRV_CMPL, &uuid_len);
+
+    if (uuid_data && uuid_len >= 16) {
+        // Check each 128-bit UUID in the list
+        for (int i = 0; i <= uuid_len - 16; i += 16) {
+            if (memcmp(uuid_data + i, nus_uuid_128, 16) == 0) {
+                return true;
+            }
+        }
+    }
+
+    // Check for incomplete 128-bit service UUIDs (0x06)
+    uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+                                                 ESP_BLE_AD_TYPE_128SRV_PART, &uuid_len);
+
+    if (uuid_data && uuid_len >= 16) {
+        // Check each 128-bit UUID in the list
+        for (int i = 0; i <= uuid_len - 16; i += 16) {
+            if (memcmp(uuid_data + i, nus_uuid_128, 16) == 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
 #else
 #include "esp_bt_device.h"
+#define BLE_HID_SVC_UUID 0x1812          /* HID Service*/
+
+// Nordic UART Service UUID: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+// In little-endian format for advertisement data
+static const uint8_t nus_uuid_128[] = {
+    0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
+    0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e
+};
+
+// Helper function to detect NUS UUID in advertisement data
+static bool detect_nus_uuid(const uint8_t *adv_data, uint16_t adv_len, uint16_t scan_rsp_len)
+{
+    // Check for complete 128-bit service UUIDs (0x07)
+    uint8_t uuid_len = 0;
+    uint8_t *uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+                                                          ESP_BLE_AD_TYPE_128SRV_CMPL, &uuid_len);
+
+    if (uuid_data && uuid_len >= 16) {
+        // Check each 128-bit UUID in the list
+        for (int i = 0; i <= uuid_len - 16; i += 16) {
+            if (memcmp(uuid_data + i, nus_uuid_128, 16) == 0) {
+                return true;
+            }
+        }
+    }
+
+    // Check for incomplete 128-bit service UUIDs (0x06)
+    uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+                                                 ESP_BLE_AD_TYPE_128SRV_PART, &uuid_len);
+
+    if (uuid_data && uuid_len >= 16) {
+        // Check each 128-bit UUID in the list
+        for (int i = 0; i <= uuid_len - 16; i += 16) {
+            if (memcmp(uuid_data + i, nus_uuid_128, 16) == 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
 #endif
 
 static const char *TAG = "BLE_CENTRAL";
@@ -222,7 +303,7 @@ static void add_bt_scan_result(esp_bd_addr_t bda, esp_bt_cod_t *cod, esp_bt_uuid
 #endif
 
 #if CONFIG_BT_BLE_ENABLED
-static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi, uint8_t *mfg_data, uint8_t mfg_data_len)
+static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi, uint8_t *mfg_data, uint8_t mfg_data_len, bool has_nus_uuid)
 {
     if (find_scan_result(bda, ble_scan_results)) {
         ESP_LOGW(TAG, "Result already exists!");
@@ -237,6 +318,7 @@ static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type
     memcpy(r->bda, bda, sizeof(esp_bd_addr_t));
     r->ble.appearance = appearance;
     r->ble.addr_type = addr_type;
+    r->ble.has_nus_uuid = has_nus_uuid;
     r->usage = esp_hid_usage_from_appearance(appearance);
     r->rssi = rssi;
     r->name = NULL;
@@ -258,7 +340,7 @@ static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type
 #endif /* CONFIG_BT_BLE_ENABLED */
 
 #if CONFIG_BT_NIMBLE_ENABLED
-static void add_ble_scan_result(const uint8_t *bda, uint8_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi)
+static void add_ble_scan_result(const uint8_t *bda, uint8_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi, bool has_nus_uuid)
 {
     if (find_scan_result(bda, ble_scan_results)) {
         ESP_LOGW(TAG, "Result already exists!");
@@ -273,6 +355,7 @@ static void add_ble_scan_result(const uint8_t *bda, uint8_t addr_type, uint16_t 
     memcpy(r->bda, bda, sizeof(r->bda));
     r->ble.appearance = appearance;
     r->ble.addr_type = addr_type;
+    r->ble.has_nus_uuid = has_nus_uuid;
     r->usage = esp_hid_usage_from_appearance(appearance);
     r->rssi = rssi;
     r->name = NULL;
@@ -448,6 +531,9 @@ static void handle_ble_device_result(struct ble_scan_result_evt_param *scan_rst)
                                                 ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
                                                 &mfg_data_len);
 
+    // Detect NUS UUID in advertisement data
+    bool has_nus_uuid = detect_nus_uuid(scan_rst->ble_adv, scan_rst->adv_data_len, scan_rst->scan_rsp_len);
+
     // For HID devices, show detailed advertisement packet data
     if (uuid == ESP_GATT_UUID_HID_SVC) {
         ESP_LOGI(TAG, "=== HID DEVICE ADVERTISEMENT PACKET ===");
@@ -464,6 +550,7 @@ static void handle_ble_device_result(struct ble_scan_result_evt_param *scan_rst)
 
         ESP_LOGI(TAG, "UUID: 0x%04x (HID Service)", uuid);
         ESP_LOGI(TAG, "APPEARANCE: 0x%04x", appearance);
+        ESP_LOGI(TAG, "NUS_UUID: %s", has_nus_uuid ? "YES" : "NO");
 
         // Log manufacturer data if present
         if (mfg_data && mfg_data_len >= 2) {
@@ -487,7 +574,7 @@ static void handle_ble_device_result(struct ble_scan_result_evt_param *scan_rst)
 
         ESP_LOGI(TAG, "==========================================");
 
-        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi, mfg_data, mfg_data_len);
+        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi, mfg_data, mfg_data_len, has_nus_uuid);
     } else if (adv_name_len) {
         // For non-HID devices, keep the original debug output
         GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", RSSI: %d, UUID: 0x%04x, APPEARANCE: 0x%04x, ADDR_TYPE: '%s', NAME: '%s'\n",

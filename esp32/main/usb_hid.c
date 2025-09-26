@@ -172,6 +172,29 @@ void usb_hid_send_report(uint8_t report_id, const uint8_t *data, size_t len) {
   }
 }
 
+void usb_hid_release_all(void) {
+  if (!usb_hid_ready()) {
+    ESP_LOGD(TAG, "USB HID not ready, skipping release");
+    return;
+  }
+
+  ESP_LOGI(TAG, "Releasing all HID inputs to neutral state");
+
+  // Report 1: Mouse buttons + scroll (buttons=0, vscroll=0, hscroll=0)
+  const uint8_t neutral_report1[] = {0x00, 0x00, 0x00};
+  usb_hid_send_report(1, neutral_report1, sizeof(neutral_report1));
+
+  // Report 2: Mouse movement (x=0, y=0)
+  const uint8_t neutral_report2[] = {0x00, 0x00, 0x00};
+  usb_hid_send_report(2, neutral_report2, sizeof(neutral_report2));
+
+  // Report 3: Consumer control (media keys=0)
+  const uint8_t neutral_report3[] = {0x00};
+  usb_hid_send_report(3, neutral_report3, sizeof(neutral_report3));
+
+  ESP_LOGI(TAG, "All HID inputs released to neutral state");
+}
+
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
   (void)instance;
   return mouthpad_report_desc;

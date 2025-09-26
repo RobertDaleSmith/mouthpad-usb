@@ -239,8 +239,8 @@ static void hid_disconnected_cb(esp_hidh_dev_t *dev)
     stop_rssi_timer();
     s_has_active_addr = false;
 
-    // Clear transport device
-    transport_hid_clear_device();
+    // Handle disconnect and release any stuck HID inputs
+    transport_hid_handle_disconnect();
 
     // Reset advertisement data
     s_active_appearance = 0;
@@ -284,11 +284,37 @@ static ble_central_scan_result_t *choose_best_result(ble_central_scan_result_t *
                      r->rssi,
                      r->name);
         }
-        if (r->transport == ESP_HID_TRANSPORT_BLE && r->rssi > best_rssi) {
-            best = r;
-            best_rssi = r->rssi;
+
+        // Filter for devices with both HID and NUS services (MouthPad devices)
+        // This uniquely identifies the target hardware
+        if (r->transport == ESP_HID_TRANSPORT_BLE) {
+            bool has_both_services = r->ble.has_nus_uuid;  // NUS UUID indicates MouthPad device
+
+            if (has_both_services) {
+                if (r->rssi > best_rssi) {
+                    best = r;
+                    best_rssi = r->rssi;
+                    ESP_LOGI(TAG, "Found MouthPad device: %s (RSSI=%d, appearance=0x%04X, NUS=YES)",
+                            r->name ? r->name : "(no name)", r->rssi, r->ble.appearance);
+                }
+            } else {
+                ESP_LOGD(TAG, "Skipping device: %s (appearance=0x%04X, no NUS UUID)",
+                        r->name ? r->name : "(no name)", r->ble.appearance);
+            }
         }
     }
+
+    if (best == NULL && results != NULL) {
+        // Count the number of devices for logging
+        int count = 0;
+        for (ble_central_scan_result_t *r = results; r != NULL; r = r->next) {
+            count++;
+        }
+        if (count > 0) {
+            ESP_LOGI(TAG, "No suitable devices found among %d HID device(s) (need both HID and NUS UUIDs)", count);
+        }
+    }
+
     return best;
 }
 

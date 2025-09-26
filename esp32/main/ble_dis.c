@@ -167,6 +167,8 @@ void ble_device_info_print(const ble_device_info_t *device_info)
         ESP_LOGI(TAG, "Product ID: 0x%04X", device_info->pnp_id.product_id);
         ESP_LOGI(TAG, "Product Version: 0x%04X", device_info->pnp_id.product_version);
     }
+
+    ESP_LOGI(TAG, "==========================");
 }
 
 static void check_info_complete(void)
