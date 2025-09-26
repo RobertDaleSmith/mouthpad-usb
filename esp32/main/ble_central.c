@@ -14,7 +14,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
-#include "ble_transport.h"
+#include "ble_central.h"
 #if CONFIG_BT_BLUEDROID_ENABLED
 #include "esp_bt_device.h"
 #endif
@@ -30,7 +30,7 @@
 #include "esp_bt_device.h"
 #endif
 
-static const char *TAG = "BLE_TRANSPORT";
+static const char *TAG = "BLE_CENTRAL";
 
 // uncomment to print all devices that were seen during a scan
 #define GAP_DBG_PRINTF(...) printf(__VA_ARGS__)
@@ -39,10 +39,10 @@ static const char *TAG = "BLE_TRANSPORT";
 static const char * gap_bt_prop_type_names[5] = {"","BDNAME","COD","RSSI","EIR"};
 #endif
 
-static ble_transport_scan_result_t *bt_scan_results = NULL;
+static ble_central_scan_result_t *bt_scan_results = NULL;
 static size_t num_bt_scan_results = 0;
 
-static ble_transport_scan_result_t *ble_scan_results = NULL;
+static ble_central_scan_result_t *ble_scan_results = NULL;
 static size_t num_ble_scan_results = 0;
 
 static SemaphoreHandle_t bt_hidh_cb_semaphore = NULL;
@@ -62,7 +62,7 @@ static const char *ble_gap_evt_names[] = { "ADV_DATA_SET_COMPLETE", "SCAN_RSP_DA
 static const char *bt_gap_evt_names[] = { "DISC_RES", "DISC_STATE_CHANGED", "RMT_SRVCS", "RMT_SRVC_REC", "AUTH_CMPL", "PIN_REQ", "CFM_REQ", "KEY_NOTIF", "KEY_REQ", "READ_RSSI_DELTA"};
 static const char *ble_addr_type_names[] = {"PUBLIC", "RANDOM", "RPA_PUBLIC", "RPA_RANDOM"};
 
-const char *ble_transport_addr_type_str(esp_ble_addr_type_t ble_addr_type)
+const char *ble_central_addr_type_str(esp_ble_addr_type_t ble_addr_type)
 {
     if (ble_addr_type > BLE_ADDR_TYPE_RPA_RANDOM) {
         return "UNKNOWN";
@@ -127,9 +127,9 @@ const char *esp_ble_key_type_str(esp_ble_key_type_t key_type)
 }
 #endif /* CONFIG_BT_BLE_ENABLED */
 
-void ble_transport_scan_results_free(ble_transport_scan_result_t *results)
+void ble_central_scan_results_free(ble_central_scan_result_t *results)
 {
-    ble_transport_scan_result_t *r = NULL;
+    ble_central_scan_result_t *r = NULL;
     while (results) {
         r = results;
         results = results->next;
@@ -141,9 +141,9 @@ void ble_transport_scan_results_free(ble_transport_scan_result_t *results)
 }
 
 #if (CONFIG_BT_HID_HOST_ENABLED || CONFIG_BT_BLE_ENABLED)
-static ble_transport_scan_result_t *find_scan_result(esp_bd_addr_t bda, ble_transport_scan_result_t *results)
+static ble_central_scan_result_t *find_scan_result(esp_bd_addr_t bda, ble_central_scan_result_t *results)
 {
-    ble_transport_scan_result_t *r = results;
+    ble_central_scan_result_t *r = results;
     while (r) {
         if (memcmp(bda, r->bda, sizeof(esp_bd_addr_t)) == 0) {
             return r;
@@ -155,9 +155,9 @@ static ble_transport_scan_result_t *find_scan_result(esp_bd_addr_t bda, ble_tran
 #endif /* (CONFIG_BT_HID_HOST_ENABLED || CONFIG_BT_BLE_ENABLED) */
 
 #if (CONFIG_BT_NIMBLE_ENABLED)
-static ble_transport_scan_result_t *find_scan_result(const uint8_t *bda, ble_transport_scan_result_t *results)
+static ble_central_scan_result_t *find_scan_result(const uint8_t *bda, ble_central_scan_result_t *results)
 {
-    ble_transport_scan_result_t *r = results;
+    ble_central_scan_result_t *r = results;
     while (r) {
         if (memcmp(bda, r->bda, sizeof(r->bda)) == 0) {
             return r;
@@ -170,7 +170,7 @@ static ble_transport_scan_result_t *find_scan_result(const uint8_t *bda, ble_tra
 #if CONFIG_BT_HID_HOST_ENABLED
 static void add_bt_scan_result(esp_bd_addr_t bda, esp_bt_cod_t *cod, esp_bt_uuid_t *uuid, uint8_t *name, uint8_t name_len, int rssi)
 {
-    ble_transport_scan_result_t *r = find_scan_result(bda, bt_scan_results);
+    ble_central_scan_result_t *r = find_scan_result(bda, bt_scan_results);
     if (r) {
         //Some info may come later
         if (r->name == NULL && name && name_len) {
@@ -192,7 +192,7 @@ static void add_bt_scan_result(esp_bd_addr_t bda, esp_bt_cod_t *cod, esp_bt_uuid
         return;
     }
 
-    r = (ble_transport_scan_result_t *)malloc(sizeof(ble_transport_scan_result_t));
+    r = (ble_central_scan_result_t *)malloc(sizeof(ble_central_scan_result_t));
     if (r == NULL) {
         ESP_LOGE(TAG, "Malloc bt_hidh_scan_result_t failed!");
         return;
@@ -222,13 +222,13 @@ static void add_bt_scan_result(esp_bd_addr_t bda, esp_bt_cod_t *cod, esp_bt_uuid
 #endif
 
 #if CONFIG_BT_BLE_ENABLED
-static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi)
+static void add_ble_scan_result(esp_bd_addr_t bda, esp_ble_addr_type_t addr_type, uint16_t appearance, uint8_t *name, uint8_t name_len, int rssi, uint8_t *mfg_data, uint8_t mfg_data_len)
 {
     if (find_scan_result(bda, ble_scan_results)) {
         ESP_LOGW(TAG, "Result already exists!");
         return;
     }
-    ble_transport_scan_result_t *r = (ble_transport_scan_result_t *)malloc(sizeof(ble_transport_scan_result_t));
+    ble_central_scan_result_t *r = (ble_central_scan_result_t *)malloc(sizeof(ble_central_scan_result_t));
     if (r == NULL) {
         ESP_LOGE(TAG, "Malloc ble_hidh_scan_result_t failed!");
         return;
@@ -264,7 +264,7 @@ static void add_ble_scan_result(const uint8_t *bda, uint8_t addr_type, uint16_t 
         ESP_LOGW(TAG, "Result already exists!");
         return;
     }
-    ble_transport_scan_result_t *r = (ble_transport_scan_result_t *)malloc(sizeof(ble_transport_scan_result_t));
+    ble_central_scan_result_t *r = (ble_central_scan_result_t *)malloc(sizeof(ble_central_scan_result_t));
     if (r == NULL) {
         ESP_LOGE(TAG, "Malloc ble_hidh_scan_result_t failed!");
         return;
@@ -294,7 +294,7 @@ static void add_ble_scan_result(const uint8_t *bda, uint8_t addr_type, uint16_t 
 #endif /* CONFIG_BT_BLE_ENABLED */
 
 #if !CONFIG_BT_NIMBLE_ENABLED
-void ble_transport_print_uuid(esp_bt_uuid_t *uuid)
+void ble_central_print_uuid(esp_bt_uuid_t *uuid)
 {
     if (uuid->len == ESP_UUID_LEN_16) {
         GAP_DBG_PRINTF("UUID16: 0x%04x", uuid->uuid.uuid16);
@@ -441,18 +441,62 @@ static void handle_ble_device_result(struct ble_scan_result_evt_param *scan_rst)
         name[adv_name_len] = 0;
     }
 
-    if (adv_name_len) {
+    // Extract manufacturer data
+    uint8_t mfg_data_len = 0;
+    uint8_t *mfg_data = esp_ble_resolve_adv_data_by_type(scan_rst->ble_adv,
+                                                scan_rst->adv_data_len + scan_rst->scan_rsp_len,
+                                                ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
+                                                &mfg_data_len);
+
+    // For HID devices, show detailed advertisement packet data
+    if (uuid == ESP_GATT_UUID_HID_SVC) {
+        ESP_LOGI(TAG, "=== HID DEVICE ADVERTISEMENT PACKET ===");
+        ESP_LOGI(TAG, "BDA: " ESP_BD_ADDR_STR ", RSSI: %d, ADDR_TYPE: '%s'",
+                 ESP_BD_ADDR_HEX(scan_rst->bda),
+                 scan_rst->rssi,
+                 ble_central_addr_type_str(scan_rst->ble_addr_type));
+
+        if (adv_name_len) {
+            ESP_LOGI(TAG, "NAME: '%s' (len=%d)", name, adv_name_len);
+        } else {
+            ESP_LOGI(TAG, "NAME: (no name advertised)");
+        }
+
+        ESP_LOGI(TAG, "UUID: 0x%04x (HID Service)", uuid);
+        ESP_LOGI(TAG, "APPEARANCE: 0x%04x", appearance);
+
+        // Log manufacturer data if present
+        if (mfg_data && mfg_data_len >= 2) {
+            uint16_t company_id = mfg_data[0] | (mfg_data[1] << 8);
+            ESP_LOGI(TAG, "MFG_DATA found: Company=0x%04X, Length=%d", company_id, mfg_data_len);
+            if (mfg_data_len > 2) {
+                ESP_LOG_BUFFER_HEX_LEVEL(TAG, mfg_data + 2, mfg_data_len - 2, ESP_LOG_INFO);
+            }
+        } else {
+            ESP_LOGI(TAG, "MFG_DATA: None");
+        }
+
+        // Show raw advertisement data
+        ESP_LOGI(TAG, "Raw ADV data (%d bytes):", scan_rst->adv_data_len);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, scan_rst->ble_adv, scan_rst->adv_data_len, ESP_LOG_INFO);
+
+        if (scan_rst->scan_rsp_len > 0) {
+            ESP_LOGI(TAG, "Raw SCAN_RSP data (%d bytes):", scan_rst->scan_rsp_len);
+            ESP_LOG_BUFFER_HEX_LEVEL(TAG, scan_rst->ble_adv + scan_rst->adv_data_len, scan_rst->scan_rsp_len, ESP_LOG_INFO);
+        }
+
+        ESP_LOGI(TAG, "==========================================");
+
+        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi, mfg_data, mfg_data_len);
+    } else if (adv_name_len) {
+        // For non-HID devices, keep the original debug output
         GAP_DBG_PRINTF("BLE: " ESP_BD_ADDR_STR ", RSSI: %d, UUID: 0x%04x, APPEARANCE: 0x%04x, ADDR_TYPE: '%s', NAME: '%s'\n",
                        ESP_BD_ADDR_HEX(scan_rst->bda),
                        scan_rst->rssi,
                        uuid,
                        appearance,
-                       ble_transport_addr_type_str(scan_rst->ble_addr_type),
+                       ble_central_addr_type_str(scan_rst->ble_addr_type),
                        name);
-    }
-
-    if (uuid == ESP_GATT_UUID_HID_SVC) {
-        add_ble_scan_result(scan_rst->bda, scan_rst->ble_addr_type, appearance, adv_name, adv_name_len, scan_rst->rssi);
     }
 }
 #endif /* CONFIG_BT_BLE_ENABLED */
@@ -667,7 +711,7 @@ static esp_err_t init_ble_gap(void)
     return ret;
 }
 
-void ble_transport_set_user_ble_callback(esp_gap_ble_cb_t cb)
+void ble_central_set_user_ble_callback(esp_gap_ble_cb_t cb)
 {
     s_user_ble_cb = cb;
 }
@@ -697,7 +741,7 @@ static esp_err_t start_ble_scan(uint32_t seconds)
     return ret;
 }
 
-esp_err_t ble_transport_adv_init(uint16_t appearance, const char *device_name)
+esp_err_t ble_central_adv_init(uint16_t appearance, const char *device_name)
 {
 
     esp_err_t ret;
@@ -775,7 +819,7 @@ esp_err_t ble_transport_adv_init(uint16_t appearance, const char *device_name)
     return ret;
 }
 
-esp_err_t ble_transport_adv_start(void)
+esp_err_t ble_central_adv_start(void)
 {
     static esp_ble_adv_params_t hidd_adv_params = {
         .adv_int_min        = 0x20,
@@ -860,7 +904,7 @@ static void handle_ble_device_result(const struct ble_gap_disc_desc *disc)
             ((adv_name_len > 0 && memcmp("ESP BLE HID2", adv_name, adv_name_len) == 0) ||
             (adv_name_len > 0 && memcmp("ESP Mouse", adv_name, adv_name_len) == 0) ||
             (adv_name_len > 0 && memcmp("ESP Keyboard", adv_name, adv_name_len) == 0))) {
-            add_ble_scan_result(disc->addr.val, disc->addr.type, appearance, adv_name, adv_name_len, disc->rssi);
+            add_ble_scan_result(disc->addr.val, disc->addr.type, appearance, adv_name, adv_name_len, disc->rssi, NULL, 0);
             break;
         }
     }
@@ -1106,7 +1150,7 @@ static esp_err_t init_low_level(uint8_t mode)
 }
 #endif
 
-esp_err_t ble_transport_init(uint8_t mode)
+esp_err_t ble_central_init(uint8_t mode)
 {
     esp_err_t ret;
     if (!mode || mode > ESP_BT_MODE_BTDM) {
@@ -1145,7 +1189,7 @@ esp_err_t ble_transport_init(uint8_t mode)
     return ESP_OK;
 }
 
-esp_err_t ble_transport_scan(uint32_t seconds, size_t *num_results, ble_transport_scan_result_t **results)
+esp_err_t ble_central_scan(uint32_t seconds, size_t *num_results, ble_central_scan_result_t **results)
 {
     if (num_bt_scan_results || bt_scan_results || num_ble_scan_results || ble_scan_results) {
         ESP_LOGE(TAG, "There are old scan results. Free them first!");
