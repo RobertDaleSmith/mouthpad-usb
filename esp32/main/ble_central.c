@@ -39,7 +39,7 @@ static bool detect_nus_uuid(const uint8_t *adv_data, uint16_t adv_len, uint16_t 
 {
     // Check for complete 128-bit service UUIDs (0x07)
     uint8_t uuid_len = 0;
-    uint8_t *uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+    uint8_t *uuid_data = esp_ble_resolve_adv_data_by_type((uint8_t *)adv_data, adv_len + scan_rsp_len,
                                                           ESP_BLE_AD_TYPE_128SRV_CMPL, &uuid_len);
 
     if (uuid_data && uuid_len >= 16) {
@@ -52,7 +52,7 @@ static bool detect_nus_uuid(const uint8_t *adv_data, uint16_t adv_len, uint16_t 
     }
 
     // Check for incomplete 128-bit service UUIDs (0x06)
-    uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+    uuid_data = esp_ble_resolve_adv_data_by_type((uint8_t *)adv_data, adv_len + scan_rsp_len,
                                                  ESP_BLE_AD_TYPE_128SRV_PART, &uuid_len);
 
     if (uuid_data && uuid_len >= 16) {
@@ -82,7 +82,7 @@ static bool detect_nus_uuid(const uint8_t *adv_data, uint16_t adv_len, uint16_t 
 {
     // Check for complete 128-bit service UUIDs (0x07)
     uint8_t uuid_len = 0;
-    uint8_t *uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+    uint8_t *uuid_data = esp_ble_resolve_adv_data_by_type((uint8_t *)adv_data, adv_len + scan_rsp_len,
                                                           ESP_BLE_AD_TYPE_128SRV_CMPL, &uuid_len);
 
     if (uuid_data && uuid_len >= 16) {
@@ -95,7 +95,7 @@ static bool detect_nus_uuid(const uint8_t *adv_data, uint16_t adv_len, uint16_t 
     }
 
     // Check for incomplete 128-bit service UUIDs (0x06)
-    uuid_data = esp_ble_resolve_adv_data_by_type(adv_data, adv_len + scan_rsp_len,
+    uuid_data = esp_ble_resolve_adv_data_by_type((uint8_t *)adv_data, adv_len + scan_rsp_len,
                                                  ESP_BLE_AD_TYPE_128SRV_PART, &uuid_len);
 
     if (uuid_data && uuid_len >= 16) {

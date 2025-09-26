@@ -90,7 +90,7 @@ void ble_hid_client_handle_event(void *handler_args, esp_event_base_t base, int3
         break;
 
     case ESP_HIDH_BATTERY_EVENT:
-        ESP_LOGI(TAG, "Battery event");
+        // ESP_LOGI(TAG, "Battery event");
         if (s_config.battery_cb) {
             s_config.battery_cb(param->battery.level, param->battery.status);
         }

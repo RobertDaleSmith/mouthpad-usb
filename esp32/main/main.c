@@ -29,8 +29,9 @@
 #include "ble_dis.h"
 #include "transport_hid.h"
 #include "ble_hid.h"
+#include "ble_bonds.h"
 
-static const char *TAG = "MAIN";
+static const char *TAG = "MP_MAIN";
 
 // s_active_dev now managed by transport_hid and ble_hid modules
 static esp_bd_addr_t s_active_addr;
@@ -202,10 +203,29 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
 static void hid_connected_cb(esp_hidh_dev_t *dev, const uint8_t *bda)
 {
     if (bda) {
+        ESP_LOGI(TAG, "HID device connected: " ESP_BD_ADDR_STR, ESP_BD_ADDR_HEX(bda));
+
         memcpy(s_active_addr, bda, sizeof(s_active_addr));
         s_has_active_addr = true;
         schedule_rssi_poll();
         start_rssi_timer();
+
+        // Handle bonding logic
+        if (!ble_bonds_has_bonded_device()) {
+            // No bonded device yet - bond with this one
+            ESP_LOGI(TAG, "No existing bond, storing new bond with device");
+            esp_err_t ret = ble_bonds_store_device(bda);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to store bond: %s", esp_err_to_name(ret));
+            }
+        } else if (!ble_bonds_is_bonded_device(bda)) {
+            // This device is not our bonded device - disconnect
+            ESP_LOGW(TAG, "Connected device is not bonded device, disconnecting");
+            esp_hidh_dev_close(dev);
+            return;
+        } else {
+            ESP_LOGI(TAG, "Connected to bonded device successfully");
+        }
 
         // Set device in transport bridge
         transport_hid_set_device(dev, bda);
@@ -276,7 +296,13 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
 static ble_central_scan_result_t *choose_best_result(ble_central_scan_result_t *results)
 {
     ble_central_scan_result_t *best = NULL;
-    int best_rssi = -128;
+    ble_central_scan_result_t *bonded_device = NULL;
+    ble_central_scan_result_t *unbonded_mouthpad = NULL;
+    int bonded_rssi = -128;
+    int unbonded_rssi = -128;
+
+    bool has_bonded_device = ble_bonds_has_bonded_device();
+
     for (ble_central_scan_result_t *r = results; r != NULL; r = r->next) {
         if (r->name) {
             ESP_LOGI(TAG, "Found %s device RSSI=%d name=%s",
@@ -286,22 +312,48 @@ static ble_central_scan_result_t *choose_best_result(ble_central_scan_result_t *
         }
 
         // Filter for devices with both HID and NUS services (MouthPad devices)
-        // This uniquely identifies the target hardware
         if (r->transport == ESP_HID_TRANSPORT_BLE) {
             bool has_both_services = r->ble.has_nus_uuid;  // NUS UUID indicates MouthPad device
 
             if (has_both_services) {
-                if (r->rssi > best_rssi) {
-                    best = r;
-                    best_rssi = r->rssi;
-                    ESP_LOGI(TAG, "Found MouthPad device: %s (RSSI=%d, appearance=0x%04X, NUS=YES)",
-                            r->name ? r->name : "(no name)", r->rssi, r->ble.appearance);
+                bool is_bonded_device = ble_bonds_is_bonded_device(r->bda);
+
+                if (has_bonded_device) {
+                    // We have a bonded device - only connect to it
+                    if (is_bonded_device) {
+                        if (r->rssi > bonded_rssi) {
+                            bonded_device = r;
+                            bonded_rssi = r->rssi;
+                            ESP_LOGI(TAG, "Found BONDED MouthPad device: %s (RSSI=%d, appearance=0x%04X)",
+                                    r->name ? r->name : "(no name)", r->rssi, r->ble.appearance);
+                        }
+                    } else {
+                        ESP_LOGD(TAG, "Skipping unbonded MouthPad device: %s (RSSI=%d) - we have a bond",
+                                r->name ? r->name : "(no name)", r->rssi);
+                    }
+                } else {
+                    // No bonded device yet - can connect to any MouthPad device for pairing
+                    if (r->rssi > unbonded_rssi) {
+                        unbonded_mouthpad = r;
+                        unbonded_rssi = r->rssi;
+                        ESP_LOGI(TAG, "Found unbonded MouthPad device for pairing: %s (RSSI=%d, appearance=0x%04X)",
+                                r->name ? r->name : "(no name)", r->rssi, r->ble.appearance);
+                    }
                 }
             } else {
                 ESP_LOGD(TAG, "Skipping device: %s (appearance=0x%04X, no NUS UUID)",
                         r->name ? r->name : "(no name)", r->ble.appearance);
             }
         }
+    }
+
+    // Choose the best device based on bonding state
+    if (has_bonded_device && bonded_device) {
+        best = bonded_device;
+        ESP_LOGI(TAG, "Selected bonded device for connection");
+    } else if (!has_bonded_device && unbonded_mouthpad) {
+        best = unbonded_mouthpad;
+        ESP_LOGI(TAG, "Selected unbonded device for pairing");
     }
 
     if (best == NULL && results != NULL) {
@@ -311,7 +363,11 @@ static ble_central_scan_result_t *choose_best_result(ble_central_scan_result_t *
             count++;
         }
         if (count > 0) {
-            ESP_LOGI(TAG, "No suitable devices found among %d HID device(s) (need both HID and NUS UUIDs)", count);
+            if (has_bonded_device) {
+                ESP_LOGI(TAG, "Bonded device not found among %d HID device(s) (waiting for bonded device)", count);
+            } else {
+                ESP_LOGI(TAG, "No suitable devices found among %d HID device(s) (need both HID and NUS UUIDs)", count);
+            }
         }
     }
 
@@ -321,14 +377,25 @@ static ble_central_scan_result_t *choose_best_result(ble_central_scan_result_t *
 static void scan_task(void *args)
 {
     (void)args;
+
     while (true) {
         size_t results_len = 0;
         ble_central_scan_result_t *results = NULL;
 
-        ESP_LOGI(TAG, "Scanning for BLE HID devices...");
+        // Check bonding status for informative scanning logs
+        bool has_bond = ble_bonds_has_bonded_device();
+
+        // Print scanning message for each scan cycle
+        if (has_bond) {
+            char bond_info[32];
+            ble_bonds_get_info_string(bond_info, sizeof(bond_info));
+            ESP_LOGI(TAG, "Scanning for MouthPad (%s)...", bond_info);
+        } else {
+            ESP_LOGI(TAG, "Scanning for MouthPad...");
+        }
+
         // Use minimum scan window (1 second) - API doesn't support sub-second scans
         ble_central_scan(1, &results_len, &results);
-        ESP_LOGI(TAG, "Scan window complete, %u result(s)", (unsigned)results_len);
 
         ble_central_scan_result_t *target = NULL;
         if (results) {
@@ -353,8 +420,6 @@ static void scan_task(void *args)
                 ble_central_scan_results_free(results);
                 break;
             }
-        } else {
-            ESP_LOGI(TAG, "No named BLE HID results found, continuing scan");
         }
 
         if (results) {
@@ -387,35 +452,32 @@ static void button_event_handler(button_event_t event)
             break;
 
         case BUTTON_EVENT_LONG_PRESS:
-            ESP_LOGI(TAG, "Button long press detected - clearing BLE bonds");
+            ESP_LOGI(TAG, "Button long press detected - clearing all bonds");
 
-            // Get number of bonded devices
-            int bond_dev_num = esp_ble_get_bond_device_num();
-            ESP_LOGI(TAG, "Number of bonded devices: %d", bond_dev_num);
+            char bond_info[32];
+            ble_bonds_get_info_string(bond_info, sizeof(bond_info));
+            ESP_LOGI(TAG, "Clearing bond with: %s", bond_info);
 
-            if (bond_dev_num > 0) {
-                // Get list of bonded devices
-                esp_ble_bond_dev_t *bond_dev_list = malloc(sizeof(esp_ble_bond_dev_t) * bond_dev_num);
-                if (bond_dev_list) {
-                    esp_ble_get_bond_device_list(&bond_dev_num, bond_dev_list);
-
-                    // Remove each bonded device
-                    for (int i = 0; i < bond_dev_num; i++) {
-                        ESP_LOGI(TAG, "Removing bond for device " ESP_BD_ADDR_STR,
-                                ESP_BD_ADDR_HEX(bond_dev_list[i].bd_addr));
-                        esp_err_t ret = esp_ble_remove_bond_device(bond_dev_list[i].bd_addr);
-                        if (ret != ESP_OK) {
-                            ESP_LOGW(TAG, "Failed to remove bond: %s", esp_err_to_name(ret));
-                        }
+            // Disconnect the currently active device first using BLE GAP disconnect
+            if (s_has_active_addr) {
+                ESP_LOGI(TAG, "Disconnecting active device before clearing bonds");
+                esp_err_t disconnect_ret = esp_ble_gap_disconnect(s_active_addr);
+                if (disconnect_ret != ESP_OK) {
+                    ESP_LOGW(TAG, "Failed to disconnect device: %s", esp_err_to_name(disconnect_ret));
+                    // Fallback to HID close if GAP disconnect fails
+                    esp_hidh_dev_t *active_dev = ble_hid_client_get_active_device();
+                    if (active_dev != NULL) {
+                        esp_hidh_dev_close(active_dev);
                     }
-
-                    free(bond_dev_list);
-                    ESP_LOGI(TAG, "All BLE bonds cleared");
-                } else {
-                    ESP_LOGE(TAG, "Failed to allocate memory for bond device list");
                 }
+            }
+
+            esp_err_t ret = ble_bonds_clear_all();
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "All bonds cleared successfully");
+                leds_set_state(LED_STATE_SCANNING);  // Visual feedback that bonds were cleared
             } else {
-                ESP_LOGI(TAG, "No bonded devices to clear");
+                ESP_LOGW(TAG, "Failed to clear bonds: %s", esp_err_to_name(ret));
             }
             break;
 
@@ -448,6 +510,9 @@ void app_main(void)
     setup_uart_logging();
 
     ESP_LOGI(TAG, "Initializing MouthPad^USB");
+
+    // Initialize bonding system early (requires NVS)
+    ESP_ERROR_CHECK(ble_bonds_init());
 
     esp_err_t led_err = leds_init();
     if (led_err != ESP_OK) {
