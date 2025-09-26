@@ -26,7 +26,7 @@
 #include "ble_nus.h"
 #include "app_config.h"
 #include "button.h"
-#include "ble_device_info.h"
+#include "ble_dis.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 

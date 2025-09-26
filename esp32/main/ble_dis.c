@@ -1,4 +1,4 @@
-#include "ble_device_info.h"
+#include "ble_dis.h"
 #include "esp_log.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gattc_api.h"
