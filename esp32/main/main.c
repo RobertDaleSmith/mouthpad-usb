@@ -26,6 +26,7 @@
 #include "ble_nus_client.h"
 #include "app_config.h"
 #include "button.h"
+#include "ble_device_info.h"
 
 static const char *TAG = "BLE_HID_CENTRAL";
 
@@ -37,6 +38,29 @@ static bool s_has_active_addr;
 static uint16_t s_active_conn_id = 0xFFFF;
 static esp_gatt_if_t s_active_gattc_if = ESP_GATT_IF_NONE;
 static esp_gatt_if_t s_nus_gattc_if = ESP_GATT_IF_NONE;  // Separate interface for NUS
+static esp_gatt_if_t s_dis_gattc_if = ESP_GATT_IF_NONE;  // Separate interface for DIS
+
+// Advertisement data from the connected device
+static uint16_t s_active_appearance = 0;
+static uint8_t s_active_manufacturer_data[32] = {0};
+static uint8_t s_active_manufacturer_len = 0;
+
+static const char* appearance_to_string(uint16_t appearance)
+{
+    switch (appearance) {
+        case 0x03C0: return "Generic HID";
+        case 0x03C1: return "Keyboard";
+        case 0x03C2: return "Mouse";
+        case 0x03C3: return "Joystick";
+        case 0x03C4: return "Gamepad";
+        case 0x03C5: return "Digitizer Tablet";
+        case 0x03C6: return "Card Reader";
+        case 0x03C7: return "Digital Pen";
+        case 0x03C8: return "Barcode Scanner";
+        case 0x0000: return "Unknown";
+        default: return "Other";
+    }
+}
 
 static void schedule_rssi_poll(void)
 {
@@ -103,7 +127,7 @@ static void log_addr(const uint8_t *addr)
         ESP_LOGI(TAG, "(unknown addr)");
         return;
     }
-    ESP_LOGI(TAG, "%02X:%02X:%02X:%02X:%02X:%02X",
+    ESP_LOGI(TAG, "Address: %02X:%02X:%02X:%02X:%02X:%02X",
              addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
 }
 
@@ -134,6 +158,13 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
 
 static void start_scan_task(void);
 
+// Device info completion callback
+static void device_info_complete_callback(const ble_device_info_t *device_info)
+{
+    // ESP_LOGI(TAG, "Device info discovery completed for connected device");
+    ble_device_info_print(device_info);
+}
+
 // Wrapper GATT client callback that handles both HID and NUS events
 static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
@@ -148,6 +179,11 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         if (param->reg.app_id == 1 && param->reg.status == ESP_GATT_OK) {
             s_nus_gattc_if = gattc_if;
             ESP_LOGI(TAG, "NUS GATT client registered with interface: %d", s_nus_gattc_if);
+        }
+        // Store the DIS GATT interface when it registers
+        else if (param->reg.app_id == 2 && param->reg.status == ESP_GATT_OK) {
+            s_dis_gattc_if = gattc_if;
+            ESP_LOGI(TAG, "DIS GATT client registered with interface: %d", s_dis_gattc_if);
         }
     }
     
@@ -175,6 +211,9 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
 #if ENABLE_NUS_CLIENT_MODE
         nus_cdc_bridge_handle_gattc_event(event, gattc_if, param);
 #endif
+    } else if (gattc_if == s_dis_gattc_if) {
+        // This is a DIS event on the dedicated DIS GATT interface
+        ble_device_info_handle_gattc_event(event, gattc_if, param);
     } else {
         // This is a HID event (or registration event)
         esp_hidh_gattc_event_handler(event, gattc_if, param);
@@ -186,17 +225,14 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
             nus_cdc_bridge_handle_gattc_event(event, gattc_if, param);
 #endif
         }
-
-#if ENABLE_NUS_CLIENT_MODE
-        // Also forward service discovery events to NUS handler when NUS discovery is active
-        // Service discovery events come back on the original connection interface, not the discovery interface
-        if (s_nus_gattc_if != ESP_GATT_IF_NONE && s_active_conn_id != 0xFFFF) {
-            if (event == ESP_GATTC_SEARCH_RES_EVT || event == ESP_GATTC_SEARCH_CMPL_EVT) {
-                ESP_LOGI(TAG, "Also routing service discovery event %d to NUS handler", event);
-                nus_cdc_bridge_handle_gattc_event(event, s_nus_gattc_if, param);
-            }
+        // For registration events, also forward to DIS if it's app_id 2
+        else if (event == ESP_GATTC_REG_EVT && param->reg.app_id == 2) {
+            ESP_LOGI(TAG, "Also routing DIS registration event to DIS handler");
+            ble_device_info_handle_gattc_event(event, gattc_if, param);
         }
-#endif
+
+        // NUS and DIS now handle their own service discovery on their own GATT interfaces
+        // No forwarding needed from HID's discovery events
     }
 }
 
@@ -211,9 +247,18 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
     case ESP_HIDH_OPEN_EVENT:
         if (param->open.dev) {
             const uint8_t *bda = esp_hidh_dev_bda_get(param->open.dev);
-            ESP_LOGI(TAG, "Device connected: %s",
+            ESP_LOGI(TAG, "=== DEVICE CONNECTED ===");
+            ESP_LOGI(TAG, "Name: %s",
                      esp_hidh_dev_name_get(param->open.dev));
-            log_addr(bda);
+            if (bda) {
+                log_addr(bda);
+            }
+            if (s_active_appearance != 0) {
+                ESP_LOGI(TAG, "Appearance: 0x%04X (%s)", s_active_appearance, appearance_to_string(s_active_appearance));
+            }
+            if (s_active_manufacturer_len > 0) {
+                ESP_LOG_BUFFER_HEX_LEVEL(TAG, s_active_manufacturer_data, s_active_manufacturer_len, ESP_LOG_INFO);
+            }
             if (bda) {
                 memcpy(s_active_addr, bda, sizeof(s_active_addr));
                 s_active_dev = param->open.dev;
@@ -225,11 +270,10 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                 // Set the server BD address for NUS client so it can open its own connection
                 ble_nus_client_set_server_bda(bda);
                 // Trigger NUS service discovery immediately - no delay needed with separate GATT instances
-                ESP_LOGI(TAG, "HID device connected, starting immediate NUS discovery");
                 ESP_LOGI(TAG, "s_active_conn_id=%d, s_nus_gattc_if=%d", s_active_conn_id, s_nus_gattc_if);
 
                 if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
-                    ESP_LOGI(TAG, "Starting NUS service discovery using separate NUS interface");
+                    ESP_LOGI(TAG, "Starting NUS service discovery");
                     esp_err_t ret = nus_cdc_bridge_discover_services(s_nus_gattc_if, s_active_conn_id);
                     if (ret != ESP_OK) {
                         ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
@@ -241,6 +285,20 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
                              s_active_conn_id, s_nus_gattc_if);
                 }
 #endif
+
+                // Start Device Information Service discovery
+                if (s_active_conn_id != 0xFFFF && s_dis_gattc_if != ESP_GATT_IF_NONE && s_has_active_addr) {
+                    // ESP_LOGI(TAG, "Starting DIS service discovery to get device info");
+                    esp_err_t ret = ble_device_info_discover(s_dis_gattc_if, s_active_conn_id, s_active_addr, esp_hidh_dev_name_get(param->open.dev));
+                    if (ret != ESP_OK) {
+                        ESP_LOGW(TAG, "Failed to start DIS service discovery: %s", esp_err_to_name(ret));
+                    } else {
+                        ESP_LOGI(TAG, "DIS discovery started successfully on separate GATT interface");
+                    }
+                } else {
+                    ESP_LOGW(TAG, "Cannot start DIS discovery - conn_id: %d, dis_gattc_if: %d, has_addr: %d",
+                             s_active_conn_id, s_dis_gattc_if, s_has_active_addr);
+                }
             }
             ble_bas_reset();
             leds_set_state(LED_STATE_CONNECTED);
@@ -279,6 +337,10 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
         if (param->close.dev == s_active_dev) {
             s_active_dev = NULL;
             s_has_active_addr = false;
+            // Reset advertisement data
+            s_active_appearance = 0;
+            s_active_manufacturer_len = 0;
+            memset(s_active_manufacturer_data, 0, sizeof(s_active_manufacturer_data));
         }
         if (param->close.dev) {
             esp_hidh_dev_free(param->close.dev);
@@ -332,6 +394,13 @@ static void scan_task(void *args)
         if (target) {
             ESP_LOGI(TAG, "Found BLE device RSSI=%d name=%s", target->rssi, target->name);
             ESP_LOGI(TAG, "Connecting to best result RSSI=%d", target->rssi);
+
+            // Store advertisement data for later display
+            if (target->transport == ESP_HID_TRANSPORT_BLE) {
+                s_active_appearance = target->ble.appearance;
+                s_active_manufacturer_len = 0; // Will be filled if manufacturer data was captured
+            }
+
             esp_hidh_dev_t *dev = esp_hidh_dev_open(target->bda, target->transport, target->ble.addr_type);
             if (!dev) {
                 ESP_LOGW(TAG, "Failed to initiate connection, continuing scan");
@@ -478,6 +547,17 @@ void app_main(void)
     ESP_ERROR_CHECK(nus_cdc_bridge_init());
     ESP_ERROR_CHECK(nus_cdc_bridge_start());
 #endif
+
+    // Register a separate GATT app for Device Info Service (app_id 2)
+    ESP_LOGI(TAG, "Registering separate DIS GATT client app (app_id=2)");
+    ESP_ERROR_CHECK(esp_ble_gattc_app_register(2));
+
+    // Initialize Device Info Service client
+    ble_device_info_config_t dis_config = {
+        .info_complete_cb = device_info_complete_callback
+    };
+    ESP_LOGI(TAG, "Initializing Device Info Service client");
+    ESP_ERROR_CHECK(ble_device_info_init(&dis_config));
 
     start_scan_task();
     ESP_LOGI(TAG, "BLE HID central ready");

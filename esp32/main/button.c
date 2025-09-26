@@ -166,7 +166,7 @@ esp_err_t button_deinit(void)
 static void IRAM_ATTR button_gpio_isr_handler(void *arg)
 {
     // Read current GPIO state
-    bool current_state = (gpio_get_level(BUTTON_GPIO_PIN) == BUTTON_ACTIVE_LEVEL);
+    // bool current_state = (gpio_get_level(BUTTON_GPIO_PIN) == BUTTON_ACTIVE_LEVEL);
 
     // Simple debouncing in ISR - just trigger task processing
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;

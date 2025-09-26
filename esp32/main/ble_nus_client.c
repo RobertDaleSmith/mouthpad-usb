@@ -11,39 +11,6 @@
 
 static const char *TAG = "BLE_NUS_CLIENT";
 
-// NUS Service UUID (128-bit, little-endian)
-static esp_bt_uuid_t nus_service_uuid = {
-    .len = ESP_UUID_LEN_128,
-    .uuid = {
-        .uuid128 = {
-            0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
-            0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40, 0x6E
-        }
-    }
-};
-
-// NUS TX Characteristic UUID (128-bit, little-endian) - 6e400002-b5a3-f393-e0a9-e50e24dcca9e
-static esp_bt_uuid_t nus_char_tx_uuid = {
-    .len = ESP_UUID_LEN_128,
-    .uuid = {
-        .uuid128 = {
-            0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
-            0x93, 0xF3, 0xA3, 0xB5, 0x02, 0x00, 0x40, 0x6E
-        }
-    }
-};
-
-// NUS RX Characteristic UUID (128-bit, little-endian) - 6e400003-b5a3-f393-e0a9-e50e24dcca9e
-static esp_bt_uuid_t nus_char_rx_uuid = {
-    .len = ESP_UUID_LEN_128,
-    .uuid = {
-        .uuid128 = {
-            0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
-            0x93, 0xF3, 0xA3, 0xB5, 0x03, 0x00, 0x40, 0x6E
-        }
-    }
-};
-
 // NUS client state
 static esp_gatt_if_t nus_gattc_if = ESP_GATT_IF_NONE;
 static uint16_t nus_conn_id = 0xFFFF;
@@ -105,7 +72,7 @@ esp_err_t ble_nus_client_init(const ble_nus_client_config_t *config)
 
 esp_err_t ble_nus_client_discover_services(esp_gatt_if_t gattc_if, uint16_t conn_id)
 {
-    ESP_LOGI(TAG, "Starting NUS service discovery on conn_id: %d, gattc_if: %d", conn_id, gattc_if);
+    ESP_LOGD(TAG, "Starting NUS service discovery on conn_id: %d, gattc_if: %d", conn_id, gattc_if);
     
     // Check if NUS service is already discovered
     if (nus_service_discovered && nus_connected && nus_conn_id == conn_id) {
@@ -121,7 +88,7 @@ esp_err_t ble_nus_client_discover_services(esp_gatt_if_t gattc_if, uint16_t conn
 
     // Start service discovery on the dedicated NUS GATT interface
     // First open connection on NUS interface using stored BD address, then search for services
-    ESP_LOGI(TAG, "Starting NUS service discovery on dedicated NUS GATT interface...");
+    ESP_LOGD(TAG, "Starting NUS service discovery on dedicated NUS GATT interface...");
 
     // Use the stored server BD address from the HID connection
     if (nus_server_bda[0] == 0 && nus_server_bda[1] == 0 && nus_server_bda[2] == 0 &&
@@ -130,7 +97,7 @@ esp_err_t ble_nus_client_discover_services(esp_gatt_if_t gattc_if, uint16_t conn
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Opening GATT connection on NUS interface to %02x:%02x:%02x:%02x:%02x:%02x",
+    ESP_LOGD(TAG, "Opening GATT connection on NUS interface to %02x:%02x:%02x:%02x:%02x:%02x",
              nus_server_bda[0], nus_server_bda[1], nus_server_bda[2],
              nus_server_bda[3], nus_server_bda[4], nus_server_bda[5]);
 
@@ -141,7 +108,7 @@ esp_err_t ble_nus_client_discover_services(esp_gatt_if_t gattc_if, uint16_t conn
         return ret;
     }
 
-    ESP_LOGI(TAG, "Opened GATT connection on NUS interface, service discovery will start in OPEN event");
+    ESP_LOGD(TAG, "Opened GATT connection on NUS interface, service discovery will start in OPEN event");
 
     if (nus_config.connected_cb) {
         nus_config.connected_cb();
@@ -195,7 +162,7 @@ uint16_t ble_nus_client_get_conn_id(void)
 void ble_nus_client_set_server_bda(const esp_bd_addr_t bda)
 {
     memcpy(nus_server_bda, bda, sizeof(esp_bd_addr_t));
-    ESP_LOGI(TAG, "Set server BD address: %02x:%02x:%02x:%02x:%02x:%02x",
+    ESP_LOGD(TAG, "Set server BD address: %02x:%02x:%02x:%02x:%02x:%02x",
              nus_server_bda[0], nus_server_bda[1], nus_server_bda[2],
              nus_server_bda[3], nus_server_bda[4], nus_server_bda[5]);
 }
@@ -226,7 +193,7 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
         break;
 
     case ESP_GATTC_CONNECT_EVT:
-        ESP_LOGI(TAG, "GATT client connected, conn_id: %d", param->connect.conn_id);
+        // ESP_LOGI(TAG, "GATT client connected, conn_id: %d", param->connect.conn_id);
         // Store the server's BD address for later use
         memcpy(nus_server_bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
         break;
@@ -263,14 +230,14 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
         break;
 
     case ESP_GATTC_SEARCH_RES_EVT:
-        ESP_LOGI(TAG, "Service found, conn_id: %d, service_id: %d, start_handle: %d, end_handle: %d", 
-                 param->search_res.conn_id, param->search_res.srvc_id, 
+        ESP_LOGD(TAG, "Service found, conn_id: %d, service_id: %d, start_handle: %d, end_handle: %d",
+                 param->search_res.conn_id, param->search_res.srvc_id,
                  param->search_res.start_handle, param->search_res.end_handle);
         
         if (param->search_res.conn_id == nus_conn_id) {
             // Log UUID details for debugging
             if (param->search_res.srvc_id.uuid.len == ESP_UUID_LEN_128) {
-                ESP_LOGI(TAG, "128-bit UUID: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                ESP_LOGD(TAG, "128-bit UUID: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
                          param->search_res.srvc_id.uuid.uuid.uuid128[15], param->search_res.srvc_id.uuid.uuid.uuid128[14],
                          param->search_res.srvc_id.uuid.uuid.uuid128[13], param->search_res.srvc_id.uuid.uuid.uuid128[12],
                          param->search_res.srvc_id.uuid.uuid.uuid128[11], param->search_res.srvc_id.uuid.uuid.uuid128[10],
@@ -292,10 +259,10 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
                     ESP_LOGI(TAG, "NUS service discovered! Start handle: %d, End handle: %d",
                              nus_service_start_handle, nus_service_end_handle);
                 } else {
-                    ESP_LOGI(TAG, "Not NUS service (UUID mismatch)");
+                    ESP_LOGD(TAG, "Not NUS service (UUID mismatch)");
                 }
             } else {
-                ESP_LOGI(TAG, "16-bit UUID: 0x%04x", param->search_res.srvc_id.uuid.uuid.uuid16);
+                ESP_LOGD(TAG, "16-bit UUID: 0x%04x", param->search_res.srvc_id.uuid.uuid.uuid16);
             }
         }
         break;

@@ -167,7 +167,7 @@ esp_err_t nus_cdc_bridge_discover_services(esp_gatt_if_t gattc_if, uint16_t conn
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Starting NUS service discovery on conn_id: %d, gattc_if: %d", conn_id, gattc_if);
+    ESP_LOGD(TAG, "Starting NUS service discovery on conn_id: %d, gattc_if: %d", conn_id, gattc_if);
     return ble_nus_client_discover_services(gattc_if, conn_id);
 }
 
