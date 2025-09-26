@@ -19,7 +19,7 @@
 #include "ble_transport.h"
 #include "usb_hid.h"
 #include "driver/uart.h"
-#include "bootloader_trigger.h"
+#include "dev_dfu.h"
 #include "ble_bas.h"
 #include "leds.h"
 #include "nus_cdc_bridge.h"

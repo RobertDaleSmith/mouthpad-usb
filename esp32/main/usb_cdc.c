@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bootloader_trigger.h"
+#include "dev_dfu.h"
 
 static const char *TAG = "USB_CDC";
 
