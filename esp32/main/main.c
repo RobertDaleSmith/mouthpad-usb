@@ -22,7 +22,7 @@
 #include "dev_dfu.h"
 #include "ble_bas.h"
 #include "leds.h"
-#include "ble_transport.h"
+#include "transport_uart.h"
 #include "ble_nus.h"
 #include "app_config.h"
 #include "button.h"
@@ -209,7 +209,7 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
     if (gattc_if == s_nus_gattc_if) {
         // This is a NUS event on the dedicated NUS GATT interface
 #if ENABLE_NUS_CLIENT_MODE
-        ble_transport_handle_gattc_event(event, gattc_if, param);
+        transport_uart_handle_gattc_event(event, gattc_if, param);
 #endif
     } else if (gattc_if == s_dis_gattc_if) {
         // This is a DIS event on the dedicated DIS GATT interface
@@ -222,7 +222,7 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         if (event == ESP_GATTC_REG_EVT && param->reg.app_id == 1) {
 #if ENABLE_NUS_CLIENT_MODE
             ESP_LOGI(TAG, "Also routing NUS registration event to NUS handler");
-            ble_transport_handle_gattc_event(event, gattc_if, param);
+            transport_uart_handle_gattc_event(event, gattc_if, param);
 #endif
         }
         // For registration events, also forward to DIS if it's app_id 2
@@ -274,7 +274,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
 
                 if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
                     ESP_LOGI(TAG, "Starting NUS service discovery");
-                    esp_err_t ret = ble_transport_discover_services(s_nus_gattc_if, s_active_conn_id);
+                    esp_err_t ret = transport_uart_discover_services(s_nus_gattc_if, s_active_conn_id);
                     if (ret != ESP_OK) {
                         ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
                     } else {
@@ -544,8 +544,8 @@ void app_main(void)
 
     // Initialize NUS client to CDC bridge
     ESP_LOGI(TAG, "Initializing NUS client to CDC bridge");
-    ESP_ERROR_CHECK(ble_transport_init());
-    ESP_ERROR_CHECK(ble_transport_start());
+    ESP_ERROR_CHECK(transport_uart_init());
+    ESP_ERROR_CHECK(transport_uart_start());
 #endif
 
     // Register a separate GATT app for Device Info Service (app_id 2)

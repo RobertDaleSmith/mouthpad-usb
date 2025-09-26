@@ -9,32 +9,32 @@ extern "C" {
 #endif
 
 /**
- * @brief Initialize the BLE transport bridge
+ * @brief Initialize the UART transport bridge (BLE NUS to USB CDC)
  *
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t ble_transport_init(void);
+esp_err_t transport_uart_init(void);
 
 /**
  * @brief Start the bridge service
  * 
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t ble_transport_start(void);
+esp_err_t transport_uart_start(void);
 
 /**
  * @brief Stop the bridge service
  * 
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t ble_transport_stop(void);
+esp_err_t transport_uart_stop(void);
 
 /**
  * @brief Check if the bridge is active
  * 
  * @return true if active, false otherwise
  */
-bool ble_transport_is_active(void);
+bool transport_uart_is_active(void);
 
 /**
  * @brief Trigger NUS service discovery on a connected device
@@ -43,7 +43,7 @@ bool ble_transport_is_active(void);
  * @param conn_id Connection ID of the connected device
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t ble_transport_discover_services(esp_gatt_if_t gattc_if, uint16_t conn_id);
+esp_err_t transport_uart_discover_services(esp_gatt_if_t gattc_if, uint16_t conn_id);
 
 /**
  * @brief Handle GATT client events (called from main GATT client callback)
@@ -52,7 +52,7 @@ esp_err_t ble_transport_discover_services(esp_gatt_if_t gattc_if, uint16_t conn_
  * @param gattc_if GATT client interface
  * @param param Event parameters
  */
-void ble_transport_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+void transport_uart_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 
 #ifdef __cplusplus
 }
