@@ -1,4 +1,4 @@
-#include "dev_dfu.h"
+#include "usb_dfu.h"
 
 #include "esp_log.h"
 #include "esp_system.h"
@@ -10,16 +10,16 @@
 #include "esp32s3/rom/usb/chip_usb_dw_wrapper.h"
 #include "esp32s3/rom/usb/usb_persist.h"
 
-static const char *TAG = "bootloader_trigger";
+static const char *TAG = "USB_DFU";
 
 static bool s_pending;
 
-void bootloader_trigger_init(void)
+void usb_dfu_init(void)
 {
     s_pending = false;
 }
 
-void bootloader_trigger_enter_dfu(void)
+void usb_dfu_enter_dfu(void)
 {
     if (s_pending) {
         return;
@@ -41,7 +41,7 @@ void bootloader_trigger_enter_dfu(void)
     }
 }
 
-bool bootloader_trigger_pending(void)
+bool usb_dfu_pending(void)
 {
     return s_pending;
 }

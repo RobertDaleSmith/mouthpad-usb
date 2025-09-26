@@ -19,7 +19,7 @@
 #include "ble_central.h"
 #include "usb_hid.h"
 #include "driver/uart.h"
-#include "dev_dfu.h"
+#include "usb_dfu.h"
 #include "ble_bas.h"
 #include "leds.h"
 #include "transport_uart.h"
@@ -27,10 +27,12 @@
 #include "app_config.h"
 #include "button.h"
 #include "ble_dis.h"
+#include "transport_hid.h"
+#include "ble_hid.h"
 
-static const char *TAG = "BLE_HID_CENTRAL";
+static const char *TAG = "MAIN";
 
-static esp_hidh_dev_t *s_active_dev;
+// s_active_dev now managed by transport_hid and ble_hid modules
 static esp_bd_addr_t s_active_addr;
 static esp_timer_handle_t s_rssi_timer;
 static bool s_rssi_timer_running;
@@ -45,26 +47,11 @@ static uint16_t s_active_appearance = 0;
 static uint8_t s_active_manufacturer_data[32] = {0};
 static uint8_t s_active_manufacturer_len = 0;
 
-static const char* appearance_to_string(uint16_t appearance)
-{
-    switch (appearance) {
-        case 0x03C0: return "Generic HID";
-        case 0x03C1: return "Keyboard";
-        case 0x03C2: return "Mouse";
-        case 0x03C3: return "Joystick";
-        case 0x03C4: return "Gamepad";
-        case 0x03C5: return "Digitizer Tablet";
-        case 0x03C6: return "Card Reader";
-        case 0x03C7: return "Digital Pen";
-        case 0x03C8: return "Barcode Scanner";
-        case 0x0000: return "Unknown";
-        default: return "Other";
-    }
-}
+// appearance_to_string moved to ble_hid.c
 
 static void schedule_rssi_poll(void)
 {
-    if (!s_active_dev || !s_has_active_addr) {
+    if (!ble_hid_client_is_connected() || !s_has_active_addr) {
         return;
     }
     esp_err_t err = esp_ble_gap_read_rssi(s_active_addr);
@@ -104,32 +91,7 @@ static void stop_rssi_timer(void)
     s_rssi_timer_running = false;
 }
 
-static void log_report(const uint8_t *data, size_t length)
-{
-    if (!data || !length) {
-        ESP_LOGI(TAG, "Empty report");
-        return;
-    }
-
-    char buffer[3 * 32 + 1];
-    size_t to_print = length < 32 ? length : 32;
-    for (size_t i = 0; i < to_print; ++i) {
-        snprintf(buffer + i * 3, sizeof(buffer) - i * 3, "%02X ", data[i]);
-    }
-    buffer[to_print * 3] = '\0';
-    ESP_LOGI(TAG, "Report (%d bytes): %s%s", (int)length, buffer,
-             length > to_print ? "..." : "");
-}
-
-static void log_addr(const uint8_t *addr)
-{
-    if (!addr) {
-        ESP_LOGI(TAG, "(unknown addr)");
-        return;
-    }
-    ESP_LOGI(TAG, "Address: %02X:%02X:%02X:%02X:%02X:%02X",
-             addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
-}
+// Helper functions log_report and log_addr moved to ble_hid.c
 
 static bool addr_matches_active(const uint8_t *addr)
 {
@@ -236,123 +198,79 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
     }
 }
 
+// BLE HID client callback functions for transport bridge
+static void hid_connected_cb(esp_hidh_dev_t *dev, const uint8_t *bda)
+{
+    if (bda) {
+        memcpy(s_active_addr, bda, sizeof(s_active_addr));
+        s_has_active_addr = true;
+        schedule_rssi_poll();
+        start_rssi_timer();
+
+        // Set device in transport bridge
+        transport_hid_set_device(dev, bda);
+
+        // Trigger NUS and DIS service discovery (existing logic)
+#if ENABLE_NUS_CLIENT_MODE
+        ble_nus_client_set_server_bda(bda);
+        if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
+            ESP_LOGI(TAG, "Starting NUS service discovery");
+            esp_err_t ret = transport_uart_discover_services(s_nus_gattc_if, s_active_conn_id);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
+            }
+        }
+#endif
+        if (s_active_conn_id != 0xFFFF && s_dis_gattc_if != ESP_GATT_IF_NONE && s_has_active_addr) {
+            esp_err_t ret = ble_device_info_discover(s_dis_gattc_if, s_active_conn_id, s_active_addr, esp_hidh_dev_name_get(dev));
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to start DIS service discovery: %s", esp_err_to_name(ret));
+            }
+        }
+    }
+    ble_bas_reset();
+    leds_set_state(LED_STATE_CONNECTED);
+}
+
+static void hid_disconnected_cb(esp_hidh_dev_t *dev)
+{
+    (void)dev;
+    ESP_LOGI(TAG, "Device disconnected");
+    stop_rssi_timer();
+    s_has_active_addr = false;
+
+    // Clear transport device
+    transport_hid_clear_device();
+
+    // Reset advertisement data
+    s_active_appearance = 0;
+    s_active_manufacturer_len = 0;
+    memset(s_active_manufacturer_data, 0, sizeof(s_active_manufacturer_data));
+
+    ble_bas_reset();
+    leds_set_state(LED_STATE_SCANNING);
+    start_scan_task();
+}
+
+static void hid_input_cb(uint8_t report_id, const uint8_t *data, uint16_t length)
+{
+    // Forward to transport bridge for USB forwarding
+    transport_hid_handle_input(report_id, data, length);
+}
+
+static void hid_battery_cb(uint8_t level, esp_err_t status)
+{
+    if (status == ESP_OK) {
+        ble_bas_handle_level(level);
+    } else {
+        ESP_LOGW(TAG, "Battery event error: %d", status);
+    }
+}
+
 static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id, void *event_data)
 {
-    (void)handler_args;
-    (void)base;
-    esp_hidh_event_t event = (esp_hidh_event_t)id;
-    esp_hidh_event_data_t *param = (esp_hidh_event_data_t *)event_data;
-
-    switch (event) {
-    case ESP_HIDH_OPEN_EVENT:
-        if (param->open.dev) {
-            const uint8_t *bda = esp_hidh_dev_bda_get(param->open.dev);
-            ESP_LOGI(TAG, "=== DEVICE CONNECTED ===");
-            ESP_LOGI(TAG, "Name: %s",
-                     esp_hidh_dev_name_get(param->open.dev));
-            if (bda) {
-                log_addr(bda);
-            }
-            if (s_active_appearance != 0) {
-                ESP_LOGI(TAG, "Appearance: 0x%04X (%s)", s_active_appearance, appearance_to_string(s_active_appearance));
-            }
-            if (s_active_manufacturer_len > 0) {
-                ESP_LOG_BUFFER_HEX_LEVEL(TAG, s_active_manufacturer_data, s_active_manufacturer_len, ESP_LOG_INFO);
-            }
-            if (bda) {
-                memcpy(s_active_addr, bda, sizeof(s_active_addr));
-                s_active_dev = param->open.dev;
-                s_has_active_addr = true;
-                schedule_rssi_poll();
-                start_rssi_timer();
-
-#if ENABLE_NUS_CLIENT_MODE
-                // Set the server BD address for NUS client so it can open its own connection
-                ble_nus_client_set_server_bda(bda);
-                // Trigger NUS service discovery immediately - no delay needed with separate GATT instances
-                ESP_LOGI(TAG, "s_active_conn_id=%d, s_nus_gattc_if=%d", s_active_conn_id, s_nus_gattc_if);
-
-                if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
-                    ESP_LOGI(TAG, "Starting NUS service discovery");
-                    esp_err_t ret = transport_uart_discover_services(s_nus_gattc_if, s_active_conn_id);
-                    if (ret != ESP_OK) {
-                        ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
-                    } else {
-                        ESP_LOGI(TAG, "NUS discovery started successfully on separate GATT interface");
-                    }
-                } else {
-                    ESP_LOGW(TAG, "Cannot start NUS discovery - conn_id: %d, nus_gattc_if: %d",
-                             s_active_conn_id, s_nus_gattc_if);
-                }
-#endif
-
-                // Start Device Information Service discovery
-                if (s_active_conn_id != 0xFFFF && s_dis_gattc_if != ESP_GATT_IF_NONE && s_has_active_addr) {
-                    // ESP_LOGI(TAG, "Starting DIS service discovery to get device info");
-                    esp_err_t ret = ble_device_info_discover(s_dis_gattc_if, s_active_conn_id, s_active_addr, esp_hidh_dev_name_get(param->open.dev));
-                    if (ret != ESP_OK) {
-                        ESP_LOGW(TAG, "Failed to start DIS service discovery: %s", esp_err_to_name(ret));
-                    } else {
-                        ESP_LOGI(TAG, "DIS discovery started successfully on separate GATT interface");
-                    }
-                } else {
-                    ESP_LOGW(TAG, "Cannot start DIS discovery - conn_id: %d, dis_gattc_if: %d, has_addr: %d",
-                             s_active_conn_id, s_dis_gattc_if, s_has_active_addr);
-                }
-            }
-            ble_bas_reset();
-            leds_set_state(LED_STATE_CONNECTED);
-        }
-        break;
-    case ESP_HIDH_BATTERY_EVENT:
-        if (param->battery.status == ESP_OK) {
-            ble_bas_handle_level(param->battery.level);
-        } else {
-            ESP_LOGW(TAG, "Battery event error: %d", param->battery.status);
-        }
-        break;
-    case ESP_HIDH_INPUT_EVENT:
-        if (param->input.dev) {
-            // Fast path: Send HID report immediately with minimal processing
-            if (usb_hid_ready()) {
-                usb_hid_send_report(param->input.report_id,
-                                         param->input.data,
-                                         param->input.length);
-            }
-            // Non-critical operations moved after the report sending
-            leds_notify_activity();
-            // RSSI is now only polled via timer (every 10s) to reduce log spam
-        }
-        break;
-    case ESP_HIDH_FEATURE_EVENT:
-        if (param->feature.dev) {
-            ESP_LOGI(TAG, "Feature report (usage=%s, id=%u)",
-                     esp_hid_usage_str(param->feature.usage), param->feature.report_id);
-            log_report(param->feature.data, param->feature.length);
-        }
-        break;
-    case ESP_HIDH_CLOSE_EVENT:
-        ESP_LOGI(TAG, "Device disconnected");
-        stop_rssi_timer();
-        if (param->close.dev == s_active_dev) {
-            s_active_dev = NULL;
-            s_has_active_addr = false;
-            // Reset advertisement data
-            s_active_appearance = 0;
-            s_active_manufacturer_len = 0;
-            memset(s_active_manufacturer_data, 0, sizeof(s_active_manufacturer_data));
-        }
-        if (param->close.dev) {
-            esp_hidh_dev_free(param->close.dev);
-        }
-        ble_bas_reset();
-        leds_set_state(LED_STATE_SCANNING);
-        start_scan_task();
-        break;
-    default:
-        ESP_LOGD(TAG, "Unhandled HID event %d", event);
-        break;
-    }
+    // Forward to BLE HID client for processing
+    ble_hid_client_handle_event(handler_args, base, id, event_data);
 }
 
 static ble_central_scan_result_t *choose_best_result(ble_central_scan_result_t *results)
@@ -503,6 +421,8 @@ void app_main(void)
     // Setup UART logging on accessible pin for J-Link
     setup_uart_logging();
 
+    ESP_LOGI(TAG, "Initializing MouthPad^USB");
+
     esp_err_t led_err = leds_init();
     if (led_err != ESP_OK) {
         ESP_LOGW(TAG, "LED init failed: %s", esp_err_to_name(led_err));
@@ -517,7 +437,7 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(ble_bas_init());
-    bootloader_trigger_init();
+    usb_dfu_init();
 
     usb_hid_init();
 
@@ -535,6 +455,21 @@ void app_main(void)
     };
 
     ESP_ERROR_CHECK(esp_hidh_init(&config));
+
+    // Initialize HID transport bridge and BLE HID client
+    ESP_LOGI(TAG, "Initializing HID transport bridge");
+    ESP_ERROR_CHECK(transport_hid_init());
+    ESP_ERROR_CHECK(transport_hid_start());
+
+    ble_hid_client_config_t hid_config = {
+        .connected_cb = hid_connected_cb,
+        .disconnected_cb = hid_disconnected_cb,
+        .input_cb = hid_input_cb,
+        .feature_cb = NULL,
+        .battery_cb = hid_battery_cb,
+    };
+    ESP_LOGI(TAG, "Initializing BLE HID client");
+    ESP_ERROR_CHECK(ble_hid_client_init(&hid_config));
 
 #if ENABLE_NUS_CLIENT_MODE
     // Register a separate GATT app for NUS (app_id 1)
