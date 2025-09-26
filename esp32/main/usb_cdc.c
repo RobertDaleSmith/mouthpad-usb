@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "dev_dfu.h"
+#include "usb_dfu.h"
 
 static const char *TAG = "USB_CDC";
 
@@ -173,9 +173,9 @@ static void process_log_line(void) {
   }
 
   if ((end - start) == 3 && strncmp(&s_log_cmd_buf[start], "dfu", 3) == 0) {
-    if (!bootloader_trigger_pending()) {
+    if (!usb_dfu_pending()) {
       ESP_LOGI(TAG, "DFU command received on CDC1");
-      bootloader_trigger_enter_dfu();
+      usb_dfu_enter_dfu();
     } else {
       ESP_LOGW(TAG, "DFU trigger already pending");
     }
@@ -342,7 +342,7 @@ static void handle_cdc_rx(int itf, cdcacm_event_t *event) {
     return;
   }
 
-  if (itf == USB_CDC_PORT_BRIDGE && bootloader_trigger_pending()) {
+  if (itf == USB_CDC_PORT_BRIDGE && usb_dfu_pending()) {
     return;
   }
 

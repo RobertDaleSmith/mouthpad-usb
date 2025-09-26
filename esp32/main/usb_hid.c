@@ -10,7 +10,7 @@
 
 #include "usb_cdc.h"
 
-static const char *TAG = "usb_hid";
+static const char *TAG = "USB_HID";
 
 #define CDC0_ITF_NUM_COMM 0
 #define CDC0_ITF_NUM_DATA 1

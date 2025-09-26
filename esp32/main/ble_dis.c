@@ -9,7 +9,7 @@
 #include "freertos/queue.h"
 #include "string.h"
 
-static const char *TAG = "BLE_DEVICE_INFO";
+static const char *TAG = "BLE_DIS";
 
 // Device info client state
 static esp_gatt_if_t dis_gattc_if = ESP_GATT_IF_NONE;
