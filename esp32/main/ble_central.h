@@ -49,8 +49,8 @@
 extern "C" {
 #endif
 
-typedef struct ble_transport_scan_result_s {
-    struct ble_transport_scan_result_s *next;
+typedef struct ble_central_scan_result_s {
+    struct ble_central_scan_result_s *next;
 #if CONFIG_BT_NIMBLE_ENABLED
     uint8_t bda[6];
 #else
@@ -78,20 +78,20 @@ typedef struct ble_transport_scan_result_s {
         } ble;
     #endif
     };
-} ble_transport_scan_result_t;
+} ble_central_scan_result_t;
 
-esp_err_t ble_transport_init(uint8_t mode);
-esp_err_t ble_transport_scan(uint32_t seconds, size_t *num_results, ble_transport_scan_result_t **results);
-void ble_transport_scan_results_free(ble_transport_scan_result_t *results);
+esp_err_t ble_central_init(uint8_t mode);
+esp_err_t ble_central_scan(uint32_t seconds, size_t *num_results, ble_central_scan_result_t **results);
+void ble_central_scan_results_free(ble_central_scan_result_t *results);
 
-void ble_transport_set_user_ble_callback(esp_gap_ble_cb_t cb);
+void ble_central_set_user_ble_callback(esp_gap_ble_cb_t cb);
 
-esp_err_t ble_transport_adv_init(uint16_t appearance, const char *device_name);
-esp_err_t ble_transport_adv_start(void);
+esp_err_t ble_central_adv_init(uint16_t appearance, const char *device_name);
+esp_err_t ble_central_adv_start(void);
 
 #if !CONFIG_BT_NIMBLE_ENABLED
-void ble_transport_print_uuid(esp_bt_uuid_t *uuid);
-const char *ble_transport_addr_type_str(esp_ble_addr_type_t ble_addr_type);
+void ble_central_print_uuid(esp_bt_uuid_t *uuid);
+const char *ble_central_addr_type_str(esp_ble_addr_type_t ble_addr_type);
 #endif
 
 #ifdef __cplusplus

@@ -16,7 +16,7 @@
 #include "esp_hid_common.h"
 #include "esp_hidh.h"
 #include "esp_hidh_gattc.h"
-#include "ble_transport.h"
+#include "ble_central.h"
 #include "usb_hid.h"
 #include "driver/uart.h"
 #include "dev_dfu.h"
@@ -355,11 +355,11 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
     }
 }
 
-static ble_transport_scan_result_t *choose_best_result(ble_transport_scan_result_t *results)
+static ble_central_scan_result_t *choose_best_result(ble_central_scan_result_t *results)
 {
-    ble_transport_scan_result_t *best = NULL;
+    ble_central_scan_result_t *best = NULL;
     int best_rssi = -128;
-    for (ble_transport_scan_result_t *r = results; r != NULL; r = r->next) {
+    for (ble_central_scan_result_t *r = results; r != NULL; r = r->next) {
         if (r->name) {
             ESP_LOGI(TAG, "Found %s device RSSI=%d name=%s",
                      r->transport == ESP_HID_TRANSPORT_BLE ? "BLE" : "BT",
@@ -379,14 +379,14 @@ static void scan_task(void *args)
     (void)args;
     while (true) {
         size_t results_len = 0;
-        ble_transport_scan_result_t *results = NULL;
+        ble_central_scan_result_t *results = NULL;
 
         ESP_LOGI(TAG, "Scanning for BLE HID devices...");
         // Use minimum scan window (1 second) - API doesn't support sub-second scans
-        ble_transport_scan(1, &results_len, &results);
+        ble_central_scan(1, &results_len, &results);
         ESP_LOGI(TAG, "Scan window complete, %u result(s)", (unsigned)results_len);
 
-        ble_transport_scan_result_t *target = NULL;
+        ble_central_scan_result_t *target = NULL;
         if (results) {
             target = choose_best_result(results);
         }
@@ -406,7 +406,7 @@ static void scan_task(void *args)
                 ESP_LOGW(TAG, "Failed to initiate connection, continuing scan");
             } else {
                 ESP_LOGI(TAG, "Connection requested");
-                ble_transport_scan_results_free(results);
+                ble_central_scan_results_free(results);
                 break;
             }
         } else {
@@ -414,7 +414,7 @@ static void scan_task(void *args)
         }
 
         if (results) {
-            ble_transport_scan_results_free(results);
+            ble_central_scan_results_free(results);
         }
 
         // Minimize delay between scans for fastest discovery
@@ -522,9 +522,9 @@ void app_main(void)
     usb_hid_init();
 
     // Initialize BLE transport for HID central mode
-    ESP_ERROR_CHECK(ble_transport_init(HID_HOST_MODE));
+    ESP_ERROR_CHECK(ble_central_init(HID_HOST_MODE));
 
-    ble_transport_set_user_ble_callback(gap_callback);
+    ble_central_set_user_ble_callback(gap_callback);
 
     ESP_ERROR_CHECK(esp_ble_gattc_register_callback(gattc_event_handler));
 
