@@ -807,8 +807,8 @@ static esp_ble_scan_params_t hid_scan_params = {
     .scan_type              = BLE_SCAN_TYPE_ACTIVE,
     .own_addr_type          = BLE_ADDR_TYPE_PUBLIC,
     .scan_filter_policy     = BLE_SCAN_FILTER_ALLOW_ALL,
-    .scan_interval          = 0x50,
-    .scan_window            = 0x30,
+    .scan_interval          = 0x50,  // 50ms scan interval
+    .scan_window            = 0x30,  // 30ms scan window
     .scan_duplicate         = BLE_SCAN_DUPLICATE_ENABLE,
 };
 

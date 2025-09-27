@@ -100,6 +100,15 @@ void transport_hid_clear_device(void)
     memset(s_active_addr, 0, sizeof(s_active_addr));
 }
 
+esp_err_t transport_hid_get_active_address(uint8_t *addr)
+{
+    if (!addr || !s_has_active_addr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    memcpy(addr, s_active_addr, sizeof(esp_bd_addr_t));
+    return ESP_OK;
+}
+
 void transport_hid_handle_disconnect(void)
 {
     ESP_LOGI(TAG, "Handling HID device disconnect - releasing stuck inputs");

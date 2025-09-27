@@ -51,6 +51,14 @@ esp_err_t transport_hid_set_device(esp_hidh_dev_t *dev, const uint8_t *bda);
 void transport_hid_clear_device(void);
 
 /**
+ * @brief Get the active device's Bluetooth address
+ *
+ * @param addr Buffer to store the address (6 bytes)
+ * @return ESP_OK if active device exists, ESP_ERR_INVALID_STATE if no active device
+ */
+esp_err_t transport_hid_get_active_address(uint8_t *addr);
+
+/**
  * @brief Handle device disconnection and release all stuck inputs
  *
  * This function releases any stuck HID inputs (buttons, movement, scroll)

@@ -37,11 +37,13 @@ static const char *TAG = "MP_MAIN";
 static esp_bd_addr_t s_active_addr;
 static esp_timer_handle_t s_rssi_timer;
 static bool s_rssi_timer_running;
+static esp_timer_handle_t s_service_discovery_timer;
 static bool s_has_active_addr;
 static uint16_t s_active_conn_id = 0xFFFF;
 static esp_gatt_if_t s_active_gattc_if = ESP_GATT_IF_NONE;
 static esp_gatt_if_t s_nus_gattc_if = ESP_GATT_IF_NONE;  // Separate interface for NUS
 static esp_gatt_if_t s_dis_gattc_if = ESP_GATT_IF_NONE;  // Separate interface for DIS
+static esp_gatt_if_t s_hid_gattc_if = ESP_GATT_IF_NONE;  // HID GATT interface (app_id 0)
 
 // Advertisement data from the connected device
 static uint16_t s_active_appearance = 0;
@@ -94,6 +96,32 @@ static void stop_rssi_timer(void)
 
 // Helper functions log_report and log_addr moved to ble_hid.c
 
+static void service_discovery_timer_callback(void *arg)
+{
+    ESP_LOGI(TAG, "Starting delayed NUS and DIS service discovery");
+
+    // Start NUS service discovery
+#if ENABLE_NUS_CLIENT_MODE
+    if (s_has_active_addr) {
+        ble_nus_client_set_server_bda(s_active_addr);
+        if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
+            esp_err_t ret = transport_uart_discover_services(s_nus_gattc_if, s_active_conn_id);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
+            }
+        }
+    }
+#endif
+
+    // Start DIS service discovery
+    if (s_active_conn_id != 0xFFFF && s_dis_gattc_if != ESP_GATT_IF_NONE && s_has_active_addr) {
+        esp_err_t ret = ble_device_info_discover(s_dis_gattc_if, s_active_conn_id, s_active_addr, "RDSMouthPad");
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to start DIS service discovery: %s", esp_err_to_name(ret));
+        }
+    }
+}
+
 static bool addr_matches_active(const uint8_t *addr)
 {
     return s_has_active_addr && addr && memcmp(addr, s_active_addr, sizeof(s_active_addr)) == 0;
@@ -112,6 +140,16 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
                      param->read_rssi_cmpl.rssi);
         } else {
             ESP_LOGW(TAG, "RSSI read failed: 0x%x", param->read_rssi_cmpl.status);
+        }
+        break;
+    case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
+        if (param->update_conn_params.status == ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGI(TAG, "Connection params updated: interval=%d, latency=%d, timeout=%d",
+                     param->update_conn_params.conn_int,
+                     param->update_conn_params.latency,
+                     param->update_conn_params.timeout);
+        } else {
+            ESP_LOGW(TAG, "Connection params update failed: 0x%x", param->update_conn_params.status);
         }
         break;
     default:
@@ -138,8 +176,13 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         ESP_LOGI(TAG, "GATTC_REG_EVT: app_id=%d, status=%d, gattc_if=%d",
                  param->reg.app_id, param->reg.status, gattc_if);
 
+        // Store the HID GATT interface when it registers
+        if (param->reg.app_id == 0 && param->reg.status == ESP_GATT_OK) {
+            s_hid_gattc_if = gattc_if;
+            ESP_LOGI(TAG, "HID GATT client registered with interface: %d", s_hid_gattc_if);
+        }
         // Store the NUS GATT interface when it registers
-        if (param->reg.app_id == 1 && param->reg.status == ESP_GATT_OK) {
+        else if (param->reg.app_id == 1 && param->reg.status == ESP_GATT_OK) {
             s_nus_gattc_if = gattc_if;
             ESP_LOGI(TAG, "NUS GATT client registered with interface: %d", s_nus_gattc_if);
         }
@@ -155,7 +198,7 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         s_active_conn_id = param->connect.conn_id;
         s_active_gattc_if = gattc_if;
         ESP_LOGI(TAG, "GATT client connected, conn_id: %d, gattc_if: %d", s_active_conn_id, s_active_gattc_if);
-        
+
 #if ENABLE_NUS_CLIENT_MODE
         // NUS service discovery will be triggered from HID open event
         // to ensure HID service discovery completes first
@@ -165,6 +208,13 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
             s_active_conn_id = 0xFFFF;
             s_active_gattc_if = ESP_GATT_IF_NONE;
             ESP_LOGI(TAG, "GATT client disconnected, conn_id: %d", param->disconnect.conn_id);
+        }
+    } else if (event == ESP_GATTC_SET_ASSOC_EVT) {
+        ESP_LOGI(TAG, "GATT cache association event: status=%d", param->set_assoc_cmp.status);
+        if (param->set_assoc_cmp.status == ESP_GATT_OK) {
+            ESP_LOGI(TAG, "GATT cache association successful - service discovery should be faster");
+        } else {
+            ESP_LOGW(TAG, "GATT cache association failed: %d", param->set_assoc_cmp.status);
         }
     }
     
@@ -227,26 +277,41 @@ static void hid_connected_cb(esp_hidh_dev_t *dev, const uint8_t *bda)
             ESP_LOGI(TAG, "Connected to bonded device successfully");
         }
 
+
         // Set device in transport bridge
         transport_hid_set_device(dev, bda);
 
-        // Trigger NUS and DIS service discovery (existing logic)
-#if ENABLE_NUS_CLIENT_MODE
-        ble_nus_client_set_server_bda(bda);
-        if (s_active_conn_id != 0xFFFF && s_nus_gattc_if != ESP_GATT_IF_NONE) {
-            ESP_LOGI(TAG, "Starting NUS service discovery");
-            esp_err_t ret = transport_uart_discover_services(s_nus_gattc_if, s_active_conn_id);
-            if (ret != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to start NUS service discovery: %s", esp_err_to_name(ret));
-            }
+        // Request faster connection parameters for lower latency
+        esp_ble_conn_update_params_t conn_params = {
+            .bda = {0},
+            .min_int = 0x06,  // 6 * 1.25ms = 7.5ms (minimum allowed)
+            .max_int = 0x10,  // 16 * 1.25ms = 20ms
+            .latency = 0x00,  // No slave latency for fastest response
+            .timeout = 0xC8   // 200 * 10ms = 2 seconds
+        };
+        memcpy(conn_params.bda, bda, sizeof(esp_bd_addr_t));
+        esp_err_t update_ret = esp_ble_gap_update_conn_params(&conn_params);
+        if (update_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to request connection parameter update: %s", esp_err_to_name(update_ret));
+        } else {
+            ESP_LOGI(TAG, "Requested faster connection parameters (7.5-20ms interval)");
         }
-#endif
-        if (s_active_conn_id != 0xFFFF && s_dis_gattc_if != ESP_GATT_IF_NONE && s_has_active_addr) {
-            esp_err_t ret = ble_device_info_discover(s_dis_gattc_if, s_active_conn_id, s_active_addr, esp_hidh_dev_name_get(dev));
-            if (ret != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to start DIS service discovery: %s", esp_err_to_name(ret));
-            }
+
+
+        // ESP-IDF's built-in GATT cache handles service caching automatically
+        // with CONFIG_BT_GATTC_CACHE_NVS_FLASH=y enabled
+
+        // Start NUS and DIS service discovery after a short delay to prioritize HID readiness
+        if (!s_service_discovery_timer) {
+            esp_timer_create_args_t args = {
+                .callback = &service_discovery_timer_callback,
+                .arg = NULL,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "service_discovery"
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&args, &s_service_discovery_timer));
         }
+        ESP_ERROR_CHECK(esp_timer_start_once(s_service_discovery_timer, 50 * 1000)); // 50ms minimal delay
     }
     ble_bas_reset();
     leds_set_state(LED_STATE_CONNECTED);
@@ -412,6 +477,8 @@ static void scan_task(void *args)
                 s_active_manufacturer_len = 0; // Will be filled if manufacturer data was captured
             }
 
+            // ESP-IDF now handles GATT caching automatically with CONFIG_BT_GATTC_CACHE_NVS_FLASH=y
+
             esp_hidh_dev_t *dev = esp_hidh_dev_open(target->bda, target->transport, target->ble.addr_type);
             if (!dev) {
                 ESP_LOGW(TAG, "Failed to initiate connection, continuing scan");
@@ -513,6 +580,8 @@ void app_main(void)
 
     // Initialize bonding system early (requires NVS)
     ESP_ERROR_CHECK(ble_bonds_init());
+
+    // ESP-IDF's built-in GATT cache is enabled via CONFIG_BT_GATTC_CACHE_NVS_FLASH=y
 
     esp_err_t led_err = leds_init();
     if (led_err != ESP_OK) {

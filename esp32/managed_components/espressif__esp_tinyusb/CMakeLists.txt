@@ -4,7 +4,13 @@ set(srcs
     "usb_descriptors.c"
     )
 
-set(priv_req "usb")
+set(priv_req "")
+
+if(${IDF_VERSION_MAJOR} LESS 6)
+    list(APPEND priv_req "usb")
+else()
+    list(APPEND priv_req "usb")
+endif()
 
 if(NOT CONFIG_TINYUSB_NO_DEFAULT_TASK)
     list(APPEND srcs "tusb_tasks.c")

@@ -15,6 +15,11 @@
 #include <string.h>
 
 #include "usb_dfu.h"
+#include "ble_bonds.h"
+#include "ble_hid.h"
+#include "leds.h"
+#include "transport_hid.h"
+#include "esp_gap_ble_api.h"
 
 static const char *TAG = "USB_CDC";
 
@@ -178,6 +183,64 @@ static void process_log_line(void) {
       usb_dfu_enter_dfu();
     } else {
       ESP_LOGW(TAG, "DFU trigger already pending");
+    }
+  } else if ((end - start) == 10 && strncmp(&s_log_cmd_buf[start], "disconnect", 10) == 0) {
+    ESP_LOGI(TAG, "DISCONNECT command received on CDC1 - disconnecting BLE device");
+
+    // Disconnect the currently active device using BLE GAP disconnect
+    esp_bd_addr_t active_addr;
+    if (transport_hid_get_active_address(active_addr) == ESP_OK) {
+        ESP_LOGI(TAG, "Disconnecting device: %02X:%02X:%02X:%02X:%02X:%02X",
+                 active_addr[0], active_addr[1], active_addr[2],
+                 active_addr[3], active_addr[4], active_addr[5]);
+
+        esp_err_t disconnect_ret = esp_ble_gap_disconnect(active_addr);
+        if (disconnect_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to disconnect device via GAP: %s", esp_err_to_name(disconnect_ret));
+            // Fallback to HID close if GAP disconnect fails
+            esp_hidh_dev_t *active_dev = ble_hid_client_get_active_device();
+            if (active_dev != NULL) {
+                ESP_LOGI(TAG, "Attempting disconnect via HID close");
+                esp_hidh_dev_close(active_dev);
+            }
+        } else {
+            ESP_LOGI(TAG, "Disconnect command sent successfully");
+        }
+    } else {
+        ESP_LOGI(TAG, "No active device to disconnect");
+    }
+  } else if ((end - start) == 5 && strncmp(&s_log_cmd_buf[start], "clear", 5) == 0) {
+    ESP_LOGI(TAG, "CLEAR command received on CDC1 - clearing all bonds");
+
+    // Get bond info for logging
+    char bond_info[32];
+    ble_bonds_get_info_string(bond_info, sizeof(bond_info));
+    ESP_LOGI(TAG, "Clearing bond with: %s", bond_info);
+
+    // Disconnect the currently active device first using BLE GAP disconnect (same as button)
+    esp_bd_addr_t active_addr;
+    if (transport_hid_get_active_address(active_addr) == ESP_OK) {
+        ESP_LOGI(TAG, "Disconnecting active device before clearing bonds");
+        esp_err_t disconnect_ret = esp_ble_gap_disconnect(active_addr);
+        if (disconnect_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to disconnect device: %s", esp_err_to_name(disconnect_ret));
+            // Fallback to HID close if GAP disconnect fails
+            esp_hidh_dev_t *active_dev = ble_hid_client_get_active_device();
+            if (active_dev != NULL) {
+                esp_hidh_dev_close(active_dev);
+            }
+        }
+        // Give disconnect time to complete
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    // Clear all bonds
+    esp_err_t ret = ble_bonds_clear_all();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "All bonds cleared successfully");
+        leds_set_state(LED_STATE_SCANNING);  // Visual feedback that bonds were cleared
+    } else {
+        ESP_LOGW(TAG, "Failed to clear bonds: %s", esp_err_to_name(ret));
     }
   } else {
     ESP_LOGW(TAG, "Ignoring command on CDC1: %.*s", (int)(end - start),

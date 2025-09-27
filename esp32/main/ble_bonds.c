@@ -124,6 +124,8 @@ esp_err_t ble_bonds_clear_all(void)
 {
     ESP_LOGI(TAG, "Clearing all bonded devices");
 
+    // ESP-IDF's built-in GATT cache will be cleared automatically with bonds
+
     // Clear runtime state
     s_has_bonded_device = false;
     memset(s_bonded_device_addr, 0, sizeof(esp_bd_addr_t));
