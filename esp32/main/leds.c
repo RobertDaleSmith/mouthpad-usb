@@ -1,4 +1,5 @@
 #include "leds.h"
+#include "board_config.h"
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -9,18 +10,17 @@
 
 #define TAG "leds"
 
-#ifndef CONFIG_USER_LED_GPIO
-#define CONFIG_USER_LED_GPIO 21
-#endif
-
 #define SCAN_BLINK_INTERVAL_US    800000  /* 0.8s */
 #define ACTIVITY_OFF_US           10000   /* LED off duration during activity */
 #define ACTIVITY_ON_US            30000   /* LED on duration after pulse */
 #define LED_UPDATE_PERIOD_US      50000   /* 50ms */
 
 static bool s_available;
-static gpio_num_t s_gpio = CONFIG_USER_LED_GPIO;
 static leds_state_t s_state = LED_STATE_OFF;
+static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+
+#ifdef BOARD_LED_GPIO
+static gpio_num_t s_gpio = BOARD_LED_GPIO;
 static bool s_output_level;
 static const int s_hw_on_level = 0;
 static const int s_hw_off_level = 1 - s_hw_on_level;
@@ -33,8 +33,9 @@ static bool s_activity_phase_on;
 static int64_t s_activity_toggle_us;
 
 static esp_timer_handle_t s_timer;
-static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+#endif
 
+#ifdef BOARD_LED_GPIO
 static void leds_apply(bool level)
 {
     if (!s_available) {
@@ -46,7 +47,9 @@ static void leds_apply(bool level)
     gpio_set_level(s_gpio, level ? s_hw_on_level : s_hw_off_level);
     s_output_level = level;
 }
+#endif
 
+#ifdef BOARD_LED_GPIO
 static void leds_update_task(void *arg)
 {
     (void)arg;
@@ -103,6 +106,7 @@ static void leds_update_task(void *arg)
         break;
     }
 }
+#endif
 
 esp_err_t leds_init(void)
 {
@@ -110,6 +114,10 @@ esp_err_t leds_init(void)
         return ESP_OK;
     }
 
+#ifndef BOARD_LED_GPIO
+    ESP_LOGW(TAG, "No LED available on this board - LED status disabled");
+    return ESP_OK;
+#else
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << s_gpio,
         .mode = GPIO_MODE_OUTPUT,
@@ -154,10 +162,12 @@ esp_err_t leds_init(void)
     s_available = true;
     ESP_LOGI(TAG, "Single-colour LED initialised on GPIO %d", s_gpio);
     return ESP_OK;
+#endif
 }
 
 void leds_set_state(leds_state_t state)
 {
+#ifdef BOARD_LED_GPIO
     if (!s_available) {
         return;
     }
@@ -171,10 +181,14 @@ void leds_set_state(leds_state_t state)
     s_activity_pending = false;
     s_activity_phase_on = true;
     portEXIT_CRITICAL(&s_lock);
+#else
+    (void)state;
+#endif
 }
 
 void leds_notify_activity(void)
 {
+#ifdef BOARD_LED_GPIO
     if (!s_available) {
         return;
     }
@@ -186,6 +200,7 @@ void leds_notify_activity(void)
         s_activity_toggle_us = now;
     }
     portEXIT_CRITICAL(&s_lock);
+#endif
 }
 
 bool leds_is_available(void)

@@ -1,0 +1,41 @@
+menu "MouthPad Configuration"
+
+    choice MOUTHPAD_BOARD_TYPE
+        prompt "Board Type"
+        default MOUTHPAD_BOARD_XIAO_ESP32S3
+        help
+            Select the target board for MouthPad USB.
+
+        config MOUTHPAD_BOARD_XIAO_ESP32S3
+            bool "XIAO ESP32-S3"
+            help
+                Seeed Studio XIAO ESP32-S3 development board.
+                Features built-in LED on GPIO 21.
+
+        config MOUTHPAD_BOARD_LILYGO_T_DISPLAY_S3
+            bool "LilyGo T-Display-S3"
+            help
+                LilyGo T-Display-S3 development board with 1.9" LCD.
+                No built-in user LED, display pins reserved for future use.
+
+    endchoice
+
+    config MOUTHPAD_BOARD_NAME
+        string
+        default "XIAO ESP32-S3" if MOUTHPAD_BOARD_XIAO_ESP32S3
+        default "LilyGo T-Display-S3" if MOUTHPAD_BOARD_LILYGO_T_DISPLAY_S3
+
+    config MOUTHPAD_LED_GPIO
+        int
+        default 21 if MOUTHPAD_BOARD_XIAO_ESP32S3
+        default -1 if MOUTHPAD_BOARD_LILYGO_T_DISPLAY_S3
+        help
+            GPIO pin for status LED. Set to -1 to disable LED functionality.
+
+    config MOUTHPAD_BUTTON_GPIO
+        int
+        default 0
+        help
+            GPIO pin for user button (boot button on most boards).
+
+endmenu

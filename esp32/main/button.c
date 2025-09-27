@@ -1,4 +1,5 @@
 #include "button.h"
+#include "board_config.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -8,8 +9,8 @@
 
 static const char *TAG = "BUTTON";
 
-// Seeed XIAO ESP32-S3 user button is connected to GPIO0 (BOOT button)
-#define BUTTON_GPIO_PIN         GPIO_NUM_0
+// Board-specific button configuration
+#define BUTTON_GPIO_PIN         BOARD_BUTTON_GPIO
 #define BUTTON_ACTIVE_LEVEL     0  // Button is active low (pulls to GND when pressed)
 
 // Button timing configuration (in milliseconds)
