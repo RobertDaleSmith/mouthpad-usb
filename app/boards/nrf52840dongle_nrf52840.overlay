@@ -1,0 +1,143 @@
+/*
+ * Copyright (c) 2025 Robert Dale Smith
+ * Copyright (c) 2025 Augmental Tech
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* April Brothers nRF52840 Dongle overlay for MouthPad^USB
+ * Hardware based on PCA10059 with Adafruit nRF52 Bootloader
+ * Pin mappings from: https://wiki.aprbrother.com/en/BleUsbDongle.html
+ */
+
+/* Add PWM pinctrl configuration for optional buzzer */
+&pinctrl {
+	pwm1_default: pwm1_default {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>; /* P0.04 - unused pin for optional buzzer */
+		};
+	};
+
+	pwm1_sleep: pwm1_sleep {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+			low-power-enable;
+		};
+	};
+};
+
+&pwm1 {
+	status = "okay";
+	pinctrl-0 = <&pwm1_default>;
+	pinctrl-1 = <&pwm1_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+/* Override LEDs to match April Brothers pinout */
+/ {
+	leds {
+		compatible = "gpio-leds";
+
+		led0: led_0 {
+			gpios = <&gpio0 6 GPIO_ACTIVE_LOW>;
+			label = "Green LED 1";
+		};
+
+		led1_red: led_1 {
+			gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
+			label = "Red LED 2";
+		};
+
+		led1_green: led_2 {
+			gpios = <&gpio1 9 GPIO_ACTIVE_LOW>;
+			label = "Green LED 2";
+		};
+
+		led1_blue: led_3 {
+			gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
+			label = "Blue LED 2";
+		};
+	};
+
+	/* Override button to match April Brothers pinout (P1.06) */
+	buttons {
+		compatible = "gpio-keys";
+		button0: button_0 {
+			gpios = <&gpio1 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Push button switch SW1";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	aliases {
+		led0 = &led0;
+		led1 = &led1_red;
+		led2 = &led1_green;
+		led3 = &led1_blue;
+		sw0 = &button0;
+		buzzer-pwm = &pwm1;
+	};
+
+	/* Optional buzzer device */
+	buzzer {
+		compatible = "pwm-buzzer";
+		pwms = <&pwm1 0 1000000 PWM_POLARITY_NORMAL>; /* 1MHz base period */
+		label = "Passive Buzzer";
+	};
+};
+
+/ {
+	chosen {
+		nordic,nus-uart = &board_cdc_acm_uart;
+	};
+};
+
+&zephyr_udc0 {
+	board_cdc_acm_uart: board_cdc_acm_uart {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+/* Custom partition layout for UF2 bootloader without MCUboot
+ * The April Brothers dongle has NO SoftDevice, boots directly from 0x1000
+ */
+
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* MBR at 0x0 is reserved by Nordic */
+
+		/* Application starts at 0x1000 (after MBR) */
+		code_partition: partition@1000 {
+			label = "code_partition";
+			reg = <0x00001000 0x000d9000>;  /* ~868 KB */
+		};
+
+		/* Settings storage before bootloader */
+		storage_partition: partition@da000 {
+			label = "storage";
+			reg = <0x000da000 0x00006000>;  /* 24 KB */
+		};
+
+		/* UF2 bootloader at end of flash */
+		boot_partition: partition@e0000 {
+			label = "uf2_boot";
+			reg = <0x000e0000 0x00020000>;  /* 128 KB */
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &code_partition;
+		zephyr,settings-partition = &storage_partition;
+	};
+};

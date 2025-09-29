@@ -1,7 +1,7 @@
 # Makefile for mouthpad_usb project
 # Provides convenient targets for building, cleaning, and workspace management
 
-.PHONY: init build build-xiao build-feather flash monitor clean fullclean help
+.PHONY: init build build-xiao build-feather build-april flash monitor clean fullclean help
 
 # Default target
 all: build
@@ -10,6 +10,8 @@ all: build
 init:
 	west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
 	west update
+	west config build.sysbuild true
+	@echo "Workspace initialized with sysbuild enabled"
 
 # Build the project (default to xiao_ble, can override with BOARD=)
 BOARD ?= xiao_ble
@@ -23,13 +25,43 @@ build-xiao:
 build-feather:
 	west build -b adafruit_feather_nrf52840 app --pristine=always
 
-# Flash the built firmware
-flash:
-	west flash --runner jlink --build-dir build/app
+build-april:
+	west build -b nrf52840dongle app --pristine=always
 
 # Flash the built firmware
+flash:
+	west flash --runner jlink
+
+# Flash UF2 firmware to mounted bootloader drive
+# Usage: make flash-uf2 (will copy to /Volumes/NRF52BOOT or similar)
 flash-uf2:
-	west flash --runner uf2 --build-dir build/app
+	@UF2_FILE=""; \
+	if [ -f "build/app/zephyr/zephyr.uf2" ]; then \
+		UF2_FILE="build/app/zephyr/zephyr.uf2"; \
+	elif [ -f "build/zephyr/zephyr.uf2" ]; then \
+		UF2_FILE="build/zephyr/zephyr.uf2"; \
+	else \
+		echo "Error: No UF2 file found. Please build first with 'make build-april' or similar."; \
+		exit 1; \
+	fi; \
+	if [ -d "/Volumes/NRF52BOOT" ]; then \
+		echo "Copying UF2 to /Volumes/NRF52BOOT..."; \
+		cp "$$UF2_FILE" /Volumes/NRF52BOOT/; \
+		echo "Flash complete! Device will reset automatically."; \
+	elif [ -d "/Volumes/XIAO-SENSE" ]; then \
+		echo "Copying UF2 to /Volumes/XIAO-SENSE..."; \
+		cp "$$UF2_FILE" /Volumes/XIAO-SENSE/; \
+		echo "Flash complete! Device will reset automatically."; \
+	elif [ -d "/Volumes/FEATHERBOOT" ]; then \
+		echo "Copying UF2 to /Volumes/FEATHERBOOT..."; \
+		cp "$$UF2_FILE" /Volumes/FEATHERBOOT/; \
+		echo "Flash complete! Device will reset automatically."; \
+	else \
+		echo "Error: No UF2 bootloader drive found."; \
+		echo "Please enter bootloader mode and try again."; \
+		echo "Expected drives: /Volumes/NRF52BOOT, /Volumes/XIAO-SENSE, or /Volumes/FEATHERBOOT"; \
+		exit 1; \
+	fi
 
 # Open RTT monitor (console output via J-Link RTT)
 # NOTE: Segger RTT Viewer app is recommended for better user experience
@@ -68,6 +100,7 @@ help:
 	@echo "  build        - Build the project (default: xiao_ble, override with BOARD=)"
 	@echo "  build-xiao   - Build specifically for Seeed XIAO nRF52840"
 	@echo "  build-feather - Build specifically for Adafruit Feather nRF52840 Express"
+	@echo "  build-april  - Build specifically for April Brothers nRF52840 Dongle"
 	@echo "  flash        - Flash the built firmware to device using J-Link"
 	@echo "  flash-uf2    - Flash the built firmware to device using UF2 bootloader"
 	@echo "  monitor      - Open RTT monitor (console output via J-Link RTT)"
