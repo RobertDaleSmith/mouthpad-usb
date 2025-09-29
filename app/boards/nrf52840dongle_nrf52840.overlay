@@ -33,48 +33,53 @@
 	pinctrl-names = "default", "sleep";
 };
 
-/* Override LEDs to match April Brothers pinout */
+/* Override existing LED GPIO pins to match April Brothers pinout
+ * The base board defines led0_green, led1_red, led1_green, led1_blue
+ * We override their GPIO assignments to use the RGB LED (LED2)
+ *
+ * April Brothers wiki says: Red=P0.08, Green=P1.09, Blue=P0.12
+ * Test pattern revealed actual physical LED mapping:
+ *   Code RED -> Physical BLUE (P0.08)
+ *   Code GREEN -> Physical RED (P1.09)
+ *   Code BLUE -> Physical GREEN (P0.12)
+ *
+ * Correct mapping (swap code channels to get right colors):
+ *   led0 (red in code) -> P1.09 (physical red)
+ *   led1 (green in code) -> P0.12 (physical green)
+ *   led2 (blue in code) -> P0.08 (physical blue)
+ */
+&led0_green {
+	gpios = <&gpio1 9 GPIO_ACTIVE_LOW>;  /* Code red -> Physical red (P1.09) */
+	label = "LED Red";
+};
+
+&led1_red {
+	gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;  /* Code green -> Physical green (P0.12) */
+	label = "LED Green";
+};
+
+&led1_green {
+	gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;  /* Code blue -> Physical blue (P0.08) */
+	label = "LED Blue";
+};
+
+/* Disable standalone LED1 for sanity check */
+&led1_blue {
+	status = "disabled";
+};
+
+/* Override button to match April Brothers pinout (P1.06) */
+&button0 {
+	gpios = <&gpio1 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+	label = "Push button switch SW1";
+};
+
 / {
-	leds {
-		compatible = "gpio-leds";
-
-		led0: led_0 {
-			gpios = <&gpio0 6 GPIO_ACTIVE_LOW>;
-			label = "Green LED 1";
-		};
-
-		led1_red: led_1 {
-			gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
-			label = "Red LED 2";
-		};
-
-		led1_green: led_2 {
-			gpios = <&gpio1 9 GPIO_ACTIVE_LOW>;
-			label = "Green LED 2";
-		};
-
-		led1_blue: led_3 {
-			gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
-			label = "Blue LED 2";
-		};
-	};
-
-	/* Override button to match April Brothers pinout (P1.06) */
-	buttons {
-		compatible = "gpio-keys";
-		button0: button_0 {
-			gpios = <&gpio1 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			label = "Push button switch SW1";
-			zephyr,code = <INPUT_KEY_0>;
-		};
+	chosen {
+		nordic,nus-uart = &board_cdc_acm_uart;
 	};
 
 	aliases {
-		led0 = &led0;
-		led1 = &led1_red;
-		led2 = &led1_green;
-		led3 = &led1_blue;
-		sw0 = &button0;
 		buzzer-pwm = &pwm1;
 	};
 
@@ -83,12 +88,6 @@
 		compatible = "pwm-buzzer";
 		pwms = <&pwm1 0 1000000 PWM_POLARITY_NORMAL>; /* 1MHz base period */
 		label = "Passive Buzzer";
-	};
-};
-
-/ {
-	chosen {
-		nordic,nus-uart = &board_cdc_acm_uart;
 	};
 };
 

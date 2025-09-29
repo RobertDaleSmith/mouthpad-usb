@@ -54,7 +54,9 @@ static bool animation_phase = false;
 static uint8_t battery_color_mode = BAS_COLOR_MODE_GRADIENT;
 
 /* NeoPixel brightness control (0-255, default 25 for comfortable viewing) */
+#if HAS_NEOPIXEL
 static uint8_t neopixel_brightness = 25;
+#endif
 
 /* Private function declarations */
 static void set_rgb_color(ble_bas_rgb_color_t color);
@@ -238,20 +240,20 @@ static void set_neopixel_color(ble_bas_rgb_color_t color)
 static void set_gpio_leds(ble_bas_rgb_color_t color)
 {
 #if !HAS_NEOPIXEL
-    /* LEDs are active LOW, so invert the logic */
+    /* GPIO_ACTIVE_LOW in devicetree handles inversion automatically */
 #if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
     if (led_red_available) {
-        gpio_pin_set_dt(&led_red, color.red == 0 ? 0 : 1);
+        gpio_pin_set_dt(&led_red, color.red > 0 ? 1 : 0);
     }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
     if (led_green_available) {
-        gpio_pin_set_dt(&led_green, color.green == 0 ? 0 : 1);
+        gpio_pin_set_dt(&led_green, color.green > 0 ? 1 : 0);
     }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
     if (led_blue_available) {
-        gpio_pin_set_dt(&led_blue, color.blue == 0 ? 0 : 1);
+        gpio_pin_set_dt(&led_blue, color.blue > 0 ? 1 : 0);
     }
 #endif
 #endif
@@ -326,7 +328,7 @@ static int init_gpio_leds(void)
             LOG_ERR("Failed to configure blue LED (err %d)", ret);
             led_blue_available = false;
         } else {
-            gpio_pin_set_dt(&led_blue, 1);  /* Start with blue on (scanning state) */
+            gpio_pin_set_dt(&led_blue, 0);  /* Start with LED off */
             any_led_available = true;
         }
     }
