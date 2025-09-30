@@ -1,0 +1,382 @@
+/*
+ * Copyright (c) 2024 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "sample_usbd.h"
+
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/input/input.h>
+
+#include <zephyr/usb/usbd.h>
+#include <zephyr/usb/class/usbd_hid.h>
+
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
+
+/* MouthPad HID Report Descriptor
+ * Report Structure:
+ * - Report ID 1: Buttons (5 bits) + Padding (3 bits) + Wheel (8 bits) = 16 bits (2 bytes)
+ * - Report ID 2: X movement (12 bits) + Y movement (12 bits) = 24 bits (3 bytes)
+ * - Report ID 3: Consumer controls (volume, media keys, etc.)
+ */
+static const uint8_t hid_report_desc[] = {
+	// Report ID 1: Mouse buttons and wheel
+	0x05, 0x01,        // Usage Page (Generic Desktop)
+	0x09, 0x02,        // Usage (Mouse)
+	0xA1, 0x01,        // Collection (Application)
+	0x85, 0x01,        //   Report ID (1)
+	0x09, 0x01,        //   Usage (Pointer)
+	0xA1, 0x00,        //   Collection (Physical)
+	0x95, 0x05,        //     Report Count (5)
+	0x75, 0x01,        //     Report Size (1)
+	0x05, 0x09,        //     Usage Page (Button)
+	0x19, 0x01,        //     Usage Minimum (Button 1)
+	0x29, 0x05,        //     Usage Maximum (Button 5)
+	0x15, 0x00,        //     Logical Minimum (0)
+	0x25, 0x01,        //     Logical Maximum (1)
+	0x81, 0x02,        //     Input (Data, Variable, Absolute)
+	0x95, 0x01,        //     Report Count (1)
+	0x75, 0x03,        //     Report Size (3)
+	0x81, 0x01,        //     Input (Constant) - padding
+	0x75, 0x08,        //     Report Size (8)
+	0x95, 0x01,        //     Report Count (1)
+	0x05, 0x01,        //     Usage Page (Generic Desktop)
+	0x09, 0x38,        //     Usage (Wheel)
+	0x15, 0x81,        //     Logical Minimum (-127)
+	0x25, 0x7F,        //     Logical Maximum (127)
+	0x81, 0x06,        //     Input (Data, Variable, Relative)
+	0x05, 0x0C,        //     Usage Page (Consumer)
+	0x0A, 0x38, 0x02,  //     Usage (AC Pan)
+	0x95, 0x01,        //     Report Count (1)
+	0x81, 0x06,        //     Input (Data, Variable, Relative)
+	0xC0,              //   End Collection (Physical)
+
+	// Report ID 2: Mouse X/Y movement
+	0x85, 0x02,        //   Report ID (2)
+	0x09, 0x01,        //   Usage (Pointer)
+	0xA1, 0x00,        //   Collection (Physical)
+	0x75, 0x0C,        //     Report Size (12)
+	0x95, 0x02,        //     Report Count (2)
+	0x05, 0x01,        //     Usage Page (Generic Desktop)
+	0x09, 0x30,        //     Usage (X)
+	0x09, 0x31,        //     Usage (Y)
+	0x16, 0x01, 0xF8,  //     Logical Minimum (-2047)
+	0x26, 0xFF, 0x07,  //     Logical Maximum (2047)
+	0x81, 0x06,        //     Input (Data, Variable, Relative)
+	0xC0,              //   End Collection (Physical)
+	0xC0,              // End Collection (Application)
+
+	// Report ID 3: Consumer controls
+	0x05, 0x0C,        // Usage Page (Consumer)
+	0x09, 0x01,        // Usage (Consumer Control)
+	0xA1, 0x01,        // Collection (Application)
+	0x85, 0x03,        //   Report ID (3)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x25, 0x01,        //   Logical Maximum (1)
+	0x75, 0x01,        //   Report Size (1)
+	0x95, 0x01,        //   Report Count (1)
+	0x09, 0xCD,        //   Usage (Play/Pause)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0x0A, 0x83, 0x01,  //   Usage (AL Consumer Control Configuration)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0x09, 0xB5,        //   Usage (Scan Next Track)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0x09, 0xB6,        //   Usage (Scan Previous Track)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0x09, 0xEA,        //   Usage (Volume Decrement)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0x09, 0xE9,        //   Usage (Volume Increment)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0x0A, 0x25, 0x02,  //   Usage (AC Forward)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0x0A, 0x24, 0x02,  //   Usage (AC Back)
+	0x81, 0x06,        //   Input (Data, Variable, Relative)
+	0xC0               // End Collection (Application)
+};
+
+enum kb_leds_idx {
+	KB_LED_NUMLOCK = 0,
+	KB_LED_CAPSLOCK,
+	KB_LED_SCROLLLOCK,
+	KB_LED_COUNT,
+};
+
+static const struct gpio_dt_spec kb_leds[KB_LED_COUNT] = {
+	GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios, {0}),
+	GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios, {0}),
+	GPIO_DT_SPEC_GET_OR(DT_ALIAS(led2), gpios, {0}),
+};
+
+/* Mouse report structure: [buttons] [X] [Y] [Wheel] */
+enum mouse_report_idx {
+	MOUSE_BUTTONS = 0,
+	MOUSE_X,
+	MOUSE_Y,
+	MOUSE_WHEEL,
+	MOUSE_REPORT_COUNT,
+};
+
+struct kb_event {
+	uint16_t code;
+	int32_t value;
+};
+
+K_MSGQ_DEFINE(kb_msgq, sizeof(struct kb_event), 2, 1);
+
+UDC_STATIC_BUF_DEFINE(report, MOUSE_REPORT_COUNT);
+static uint32_t kb_duration;
+static bool kb_ready;
+
+static void input_cb(struct input_event *evt, void *user_data)
+{
+	struct kb_event kb_evt;
+
+	ARG_UNUSED(user_data);
+
+	kb_evt.code = evt->code;
+	kb_evt.value = evt->value;
+	if (k_msgq_put(&kb_msgq, &kb_evt, K_NO_WAIT) != 0) {
+		LOG_ERR("Failed to put new input event");
+	}
+}
+
+INPUT_CALLBACK_DEFINE(NULL, input_cb, NULL);
+
+static void kb_iface_ready(const struct device *dev, const bool ready)
+{
+	LOG_INF("HID device %s interface is %s",
+		dev->name, ready ? "ready" : "not ready");
+	kb_ready = ready;
+}
+
+static int kb_get_report(const struct device *dev,
+			 const uint8_t type, const uint8_t id, const uint16_t len,
+			 uint8_t *const buf)
+{
+	LOG_WRN("Get Report not implemented, Type %u ID %u", type, id);
+
+	return 0;
+}
+
+static int kb_set_report(const struct device *dev,
+			 const uint8_t type, const uint8_t id, const uint16_t len,
+			 const uint8_t *const buf)
+{
+	if (type != HID_REPORT_TYPE_OUTPUT) {
+		LOG_WRN("Unsupported report type");
+		return -ENOTSUP;
+	}
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(kb_leds); i++) {
+		if (kb_leds[i].port == NULL) {
+			continue;
+		}
+
+		(void)gpio_pin_set_dt(&kb_leds[i], buf[0] & BIT(i));
+	}
+
+	return 0;
+}
+
+/* Idle duration is stored but not used to calculate idle reports. */
+static void kb_set_idle(const struct device *dev,
+			const uint8_t id, const uint32_t duration)
+{
+	LOG_INF("Set Idle %u to %u", id, duration);
+	kb_duration = duration;
+}
+
+static uint32_t kb_get_idle(const struct device *dev, const uint8_t id)
+{
+	LOG_INF("Get Idle %u to %u", id, kb_duration);
+	return kb_duration;
+}
+
+static void kb_set_protocol(const struct device *dev, const uint8_t proto)
+{
+	LOG_INF("Protocol changed to %s",
+		proto == 0U ? "Boot Protocol" : "Report Protocol");
+}
+
+static void kb_output_report(const struct device *dev, const uint16_t len,
+			     const uint8_t *const buf)
+{
+	LOG_HEXDUMP_DBG(buf, len, "o.r.");
+	kb_set_report(dev, HID_REPORT_TYPE_OUTPUT, 0U, len, buf);
+}
+
+struct hid_device_ops kb_ops = {
+	.iface_ready = kb_iface_ready,
+	.get_report = kb_get_report,
+	.set_report = kb_set_report,
+	.set_idle = kb_set_idle,
+	.get_idle = kb_get_idle,
+	.set_protocol = kb_set_protocol,
+	.output_report = kb_output_report,
+};
+
+/* doc device msg-cb start */
+static void msg_cb(struct usbd_context *const usbd_ctx,
+		   const struct usbd_msg *const msg)
+{
+	LOG_INF("USBD message: %s", usbd_msg_type_string(msg->type));
+
+	if (msg->type == USBD_MSG_CONFIGURATION) {
+		LOG_INF("\tConfiguration value %d", msg->status);
+	}
+
+	if (usbd_can_detect_vbus(usbd_ctx)) {
+		if (msg->type == USBD_MSG_VBUS_READY) {
+			if (usbd_enable(usbd_ctx)) {
+				LOG_ERR("Failed to enable device support");
+			}
+		}
+
+		if (msg->type == USBD_MSG_VBUS_REMOVED) {
+			if (usbd_disable(usbd_ctx)) {
+				LOG_ERR("Failed to disable device support");
+			}
+		}
+	}
+}
+/* doc device msg-cb end */
+
+int main(void)
+{
+	struct usbd_context *sample_usbd;
+	const struct device *hid_dev;
+	int ret;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(kb_leds); i++) {
+		if (kb_leds[i].port == NULL) {
+			continue;
+		}
+
+		if (!gpio_is_ready_dt(&kb_leds[i])) {
+			LOG_ERR("LED device %s is not ready", kb_leds[i].port->name);
+			return -EIO;
+		}
+
+		ret = gpio_pin_configure_dt(&kb_leds[i], GPIO_OUTPUT_INACTIVE);
+		if (ret != 0) {
+			LOG_ERR("Failed to configure the LED pin, %d", ret);
+			return -EIO;
+		}
+	}
+
+	hid_dev = DEVICE_DT_GET_ONE(zephyr_hid_device);
+	if (!device_is_ready(hid_dev)) {
+		LOG_ERR("HID Device is not ready");
+		return -EIO;
+	}
+
+	ret = hid_device_register(hid_dev,
+				  hid_report_desc, sizeof(hid_report_desc),
+				  &kb_ops);
+	if (ret != 0) {
+		LOG_ERR("Failed to register HID Device, %d", ret);
+		return ret;
+	}
+
+	sample_usbd = sample_usbd_init_device(msg_cb);
+	if (sample_usbd == NULL) {
+		LOG_ERR("Failed to initialize USB device");
+		return -ENODEV;
+	}
+
+	if (!usbd_can_detect_vbus(sample_usbd)) {
+		/* doc device enable start */
+		ret = usbd_enable(sample_usbd);
+		if (ret) {
+			LOG_ERR("Failed to enable device support");
+			return ret;
+		}
+		/* doc device enable end */
+	}
+
+	LOG_INF("HID keyboard sample is initialized");
+
+	/* Get and log CDC devices */
+	const struct device *cdc0 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
+	const struct device *cdc1 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart1));
+	LOG_INF("=== CDC DEVICE INITIALIZATION ===");
+	LOG_INF("CDC0: %s (ready=%d, addr=%p)", cdc0->name, device_is_ready(cdc0), cdc0);
+	LOG_INF("CDC1: %s (ready=%d, addr=%p)", cdc1->name, device_is_ready(cdc1), cdc1);
+	LOG_INF("Console should appear on CDC1: %s", cdc1->name);
+	LOG_INF("================================");
+
+	while (true) {
+		struct kb_event kb_evt;
+
+		k_msgq_get(&kb_msgq, &kb_evt, K_FOREVER);
+
+		/* Simple mouse button mapping */
+		switch (kb_evt.code) {
+		case INPUT_KEY_0:
+			/* Button 1 (left click) */
+			if (kb_evt.value) {
+				report[MOUSE_BUTTONS] |= BIT(0);
+			} else {
+				report[MOUSE_BUTTONS] &= ~BIT(0);
+			}
+			break;
+		case INPUT_KEY_1:
+			/* Button 2 (right click) */
+			if (kb_evt.value) {
+				report[MOUSE_BUTTONS] |= BIT(1);
+			} else {
+				report[MOUSE_BUTTONS] &= ~BIT(1);
+			}
+			break;
+		case INPUT_KEY_2:
+			/* Button 3 (middle click) */
+			if (kb_evt.value) {
+				report[MOUSE_BUTTONS] |= BIT(2);
+			} else {
+				report[MOUSE_BUTTONS] &= ~BIT(2);
+			}
+			break;
+		case INPUT_KEY_3:
+			/* Move mouse when button 3 held */
+			if (kb_evt.value) {
+				report[MOUSE_X] = 10;  /* Move right */
+				report[MOUSE_Y] = 10;  /* Move down */
+			} else {
+				report[MOUSE_X] = 0;
+				report[MOUSE_Y] = 0;
+			}
+			break;
+		default:
+			LOG_INF("Unrecognized input code %u value %d",
+				kb_evt.code, kb_evt.value);
+			continue;
+		}
+
+		if (!kb_ready) {
+			LOG_INF("USB HID device is not ready");
+			continue;
+		}
+
+		if (usbd_is_suspended(sample_usbd)) {
+			/* on a press of any button, send wakeup request */
+			if (kb_evt.value) {
+				ret = usbd_wakeup_request(sample_usbd);
+				if (ret) {
+					LOG_ERR("Remote wakeup error, %d", ret);
+				}
+			}
+			continue;
+		}
+
+		ret = hid_device_submit_report(hid_dev, MOUSE_REPORT_COUNT, report);
+		if (ret) {
+			LOG_ERR("HID submit report error, %d", ret);
+		}
+	}
+
+	return 0;
+}

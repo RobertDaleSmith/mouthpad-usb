@@ -1,0 +1,141 @@
+/*
+ * Copyright (c) 2025 Robert Dale Smith
+ * Copyright (c) 2025 Augmental Tech
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Adafruit Feather nRF52840 overlay for dual CDC + HID test */
+
+#include <zephyr/dt-bindings/led/led.h>
+
+/ {
+	/* HID device node */
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "HID0";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	aliases {
+		buzzer-pwm = &pwm1;
+		led-strip = &neopixel;
+		led0 = &neopixel;  /* Make led0 alias point to neopixel */
+		sw0 = &button0;    /* Use existing Feather user button */
+	};
+
+	buzzer {
+		compatible = "pwm-buzzer";
+		pwms = <&pwm1 0 1000000 PWM_POLARITY_NORMAL>; /* 1MHz base period */
+		label = "Passive Buzzer";
+	};
+
+	/* NeoPixel for status indication */
+	neopixel: ws2812 {
+		compatible = "worldsemi,ws2812-gpio";
+		chain-length = <1>;
+		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>; /* GRB order */
+		/* P0.16 confirmed by schematic */
+		gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+/* Add PWM configuration for passive buzzer on pin A0 (P0.04) */
+&pinctrl {
+	pwm1_default: pwm1_default {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>; /* A0 pin for buzzer */
+		};
+	};
+
+	pwm1_sleep: pwm1_sleep {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+			low-power-enable;
+		};
+	};
+};
+
+&pwm1 {
+	status = "okay";
+	pinctrl-0 = <&pwm1_default>;
+	pinctrl-1 = <&pwm1_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+/* Add dual CDC ACM nodes for new USB stack */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
+	};
+};
+
+/* Delete default MCUboot partitions and replace with UF2-compatible layout */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	/*
+	 * UF2 flash layout for nrf52840 using Adafruit bootloader
+	 *
+	 * 0x00000000 SoftDevice s140 v6    (152 kB)
+	 * 0x00026000 Application partition (792 kB)
+	 * 0x000ec000 Storage partition     (32 kB)
+	 * 0x000f4000 UF2 boot partition    (48 kB)
+	 *
+	 * See https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/hathach-memory-map
+	 */
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		sd_partition: partition@0 {
+			label = "softdevice";
+			reg = <0x00000000 0x00026000>;
+		};
+
+		code_partition: partition@26000 {
+			label = "code_partition";
+			reg = <0x00026000 0x000c6000>;
+		};
+
+		storage_partition: partition@ec000 {
+			label = "storage";
+			reg = <0x000ec000 0x00008000>;
+		};
+
+		boot_partition: partition@f4000 {
+			label = "adafruit_boot";
+			reg = <0x000f4000 0x0000c000>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &code_partition;
+		zephyr,settings-partition = &storage_partition;
+		zephyr,led-strip = &neopixel;  /* Critical: Set chosen led-strip for timing calculations */
+		zephyr,console = &cdc_acm_uart1;
+		zephyr,shell-uart = &cdc_acm_uart1;
+	};
+
+	/* Ensure CPU frequency is properly defined for WS2812 timing calculations */
+	cpus {
+		cpu@0 {
+			clock-frequency = <64000000>;  /* 64MHz - standard nRF52840 frequency */
+		};
+	};
+};

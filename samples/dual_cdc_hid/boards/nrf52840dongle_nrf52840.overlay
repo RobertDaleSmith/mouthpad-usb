@@ -1,0 +1,80 @@
+/* Overlay for April Brothers nRF52840 Dongle */
+
+/ {
+	chosen {
+		/* Route console to second CDC port for monitoring */
+		zephyr,console = &cdc_acm_uart1;
+		zephyr,shell-uart = &cdc_acm_uart1;
+	};
+
+	/* HID device node */
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "HID0";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+};
+
+/* Disable board's default CDC node */
+&board_cdc_acm_uart {
+	status = "disabled";
+};
+
+/* Add dual CDC ACM nodes */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
+	};
+};
+
+/* Custom partition layout for UF2 bootloader without MCUboot
+ * The April Brothers dongle has NO SoftDevice, boots directly from 0x1000
+ */
+
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* MBR at 0x0 is reserved by Nordic */
+
+		/* Application starts at 0x1000 (after MBR) */
+		code_partition: partition@1000 {
+			label = "code_partition";
+			reg = <0x00001000 0x000d9000>;  /* ~868 KB */
+		};
+
+		/* Settings storage before bootloader */
+		storage_partition: partition@da000 {
+			label = "storage";
+			reg = <0x000da000 0x00006000>;  /* 24 KB */
+		};
+
+		/* UF2 bootloader at end of flash */
+		boot_partition: partition@e0000 {
+			label = "uf2_boot";
+			reg = <0x000e0000 0x00020000>;  /* 128 KB */
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &code_partition;
+		zephyr,settings-partition = &storage_partition;
+	};
+};

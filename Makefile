@@ -52,14 +52,14 @@ flash-uf2:
 		echo "Copying UF2 to /Volumes/XIAO-SENSE..."; \
 		cp "$$UF2_FILE" /Volumes/XIAO-SENSE/; \
 		echo "Flash complete! Device will reset automatically."; \
-	elif [ -d "/Volumes/FEATHERBOOT" ]; then \
-		echo "Copying UF2 to /Volumes/FEATHERBOOT..."; \
-		cp "$$UF2_FILE" /Volumes/FEATHERBOOT/; \
+	elif [ -d "/Volumes/FTHR840BOOT" ]; then \
+		echo "Copying UF2 to /Volumes/FTHR840BOOT..."; \
+		cp "$$UF2_FILE" /Volumes/FTHR840BOOT/; \
 		echo "Flash complete! Device will reset automatically."; \
 	else \
 		echo "Error: No UF2 bootloader drive found."; \
 		echo "Please enter bootloader mode and try again."; \
-		echo "Expected drives: /Volumes/NRF52BOOT, /Volumes/XIAO-SENSE, or /Volumes/FEATHERBOOT"; \
+		echo "Expected drives: /Volumes/NRF52BOOT, /Volumes/XIAO-SENSE, or /Volumes/FTHR840BOOT"; \
 		exit 1; \
 	fi
 
