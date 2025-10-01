@@ -10,6 +10,8 @@
  */
 
 #include <zephyr/logging/log.h>
+#include <string.h>
+#include <nrf.h>
 
 #include "usb_cdc.h"
 #include "usb_hid.h"
@@ -215,23 +217,59 @@ int main(void)
 	
 	static bool data_activity = false;
 	static int display_update_counter = 0;
-	
+
 	/* Reset display state after splash screen to ensure status updates work */
 	if (oled_display_is_available()) {
 		oled_display_reset_state();
 	}
-	
+
 	LOG_INF("Entering main loop...");
 
 	for (;;) {
 		/* USB CDC ↔ BLE NUS Bridge */
-		
+
 		/* Check BLE connection status and data activity */
 		bool is_connected = ble_transport_is_connected();
 		bool ble_data_activity = ble_transport_has_data_activity();
-		uint8_t battery_level = ble_bas_get_battery_level();		
+		uint8_t battery_level = ble_bas_get_battery_level();
 		int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
-		
+
+		/* Check for DFU command from CDC1 (console port) */
+		static uint8_t cdc1_cmd_buffer[32];
+		static int cdc1_cmd_pos = 0;
+		uint8_t cdc1_byte;
+		const struct device *cdc1_dev = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart1));
+
+		if (device_is_ready(cdc1_dev)) {
+			int ret = uart_poll_in(cdc1_dev, &cdc1_byte);
+			if (ret == 0) {
+				if (cdc1_byte == '\n' || cdc1_byte == '\r') {
+					/* End of command - null terminate and process */
+					cdc1_cmd_buffer[cdc1_cmd_pos] = '\0';
+
+					/* Check for "dfu" command */
+					if (cdc1_cmd_pos == 3 &&
+					    strncmp((char *)cdc1_cmd_buffer, "dfu", 3) == 0) {
+						LOG_INF("DFU command received - entering bootloader mode...");
+						k_sleep(K_MSEC(100)); /* Brief delay for log to flush */
+
+						/* Set GPREGRET magic value for UF2 bootloader */
+						NRF_POWER->GPREGRET = 0x57;
+
+						/* Perform system reset */
+						NVIC_SystemReset();
+					}
+
+					cdc1_cmd_pos = 0; /* Reset buffer */
+				} else if (cdc1_cmd_pos < sizeof(cdc1_cmd_buffer) - 1) {
+					cdc1_cmd_buffer[cdc1_cmd_pos++] = cdc1_byte;
+				} else {
+					/* Buffer overflow - reset */
+					cdc1_cmd_pos = 0;
+				}
+			}
+		}
+
 		// Check for data from USB CDC and send to NUS
 		static uint8_t cdc_buffer[UART_BUF_SIZE];
 		static int cdc_pos = 0;

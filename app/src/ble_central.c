@@ -34,6 +34,18 @@ static bool scanning_active = false;
 static bt_addr_le_t bonded_device_addr;
 static bool has_bonded_device = false;
 
+/* Device UUID tracking - to verify both HID and NUS across multiple packets */
+struct device_uuid_state {
+	bt_addr_le_t addr;
+	bool has_hid;
+	bool has_nus;
+	int8_t rssi;
+	int64_t timestamp;
+};
+
+static struct device_uuid_state tracked_devices[4];
+static K_MUTEX_DEFINE(tracked_devices_mutex);
+
 /* Device type detection */
 static bool is_nus_device(const struct bt_scan_device_info *device_info);
 static bool is_hid_device(const struct bt_scan_device_info *device_info);
@@ -129,6 +141,9 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 
 	LOG_INF("CONNECTED TO DEVICE: %s", addr);
 
+	/* Store connection reference */
+	default_conn = bt_conn_ref(conn);
+
 	/* Stop scanning */
 	scanning_active = false;
 	err = bt_scan_stop();
@@ -204,6 +219,37 @@ static void scan_indicator_handler(struct k_work *work)
 	}
 }
 
+/* Helper function to find or create device UUID state */
+static struct device_uuid_state *find_or_create_device_state(const bt_addr_le_t *addr)
+{
+	int64_t now = k_uptime_get();
+	int oldest_idx = 0;
+	int64_t oldest_time = now;
+
+	k_mutex_lock(&tracked_devices_mutex, K_FOREVER);
+
+	/* First try to find existing entry */
+	for (int i = 0; i < ARRAY_SIZE(tracked_devices); i++) {
+		if (bt_addr_le_cmp(&tracked_devices[i].addr, addr) == 0) {
+			k_mutex_unlock(&tracked_devices_mutex);
+			return &tracked_devices[i];
+		}
+		/* Track oldest entry for potential reuse */
+		if (tracked_devices[i].timestamp < oldest_time) {
+			oldest_time = tracked_devices[i].timestamp;
+			oldest_idx = i;
+		}
+	}
+
+	/* Not found - reuse oldest entry */
+	memset(&tracked_devices[oldest_idx], 0, sizeof(struct device_uuid_state));
+	bt_addr_le_copy(&tracked_devices[oldest_idx].addr, addr);
+	tracked_devices[oldest_idx].timestamp = now;
+
+	k_mutex_unlock(&tracked_devices_mutex);
+	return &tracked_devices[oldest_idx];
+}
+
 /* Scan callback implementations */
 static void scan_filter_match(struct bt_scan_device_info *device_info,
 			      struct bt_scan_filter_match *filter_match,
@@ -221,69 +267,114 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		}
 	}
 
-	/* Log device type and connection status */
-	log_device_type(device_info, addr);
-	/* Log RSSI information */
 	int8_t rssi = device_info->recv_info->rssi;
-	LOG_INF("DEVICE FOUND: %s connectable: %d RSSI: %d dBm",
-	       addr, connectable, rssi);
-	
-	/* Only connect to devices that have both NUS and HID services */
+
+	/* Find or create device state to track UUIDs across multiple packets */
+	struct device_uuid_state *dev_state = find_or_create_device_state(device_info->recv_info->addr);
+
+	/* Update UUID state from this packet */
 	bool has_nus = is_nus_device(device_info);
 	bool has_hid = is_hid_device(device_info);
-	
-	if (has_nus && has_hid) {
-		/* Stop scanning indicator */
-		scanning_active = false;
-		LOG_INF("CONNECTING TO MOUTHPAD DEVICE: %s (RSSI: %d dBm)", addr, rssi);
-		
-		/* Store RSSI for later use during connection */
-		extern void ble_transport_set_rssi(int8_t rssi);
-		ble_transport_set_rssi(rssi);
-		
-		/* Extract device name directly from advertising data */
-		char device_name[32];
-		if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) == 0) {
-			/* Successfully extracted name - truncate to 12 characters */
-			LOG_INF("Extracted device name from advertising: '%s'", device_name);
-			device_name[12] = '\0';  /* Truncate to 12 chars for display */
-		} else {
-			/* Fallback to checking stored names */
-			const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
-			if (stored_name) {
-				strncpy(device_name, stored_name, 12);
-				device_name[12] = '\0';
-				LOG_INF("Using stored device name: '%s'", device_name);
-			} else {
-				/* Final fallback - use shortened address */
-				char addr_str[BT_ADDR_LE_STR_LEN];
-				bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
-				/* Use last 12 chars of address */
-				int addr_len = strlen(addr_str);
-				if (addr_len > 12) {
-					strncpy(device_name, addr_str + addr_len - 12, 12);
-				} else {
-					strncpy(device_name, addr_str, 12);
-				}
-				device_name[12] = '\0';
-				LOG_INF("No device name found, using address: '%s'", device_name);
-			}
-		}
-		
-		/* Store device name in transport layer */
-		extern void ble_transport_set_device_name(const char *name);
-		ble_transport_set_device_name(device_name);
-		
-		/* Update display to show device found */
-		extern int oled_display_device_found(const char *device_name);
-		oled_display_device_found(device_name);
-		
-	} else {
-		LOG_WRN("REJECTING DEVICE (missing required services): %s", addr);
-		LOG_INF("Rejecting device - missing required services: %s", addr);
-		/* Don't connect to this device */
+
+	if (has_hid) dev_state->has_hid = true;
+	if (has_nus) dev_state->has_nus = true;
+	dev_state->rssi = rssi;
+	dev_state->timestamp = k_uptime_get();
+
+	/* Only connect to connectable packets (ignore scan responses) */
+	if (!connectable) {
 		return;
 	}
+
+	/* Verify device has both HID and NUS services (accumulated across packets) */
+	if (!dev_state->has_hid || !dev_state->has_nus) {
+		/* Still waiting for both UUIDs - don't log to reduce spam */
+		return;
+	}
+
+	/* Device has both services - log and proceed with connection */
+	LOG_INF("MouthPad device found: %s (RSSI: %d dBm)", addr, rssi);
+	LOG_INF("CONNECTING TO MOUTHPAD DEVICE: %s", addr);
+
+	/* Stop scanning indicator */
+	scanning_active = false;
+
+	/* Store RSSI for later use during connection */
+	extern void ble_transport_set_rssi(int8_t rssi);
+	ble_transport_set_rssi(rssi);
+
+	/* Extract device name directly from advertising data */
+	char device_name[32];
+	if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) == 0) {
+		/* Successfully extracted name - truncate to 12 characters */
+		LOG_INF("Extracted device name from advertising: '%s'", device_name);
+		device_name[12] = '\0';  /* Truncate to 12 chars for display */
+	} else {
+		/* Fallback to checking stored names */
+		const char *stored_name = get_stored_device_name_for_addr(device_info->recv_info->addr);
+		if (stored_name) {
+			strncpy(device_name, stored_name, 12);
+			device_name[12] = '\0';
+			LOG_INF("Using stored device name: '%s'", device_name);
+		} else {
+			/* Final fallback - use shortened address */
+			char addr_str[BT_ADDR_LE_STR_LEN];
+			bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
+			/* Use last 12 chars of address */
+			int addr_len = strlen(addr_str);
+			if (addr_len > 12) {
+				strncpy(device_name, addr_str + addr_len - 12, 12);
+			} else {
+				strncpy(device_name, addr_str, 12);
+			}
+			device_name[12] = '\0';
+			LOG_INF("No device name found, using address: '%s'", device_name);
+		}
+	}
+
+	/* Store device name in transport layer */
+	extern void ble_transport_set_device_name(const char *name);
+	ble_transport_set_device_name(device_name);
+
+	/* Update display to show device found */
+	extern int oled_display_device_found(const char *device_name);
+	oled_display_device_found(device_name);
+
+	/* Manually initiate connection (since auto-connect is disabled) */
+	int err = bt_scan_stop();
+	if (err) {
+		LOG_ERR("Failed to stop scan before connecting (err %d)", err);
+	}
+
+	/* Check if there's an existing connection to this device and clean it up */
+	struct bt_conn *existing_conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, device_info->recv_info->addr);
+	if (existing_conn) {
+		LOG_DBG("Found existing connection object, unreferencing twice (lookup + original)...");
+		bt_conn_unref(existing_conn); /* Unref from lookup */
+		bt_conn_unref(existing_conn); /* Unref the actual connection */
+	}
+
+	/* Create connection with default parameters */
+	struct bt_conn *conn = NULL;
+	struct bt_le_conn_param *conn_param = BT_LE_CONN_PARAM_DEFAULT;
+
+	err = bt_conn_le_create(device_info->recv_info->addr, BT_CONN_LE_CREATE_CONN,
+				conn_param, &conn);
+	if (err) {
+		LOG_ERR("Failed to create connection (err %d)", err);
+		/* Restart scanning on error */
+		scanning_active = true;
+		k_work_schedule(&scan_indicator_work, K_SECONDS(1));
+		(void)k_work_submit(&scan_work);
+		return;
+	}
+
+	/* bt_conn_le_create returns with a reference, but we don't store it here
+	 * The 'connected' callback will get the connection and create its own reference
+	 * So we need to unref this one to avoid leaking */
+	bt_conn_unref(conn);
+
+	LOG_INF("Connection creation initiated successfully");
 }
 
 static void scan_connecting_error(struct bt_scan_device_info *device_info)
@@ -377,66 +468,84 @@ static void try_add_address_filter(const struct bt_bond_info *info, void *user_d
 	*filter_mode |= BT_SCAN_ADDR_FILTER;
 }
 
+/* Helper structure for UUID search */
+struct uuid_search_context {
+	bool found;
+	const struct bt_uuid *target_uuid;
+};
+
+/* Callback for bt_data_parse to search for specific UUID */
+static bool uuid_search_cb(struct bt_data *data, void *user_data)
+{
+	struct uuid_search_context *ctx = (struct uuid_search_context *)user_data;
+
+	if (data->type == BT_DATA_UUID16_ALL || data->type == BT_DATA_UUID16_SOME) {
+		/* Parse 16-bit UUIDs */
+		if (ctx->target_uuid->type == BT_UUID_TYPE_16) {
+			struct bt_uuid_16 *target = (struct bt_uuid_16 *)ctx->target_uuid;
+			for (size_t i = 0; i < data->data_len; i += 2) {
+				uint16_t uuid_val = sys_get_le16(&data->data[i]);
+				if (uuid_val == target->val) {
+					ctx->found = true;
+					return false; /* Stop parsing */
+				}
+			}
+		}
+	} else if (data->type == BT_DATA_UUID128_ALL || data->type == BT_DATA_UUID128_SOME) {
+		/* Parse 128-bit UUIDs */
+		if (ctx->target_uuid->type == BT_UUID_TYPE_128) {
+			struct bt_uuid_128 *target = (struct bt_uuid_128 *)ctx->target_uuid;
+			for (size_t i = 0; i < data->data_len; i += 16) {
+				if (memcmp(&data->data[i], target->val, 16) == 0) {
+					ctx->found = true;
+					return false; /* Stop parsing */
+				}
+			}
+		}
+	}
+
+	return true; /* Continue parsing */
+}
+
 /* Device type detection functions */
 static bool is_nus_device(const struct bt_scan_device_info *device_info)
 {
 	/* Check if NUS service UUID is present in advertising data */
 	struct bt_uuid_128 nus_uuid = BT_UUID_INIT_128(BT_UUID_NUS_VAL);
+	struct uuid_search_context ctx = {
+		.found = false,
+		.target_uuid = (const struct bt_uuid *)&nus_uuid,
+	};
 
-	/* Search for NUS UUID in the advertising data */
 	if (device_info->adv_data) {
-		for (size_t i = 0; i < device_info->adv_data->len;) {
-			uint8_t field_len = device_info->adv_data->data[i];
-			if (field_len == 0) break;
-
-			uint8_t field_type = device_info->adv_data->data[i + 1];
-			if (field_type == BT_DATA_UUID128_ALL || field_type == BT_DATA_UUID128_SOME) {
-				/* Check if this 128-bit UUID matches NUS */
-				if (field_len >= 17) { /* 1 byte type + 16 bytes UUID */
-					if (memcmp(&device_info->adv_data->data[i + 2], nus_uuid.val, 16) == 0) {
-						return true;
-					}
-				}
-			}
-			i += field_len + 1;
-		}
+		struct net_buf_simple_state state;
+		net_buf_simple_save(device_info->adv_data, &state);
+		bt_data_parse(device_info->adv_data, uuid_search_cb, &ctx);
+		net_buf_simple_restore(device_info->adv_data, &state);
 	}
-	return false;
+
+	return ctx.found;
 }
 
 static bool is_hid_device(const struct bt_scan_device_info *device_info)
 {
 	/* Check if HID service UUID is present in advertising data */
 	struct bt_uuid_16 hid_uuid = BT_UUID_INIT_16(BT_UUID_HIDS_VAL);
+	struct uuid_search_context ctx = {
+		.found = false,
+		.target_uuid = (const struct bt_uuid *)&hid_uuid,
+	};
 
-	/* Search for HID UUID in the advertising data */
 	if (device_info->adv_data) {
-		for (size_t i = 0; i < device_info->adv_data->len;) {
-			uint8_t field_len = device_info->adv_data->data[i];
-			if (field_len == 0) break;
-
-			uint8_t field_type = device_info->adv_data->data[i + 1];
-			if (field_type == BT_DATA_UUID16_ALL || field_type == BT_DATA_UUID16_SOME) {
-				/* Check each 16-bit UUID in this field */
-				for (size_t j = 2; j < field_len; j += 2) {
-					uint16_t uuid_val = sys_get_le16(&device_info->adv_data->data[i + j]);
-					if (uuid_val == hid_uuid.val) {
-						return true;
-					}
-				}
-			}
-			i += field_len + 1;
-		}
+		struct net_buf_simple_state state;
+		net_buf_simple_save(device_info->adv_data, &state);
+		bt_data_parse(device_info->adv_data, uuid_search_cb, &ctx);
+		net_buf_simple_restore(device_info->adv_data, &state);
 	}
-	return false;
+
+	return ctx.found;
 }
 
-static void log_device_type(const struct bt_scan_device_info *device_info, const char *addr)
-{
-	/* Since we're scanning for devices with both NUS and HID services,
-	   any device that matches our scan filter is likely a MouthPad device */
-	LOG_INF("MouthPad device detected (NUS + HID): %s", addr);
-}
 
 /* Scan work handler */
 static void scan_work_handler(struct k_work *item)
@@ -488,9 +597,9 @@ int ble_central_init(void)
 		LOG_INF("Found existing bond at startup: %s", addr);
 	}
 
-	/* Initialize scan */
+	/* Initialize scan without auto-connect so we can verify both HID+NUS before connecting */
 	struct bt_scan_init_param scan_init = {
-		.connect_if_match = true,
+		.connect_if_match = false,  /* Disable auto-connect, we'll connect manually after verification */
 	};
 
 	bt_scan_init(&scan_init);
@@ -550,6 +659,8 @@ int ble_central_start_scan(void)
 		LOG_INF("Enabling HID+NUS UUID filter (no bonded devices - will pair with first MouthPad found)");
 	}
 
+	/* Enable filters with match_all=false (OR logic) so we get callbacks for devices with HID or NUS
+	 * We'll manually verify both UUIDs are present in scan_filter_match callback */
 	err = bt_scan_filter_enable(enable_filters, false);
 	if (err) {
 		LOG_ERR("Filters cannot be turned on (err %d)", err);
