@@ -20,6 +20,7 @@
 #include <bluetooth/services/hogp.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/byteorder.h>
 
 LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_INF);
 
@@ -379,18 +380,55 @@ static void try_add_address_filter(const struct bt_bond_info *info, void *user_d
 /* Device type detection functions */
 static bool is_nus_device(const struct bt_scan_device_info *device_info)
 {
-	/* Since we're scanning without UUID filters, we'll assume any device that matches
-	   our scan filter has the services we're looking for. The scan filter system
-	   handles the UUID matching for us. */
-	return true;
+	/* Check if NUS service UUID is present in advertising data */
+	struct bt_uuid_128 nus_uuid = BT_UUID_INIT_128(BT_UUID_NUS_VAL);
+
+	/* Search for NUS UUID in the advertising data */
+	if (device_info->adv_data) {
+		for (size_t i = 0; i < device_info->adv_data->len;) {
+			uint8_t field_len = device_info->adv_data->data[i];
+			if (field_len == 0) break;
+
+			uint8_t field_type = device_info->adv_data->data[i + 1];
+			if (field_type == BT_DATA_UUID128_ALL || field_type == BT_DATA_UUID128_SOME) {
+				/* Check if this 128-bit UUID matches NUS */
+				if (field_len >= 17) { /* 1 byte type + 16 bytes UUID */
+					if (memcmp(&device_info->adv_data->data[i + 2], nus_uuid.val, 16) == 0) {
+						return true;
+					}
+				}
+			}
+			i += field_len + 1;
+		}
+	}
+	return false;
 }
 
 static bool is_hid_device(const struct bt_scan_device_info *device_info)
 {
-	/* Since we're scanning without UUID filters, we'll assume any device that matches
-	   our scan filter has the services we're looking for. The scan filter system
-	   handles the UUID matching for us. */
-	return true;
+	/* Check if HID service UUID is present in advertising data */
+	struct bt_uuid_16 hid_uuid = BT_UUID_INIT_16(BT_UUID_HIDS_VAL);
+
+	/* Search for HID UUID in the advertising data */
+	if (device_info->adv_data) {
+		for (size_t i = 0; i < device_info->adv_data->len;) {
+			uint8_t field_len = device_info->adv_data->data[i];
+			if (field_len == 0) break;
+
+			uint8_t field_type = device_info->adv_data->data[i + 1];
+			if (field_type == BT_DATA_UUID16_ALL || field_type == BT_DATA_UUID16_SOME) {
+				/* Check each 16-bit UUID in this field */
+				for (size_t j = 2; j < field_len; j += 2) {
+					uint16_t uuid_val = sys_get_le16(&device_info->adv_data->data[i + j]);
+					if (uuid_val == hid_uuid.val) {
+						return true;
+					}
+				}
+			}
+			i += field_len + 1;
+		}
+	}
+	return false;
 }
 
 static void log_device_type(const struct bt_scan_device_info *device_info, const char *addr)
@@ -483,10 +521,16 @@ int ble_central_start_scan(void)
 	has_bonded_device = false;
 	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
 
-	/* Add UUID filter for HID service (like working sample) */
+	/* Add UUID filters for both HID and NUS services (MouthPad has both) */
 	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_HIDS);
 	if (err) {
 		LOG_ERR("Cannot add HID UUID scan filter (err %d)", err);
+		return err;
+	}
+
+	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_NUS_SERVICE);
+	if (err) {
+		LOG_ERR("Cannot add NUS UUID scan filter (err %d)", err);
 		return err;
 	}
 
@@ -501,9 +545,9 @@ int ble_central_start_scan(void)
 		enable_filters |= filter_mode;
 		char addr[BT_ADDR_LE_STR_LEN];
 		bt_addr_le_to_str(&bonded_device_addr, addr, sizeof(addr));
-		LOG_INF("Enabling HID UUID + address filter for bonded device: %s", addr);
+		LOG_INF("Enabling HID+NUS UUID + address filter for bonded device: %s", addr);
 	} else {
-		LOG_INF("Enabling HID UUID filter (no bonded devices - will pair with first MouthPad found)");
+		LOG_INF("Enabling HID+NUS UUID filter (no bonded devices - will pair with first MouthPad found)");
 	}
 
 	err = bt_scan_filter_enable(enable_filters, false);
