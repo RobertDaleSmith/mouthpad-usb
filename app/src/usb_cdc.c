@@ -11,7 +11,6 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/usb/usb_device.h>
 #include <zephyr/drivers/uart.h>
 #include "MouthpadUsb.pb.h"
 #include "pb_encode.h"
@@ -233,19 +232,20 @@ static void uart_work_handler(struct k_work *item)
 int usb_cdc_init(void)
 {
 	LOG_INF("USB CDC: Starting CDC initialization");
-	
-	/* Get CDC ACM device */
-	cdc_acm_dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
+
+	/* Get CDC0 device (BLE NUS bridge port) from device tree */
+	cdc_acm_dev = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
 	if (!device_is_ready(cdc_acm_dev)) {
 		LOG_ERR("CDC ACM device not ready");
 		return -ENODEV;
 	}
-	
+
 	/* Initialize work queue for async message sending */
 	k_work_init(&usb_cdc_async_work, usb_cdc_async_work_handler);
-	
+
 	/* Note: USB subsystem will be initialized by USB HID later */
-	LOG_INF("USB CDC: Device ready: %s", cdc_acm_dev->name);
+	/* CDC1 (cdc_acm_uart1) is used for console/logs */
+	LOG_INF("USB CDC: CDC0 ready: %s (BLE NUS bridge)", cdc_acm_dev->name);
 	LOG_INF("USB CDC: Initialization successful");
 	return 0;
 }

@@ -6,7 +6,7 @@
  */
 
 /** @file
- *  @brief MouthPad USB Bridge - Main Application
+ *  @brief MouthPad^USB - Main Application
  */
 
 #include <zephyr/sys/printk.h>
@@ -24,7 +24,7 @@ int main(void)
 {
 	int err;
 
-	LOG_INF("=== MouthPad USB Bridge Starting ===");
+	LOG_INF("=== MouthPad^USB Starting ===");
 
 	/* Initialize USB CDC */
 	LOG_INF("Initializing USB CDC...");

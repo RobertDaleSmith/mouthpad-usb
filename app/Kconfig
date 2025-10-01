@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
+rsource "Kconfig.sample_usbd"
+
 source "Kconfig.zephyr"
 
 config SETTINGS

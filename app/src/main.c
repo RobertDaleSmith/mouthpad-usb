@@ -111,7 +111,16 @@ int main(void)
 
 	LOG_INF("=== MouthPad^USB Starting ===");
 
-	/* Initialize USB CDC */
+	/* Initialize USB device stack (HID + CDC) */
+	LOG_INF("Initializing USB device stack...");
+	err = usb_init();
+	if (err != 0) {
+		LOG_ERR("usb_init failed (err %d)", err);
+		return 0;
+	}
+	LOG_INF("USB device stack initialized successfully");
+
+	/* Initialize USB CDC (get CDC0 device reference) */
 	LOG_INF("Initializing USB CDC...");
 	err = usb_cdc_init();
 	if (err != 0) {
@@ -120,14 +129,23 @@ int main(void)
 	}
 	LOG_INF("USB CDC initialized successfully");
 
-	/* Initialize USB HID */
-	LOG_INF("Initializing USB HID...");
-	err = usb_init();
-	if (err != 0) {
-		LOG_ERR("usb_init failed (err %d)", err);
-		return 0;
-	}
-	LOG_INF("USB HID initialized successfully");
+	/* Debug: Log CDC device info */
+	const struct device *cdc0 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
+	const struct device *cdc1 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart1));
+
+	/* Use printk directly to test console output */
+	printk("\n\n=== MouthPad^USB CDC TEST ===\n");
+	printk("CDC0: %s (ready=%d)\n", cdc0->name, device_is_ready(cdc0));
+	printk("CDC1: %s (ready=%d)\n", cdc1->name, device_is_ready(cdc1));
+	printk("Console output on CDC1: %s\n", cdc1->name);
+	printk("If you see this, console is working!\n");
+	printk("================================\n\n");
+
+	LOG_INF("=== CDC DEVICE INITIALIZATION ===");
+	LOG_INF("CDC0: %s (ready=%d)", cdc0->name, device_is_ready(cdc0));
+	LOG_INF("CDC1: %s (ready=%d)", cdc1->name, device_is_ready(cdc1));
+	LOG_INF("Console output should appear on CDC1: %s", cdc1->name);
+	LOG_INF("================================");
 
 	/* Initialize OLED Display */
 	LOG_INF("Initializing OLED Display...");

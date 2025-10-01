@@ -14,10 +14,10 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/util.h>
-#include <zephyr/usb/usb_device.h>
 #include <zephyr/usb/usbd.h>
-#include <zephyr/usb/class/usb_hid.h>
+#include <zephyr/usb/class/usbd_hid.h>
 #include <zephyr/logging/log.h>
+#include "sample_usbd.h"
 
 LOG_MODULE_REGISTER(usb_mouse, LOG_LEVEL_INF);
 
@@ -34,7 +34,8 @@ static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
 const struct device *hid_dev;
 struct k_sem ep_write_sem;
 
-/* USB device status tracking */
+/* USB device context for new stack */
+static struct usbd_context *usbd_ctx;
 
 /* ============================================================================
  * HID DESCRIPTOR
@@ -63,8 +64,6 @@ static const uint8_t hid_report_desc[] = {
     0x06, 0x09, 0xE9, 0x81, 0x06, 0x0A, 0x25, 0x02, 0x81, 0x06, 0x0A, 0x24,
     0x02, 0x81, 0x06, 0xC0
 };
-static enum usb_dc_status_code usb_status;
-
 
 /* ============================================================================
  * CONSTANTS AND ENUMERATIONS
@@ -92,68 +91,110 @@ enum mouse_report2_idx {
  * ============================================================================ */
 
 /**
- * @brief USB device status change callback
- * 
- * @param status New USB device status
- * @param param Additional status parameters (unused)
+ * @brief USB device message callback
+ *
+ * Handles USB device state changes (VBUS, configuration, etc.)
  */
-static inline void status_cb(enum usb_dc_status_code status, const uint8_t *param)
+static void usb_msg_cb(struct usbd_context *const ctx,
+		       const struct usbd_msg *const msg)
 {
-	usb_status = status;
-}
+	LOG_DBG("USBD message: %s", usbd_msg_type_string(msg->type));
 
-/**
- * @brief Request USB wakeup if device is suspended
- * 
- * Called when input activity is detected while USB is suspended
- */
-static ALWAYS_INLINE void rwup_if_suspended(void)
-{
-	if (IS_ENABLED(CONFIG_USB_DEVICE_REMOTE_WAKEUP)) {
-		if (usb_status == USB_DC_SUSPEND) {
-			usb_wakeup_request();
-			return;
+	if (msg->type == USBD_MSG_CONFIGURATION) {
+		LOG_INF("USB Configuration value %d", msg->status);
+	}
+
+	if (usbd_can_detect_vbus(ctx)) {
+		if (msg->type == USBD_MSG_VBUS_READY) {
+			if (usbd_enable(ctx)) {
+				LOG_ERR("Failed to enable device support");
+			}
+		}
+
+		if (msg->type == USBD_MSG_VBUS_REMOVED) {
+			if (usbd_disable(ctx)) {
+				LOG_ERR("Failed to disable device support");
+			}
 		}
 	}
 }
 
-/* USB HID output report callback function pointer (for future expansion) */
-
 /**
- * @brief USB HID interrupt IN endpoint ready callback
- * 
- * Called when the USB HID interrupt endpoint is ready to accept data.
- * Signals the semaphore to allow BLE module to send reports.
- * 
- * @param dev USB HID device (unused)
+ * @brief HID interface ready callback
  */
-static void int_in_ready_cb(const struct device *dev)
+static void hid_iface_ready(const struct device *dev, const bool ready)
 {
-	ARG_UNUSED(dev);
-	k_sem_give(&ep_write_sem);
+	LOG_INF("HID device %s interface is %s",
+		dev->name, ready ? "ready" : "not ready");
+	if (ready) {
+		k_sem_give(&ep_write_sem);
+	}
 }
 
 /**
- * @brief USB HID interrupt OUT endpoint ready callback
- * 
- * Called when the USB HID receives output reports from the host.
- * This captures mouse button reports that we need for buzzer feedback.
- * 
- * @param dev USB HID device (unused)
+ * @brief HID get report callback
  */
-static void int_out_ready_cb(const struct device *dev)
+static int hid_get_report(const struct device *dev, const uint8_t type,
+			  const uint8_t id, const uint16_t len, uint8_t *const buf)
 {
-	ARG_UNUSED(dev);
-	LOG_INF("USB HID int_out_ready callback triggered");
-	
-	// TODO: Get the actual output report data
-	// This callback indicates output data is available, but we need to read it
+	LOG_DBG("Get report: type %u id %u len %u", type, id, len);
+	return 0;
 }
 
-/* USB HID operations structure */
-static const struct hid_ops ops = {
-	.int_in_ready = int_in_ready_cb,
-	.int_out_ready = int_out_ready_cb,
+/**
+ * @brief HID set report callback
+ */
+static int hid_set_report(const struct device *dev, const uint8_t type,
+			  const uint8_t id, const uint16_t len, const uint8_t *const buf)
+{
+	LOG_DBG("Set report: type %u id %u len %u", type, id, len);
+	return 0;
+}
+
+/**
+ * @brief HID set idle callback
+ */
+static void hid_set_idle(const struct device *dev, const uint8_t id, const uint32_t duration)
+{
+	LOG_DBG("Set Idle %u to %u", id, duration);
+}
+
+/**
+ * @brief HID get idle callback
+ */
+static uint32_t hid_get_idle(const struct device *dev, const uint8_t id)
+{
+	LOG_DBG("Get Idle %u", id);
+	return 0;
+}
+
+/**
+ * @brief HID set protocol callback
+ */
+static void hid_set_protocol(const struct device *dev, const uint8_t proto)
+{
+	LOG_INF("Protocol changed to %s",
+		proto == 0U ? "Boot Protocol" : "Report Protocol");
+}
+
+/**
+ * @brief HID output report callback
+ */
+static void hid_output_report(const struct device *dev, const uint16_t len,
+			      const uint8_t *const buf)
+{
+	LOG_HEXDUMP_DBG(buf, len, "HID output report");
+}
+
+/* USB HID operations structure for new stack */
+static struct hid_device_ops hid_ops = {
+	.iface_ready = hid_iface_ready,
+	.get_report = hid_get_report,
+	.set_report = hid_set_report,
+	.set_idle = hid_set_idle,
+	.get_idle = hid_get_idle,
+	.set_protocol = hid_set_protocol,
+	.output_report = hid_output_report,
 };
 
 /* ============================================================================
@@ -191,74 +232,39 @@ int usb_init(void)
 	LOG_INF("No blue LED available for status indication");
 #endif
 
-	/* Get USB HID device */
-#if defined(CONFIG_USB_DEVICE_STACK_NEXT)
+	/* Get USB HID device from device tree */
 	hid_dev = DEVICE_DT_GET_ONE(zephyr_hid_device);
-#else
-	/* Try different possible HID device names */
-	hid_dev = device_get_binding("HID_0");
-	if (hid_dev == NULL) {
-		hid_dev = device_get_binding("HID0");
-	}
-	if (hid_dev == NULL) {
-		hid_dev = device_get_binding("HID_1");
-	}
-	if (hid_dev == NULL) {
-		hid_dev = device_get_binding("HID");
-	}
-	if (hid_dev == NULL) {
-		/* Try to get any HID device using device tree */
-		hid_dev = DEVICE_DT_GET_ANY(zephyr_hid_device);
-	}
-	if (hid_dev == NULL) {
-		LOG_ERR("Cannot get USB HID Device - no HID device found");
-		LOG_WRN("Trying to initialize USB HID without specific device binding");
-		/* Try to initialize USB HID without device binding */
-		hid_dev = NULL;
-	}
-
-	LOG_INF("Found USB HID device: %s", hid_dev ? hid_dev->name : "NULL (using fallback)");
-#endif
-	if (hid_dev == NULL) {
-		LOG_ERR("Cannot get USB HID Device - no HID device found");
+	if (!device_is_ready(hid_dev)) {
+		LOG_ERR("HID Device is not ready");
 		return -ENODEV;
 	}
 
 	LOG_INF("Found USB HID device: %s", hid_dev->name);
 
-	LOG_INF("Registering HID device with descriptor...");
 	/* Register HID device with descriptor and callbacks */
-	usb_hid_register_device(hid_dev,
-				hid_report_desc, sizeof(hid_report_desc),
-				&ops);
-	LOG_INF("HID device registered successfully");
-	k_sleep(K_MSEC(10)); // Small delay to ensure registration completes
-
-	LOG_INF("Initializing USB HID device...");
-	int init_ret = usb_hid_init(hid_dev);
-	if (init_ret != 0) {
-		LOG_ERR("Failed to initialize USB HID device (err %d)", init_ret);
-		return init_ret;
-	}
-	LOG_INF("USB HID device initialized");
-	k_sleep(K_MSEC(10)); // Small delay to ensure initialization completes
-
-	LOG_INF("Enabling USB device stack...");
-	/* Enable USB device stack only if not already enabled by CDC */
-#if defined(CONFIG_USB_DEVICE_STACK_NEXT)
-	ret = enable_usb_device_next();
-#else
-	/* Check if USB is already enabled by CDC */
-	if (usb_status == USB_DC_UNKNOWN) {
-		ret = usb_enable(status_cb);
-	} else {
-		LOG_INF("USB stack already enabled by CDC, skipping HID enable");
-		ret = 0;
-	}
-#endif
+	ret = hid_device_register(hid_dev,
+				  hid_report_desc, sizeof(hid_report_desc),
+				  &hid_ops);
 	if (ret != 0) {
-		LOG_ERR("Failed to enable USB");
+		LOG_ERR("Failed to register HID Device, %d", ret);
 		return ret;
+	}
+	LOG_INF("HID device registered successfully");
+
+	/* Initialize USB device context */
+	usbd_ctx = sample_usbd_init_device(usb_msg_cb);
+	if (usbd_ctx == NULL) {
+		LOG_ERR("Failed to initialize USB device");
+		return -ENODEV;
+	}
+
+	/* Enable USB device stack if VBUS detection not available */
+	if (!usbd_can_detect_vbus(usbd_ctx)) {
+		ret = usbd_enable(usbd_ctx);
+		if (ret) {
+			LOG_ERR("Failed to enable USB device support");
+			return ret;
+		}
 	}
 	LOG_INF("USB device stack enabled successfully");
 
@@ -288,16 +294,8 @@ int usb_hid_send_report(const uint8_t *data, uint16_t len)
 	
 	LOG_DBG("Sending HID report: %d bytes", len);
 	
-	/* Wait for endpoint to be ready */
-	ret = k_sem_take(&ep_write_sem, K_MSEC(100));
-	if (ret != 0) {
-		LOG_ERR("USB HID endpoint not ready (err %d)", ret);
-		return ret;
-	}
-	
-	LOG_DBG("USB HID endpoint ready, sending report...");
-	/* Send the HID report */
-	ret = hid_int_ep_write(hid_dev, data, len, NULL);
+	/* Send the HID report using new stack API */
+	ret = hid_device_submit_report(hid_dev, len, data);
 	if (ret != 0) {
 		LOG_ERR("Failed to send HID report (err %d)", ret);
 		return ret;

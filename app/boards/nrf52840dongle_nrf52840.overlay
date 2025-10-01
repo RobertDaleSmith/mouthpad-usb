@@ -76,11 +76,22 @@
 
 / {
 	chosen {
-		nordic,nus-uart = &board_cdc_acm_uart;
+		nordic,nus-uart = &cdc_acm_uart0;  /* BLE NUS bridge uses CDC0 */
+		zephyr,console = &cdc_acm_uart1;   /* Console/logs on CDC1 */
+		zephyr,shell-uart = &cdc_acm_uart1;
 	};
 
 	aliases {
 		buzzer-pwm = &pwm1;
+	};
+
+	/* HID device node */
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "HID0";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
 	};
 
 	/* Optional buzzer device */
@@ -91,9 +102,21 @@
 	};
 };
 
+/* Disable board's default CDC node */
+&board_cdc_acm_uart {
+	status = "disabled";
+};
+
+/* Add dual CDC ACM nodes */
 &zephyr_udc0 {
-	board_cdc_acm_uart: board_cdc_acm_uart {
+	cdc_acm_uart0: cdc_acm_uart0 {
 		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
 	};
 };
 

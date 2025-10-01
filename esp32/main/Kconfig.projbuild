@@ -4,7 +4,7 @@ menu "MouthPad Configuration"
         prompt "Board Type"
         default MOUTHPAD_BOARD_XIAO_ESP32S3
         help
-            Select the target board for MouthPad USB.
+            Select the target board for MouthPad^USB.
 
         config MOUTHPAD_BOARD_XIAO_ESP32S3
             bool "XIAO ESP32-S3"

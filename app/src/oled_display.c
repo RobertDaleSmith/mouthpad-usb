@@ -571,8 +571,8 @@ int oled_display_splash_screen(uint32_t duration_ms)
     uint16_t line_spacing = 16;
     uint16_t y_pos = 0;
     
-    /* Line 1: MouthPad USB title */
-    cfb_print(display_dev, "MouthPad USB", 0, y_pos);
+    /* Line 1: MouthPad^USB title */
+    cfb_print(display_dev, "MouthPad^USB", 0, y_pos);
     y_pos += line_spacing;
     
     /* Line 2: Scanning status */

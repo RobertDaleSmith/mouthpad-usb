@@ -22,6 +22,7 @@ target_include_directories(app PRIVATE
     src/ble_bas.c
     src/usb_cdc.c
     src/usb_hid.c
+    src/sample_usbd_init.c
     src/oled_display.c
     src/buzzer.c
     src/leds.c

@@ -137,6 +137,9 @@ static void input_cb(struct input_event *evt, void *user_data)
 
 	ARG_UNUSED(user_data);
 
+	LOG_INF("Input event received: code=%u value=%d type=%d",
+		evt->code, evt->value, evt->type);
+
 	kb_evt.code = evt->code;
 	kb_evt.value = evt->value;
 	if (k_msgq_put(&kb_msgq, &kb_evt, K_NO_WAIT) != 0) {
@@ -298,16 +301,7 @@ int main(void)
 		/* doc device enable end */
 	}
 
-	LOG_INF("HID keyboard sample is initialized");
-
-	/* Get and log CDC devices */
-	const struct device *cdc0 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
-	const struct device *cdc1 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart1));
-	LOG_INF("=== CDC DEVICE INITIALIZATION ===");
-	LOG_INF("CDC0: %s (ready=%d, addr=%p)", cdc0->name, device_is_ready(cdc0), cdc0);
-	LOG_INF("CDC1: %s (ready=%d, addr=%p)", cdc1->name, device_is_ready(cdc1), cdc1);
-	LOG_INF("Console should appear on CDC1: %s", cdc1->name);
-	LOG_INF("================================");
+	LOG_INF("MouthPad^USB initialized - dual CDC + HID ready");
 
 	while (true) {
 		struct kb_event kb_evt;

@@ -24,8 +24,8 @@
 
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/usb/usb_device.h>
-#include <zephyr/usb/class/usb_hid.h>
+#include <zephyr/usb/usbd.h>
+#include <zephyr/usb/class/usbd_hid.h>
 
 #include "ble_hid.h"
 
@@ -169,23 +169,18 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 		for (uint8_t i = 0; i < size; i++) {
 			report_with_id[i + 1] = data[i];
 		}
-		
-		int ret = hid_int_ep_write(hid_dev, report_with_id, size + 1, NULL);
+
+		int ret = hid_device_submit_report(hid_dev, size + 1, report_with_id);
 		if (ret) {
 			printk("HID write error, %d", ret);
 		} else {
-			// Wait for endpoint to be ready but with timeout to avoid blocking
-			ret = k_sem_take(&ep_write_sem, K_MSEC(50));
-			if (ret != 0) {
-				printk("USB HID endpoint timeout in BLE path");
-			}
 			// printk("Report %u sent directly to USB", report_id);
-			
+
 			/* Trigger data activity callback for LED indication */
 			if (data_received_callback) {
 				data_received_callback(data, size);
 			}
-			
+
 			/* Also directly trigger transport layer data activity */
 			extern void ble_transport_mark_data_activity(void);
 			ble_transport_mark_data_activity();
@@ -241,19 +236,13 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	
 	/* Set wheel to 0 for now (BLE boot mouse doesn't have wheel in standard format) */
 	report_with_id[2] = 0x00;  // Wheel byte
-	
+
 	/* Send directly to USB for zero latency */
-	int ret = hid_int_ep_write(hid_dev, report_with_id, 3, NULL);  // Always 3 bytes: Report ID + Buttons + Wheel
+	int ret = hid_device_submit_report(hid_dev, 3, report_with_id);  // Always 3 bytes: Report ID + Buttons + Wheel
 	if (ret) {
 		printk("HID write error, %d", ret);
 	} else {
-		// Wait for endpoint to be ready but with timeout to avoid blocking
-		ret = k_sem_take(&ep_write_sem, K_MSEC(50));
-		if (ret != 0) {
-			printk("USB HID endpoint timeout in boot mouse path");
-		} else {
-			printk("Boot mouse report sent directly to USB");
-		}
+		printk("Boot mouse report sent directly to USB");
 	}
 	
 	return BT_GATT_ITER_CONTINUE;

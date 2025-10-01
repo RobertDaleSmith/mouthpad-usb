@@ -53,10 +53,12 @@
 
 / {
 	chosen {
-		nordic,nus-uart = &board_cdc_acm_uart;
+		nordic,nus-uart = &cdc_acm_uart0;  /* BLE NUS bridge uses CDC0 */
+		zephyr,console = &cdc_acm_uart1;   /* Console/logs on CDC1 */
+		zephyr,shell-uart = &cdc_acm_uart1;
 		zephyr,led-strip = &neopixel;  /* Critical: Set chosen led-strip for timing calculations */
 	};
-	
+
 	/* Ensure CPU frequency is properly defined for WS2812 timing calculations */
 	cpus {
 		cpu@0 {
@@ -70,7 +72,16 @@
 		led0 = &neopixel;  /* Make led0 alias point to neopixel for HAS_NEOPIXEL detection */
 		sw0 = &button0;    /* Use existing Feather user button */
 	};
-	
+
+	/* HID device node */
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "HID0";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
 	buzzer {
 		compatible = "pwm-buzzer";
 		pwms = <&pwm1 0 1000000 PWM_POLARITY_NORMAL>; /* 1MHz base period */
@@ -80,9 +91,21 @@
 	/* NeoPixel powered directly from 3.3V - no power enable needed */
 };
 
+/* Disable board's default CDC node if it exists */
+&board_cdc_acm_uart {
+	status = "disabled";
+};
+
+/* Add dual CDC ACM nodes */
 &zephyr_udc0 {
-	board_cdc_acm_uart: board_cdc_acm_uart {
+	cdc_acm_uart0: cdc_acm_uart0 {
 		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
 	};
 };
 
