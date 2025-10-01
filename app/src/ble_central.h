@@ -40,4 +40,7 @@ const char *ble_central_get_device_type_string(const struct bt_scan_device_info 
 /* Background scanning for RSSI updates during connections */
 int ble_central_start_background_scan_for_rssi(void);
 
+/* Bonding management */
+void ble_central_clear_bonded_device(void);
+
 #endif /* BLE_CENTRAL_H */

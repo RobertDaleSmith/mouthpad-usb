@@ -706,13 +706,17 @@ void ble_transport_disconnect(void)
 void ble_transport_clear_bonds(void)
 {
 	LOG_INF("Clearing all BLE bonds...");
-	
+
 	/* Clear all bonds */
 	int err = bt_unpair(BT_ID_DEFAULT, NULL);
 	if (err) {
 		LOG_ERR("Failed to clear bonds (err %d)", err);
 		return;
 	}
-	
+
+	/* Clear bonded device tracking in ble_central */
+	extern void ble_central_clear_bonded_device(void);
+	ble_central_clear_bonded_device();
+
 	LOG_INF("All BLE bonds cleared successfully");
 }

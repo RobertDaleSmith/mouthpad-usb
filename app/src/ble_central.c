@@ -29,6 +29,10 @@ static struct k_work scan_work;
 static struct k_work_delayable scan_indicator_work;
 static bool scanning_active = false;
 
+/* Bonded device tracking */
+static bt_addr_le_t bonded_device_addr;
+static bool has_bonded_device = false;
+
 /* Device type detection */
 static bool is_nus_device(const struct bt_scan_device_info *device_info);
 static bool is_hid_device(const struct bt_scan_device_info *device_info);
@@ -183,7 +187,17 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 static void scan_indicator_handler(struct k_work *work)
 {
 	if (scanning_active) {
-		LOG_INF("Scanning for MouthPad...");
+		if (has_bonded_device) {
+			/* Format address without type suffix like "(random)" */
+			char addr_str[18]; // "XX:XX:XX:XX:XX:XX\0"
+			snprintf(addr_str, sizeof(addr_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+				bonded_device_addr.a.val[5], bonded_device_addr.a.val[4],
+				bonded_device_addr.a.val[3], bonded_device_addr.a.val[2],
+				bonded_device_addr.a.val[1], bonded_device_addr.a.val[0]);
+			LOG_INF("Scanning for MouthPad (%s)...", addr_str);
+		} else {
+			LOG_INF("Scanning for MouthPad...");
+		}
 		/* Re-schedule for next message */
 		k_work_schedule(&scan_indicator_work, K_SECONDS(1));
 	}
@@ -197,6 +211,14 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 	char addr[BT_ADDR_LE_STR_LEN];
 
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
+
+	/* If we have a bonded device, reject all other devices */
+	if (has_bonded_device) {
+		if (bt_addr_le_cmp(device_info->recv_info->addr, &bonded_device_addr) != 0) {
+			LOG_DBG("Rejecting non-bonded device: %s", addr);
+			return;
+		}
+	}
 
 	/* Log device type and connection status */
 	log_device_type(device_info, addr);
@@ -297,6 +319,13 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	LOG_INF("Pairing completed: %s, bonded: %d", addr, bonded);
+
+	/* If bonded, store this as our bonded device */
+	if (bonded) {
+		bt_addr_le_copy(&bonded_device_addr, bt_conn_get_dst(conn));
+		has_bonded_device = true;
+		LOG_INF("Device bonded - will only reconnect to this MouthPad: %s", addr);
+	}
 }
 
 static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
@@ -307,6 +336,18 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 
 	LOG_WRN("Pairing failed conn: %s, reason %d %s", addr, reason,
 		bt_security_err_to_str(reason));
+}
+
+/* Helper to check and store bonded device */
+static void check_bonded_device(const struct bt_bond_info *info, void *user_data)
+{
+	/* Store the bonded device address (there should only be one with MAX_PAIRED=1) */
+	bt_addr_le_copy(&bonded_device_addr, &info->addr);
+	has_bonded_device = true;
+
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(&info->addr, addr, sizeof(addr));
+	LOG_INF("Found bonded device: %s", addr);
 }
 
 /* Address filter helper function */
@@ -400,6 +441,15 @@ int ble_central_init(void)
 	}
 	LOG_INF("Authorization info callbacks registered");
 
+	/* Check if we have any bonded devices on startup */
+	has_bonded_device = false;
+	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
+	if (has_bonded_device) {
+		char addr[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(&bonded_device_addr, addr, sizeof(addr));
+		LOG_INF("Found existing bond at startup: %s", addr);
+	}
+
 	/* Initialize scan */
 	struct bt_scan_init_param scan_init = {
 		.connect_if_match = true,
@@ -429,6 +479,10 @@ int ble_central_start_scan(void)
 
 	bt_scan_filter_remove_all();
 
+	/* Check if we have a bonded device */
+	has_bonded_device = false;
+	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
+
 	/* Add UUID filter for HID service (like working sample) */
 	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_HIDS);
 	if (err) {
@@ -436,15 +490,20 @@ int ble_central_start_scan(void)
 		return err;
 	}
 
-	bt_foreach_bond(BT_ID_DEFAULT, try_add_address_filter, &filter_mode);
+	/* If we have a bonded device, only scan for that specific address */
+	if (has_bonded_device) {
+		bt_foreach_bond(BT_ID_DEFAULT, try_add_address_filter, &filter_mode);
+	}
 
 	/* Always enable UUID filter, optionally add address filters */
 	uint8_t enable_filters = BT_SCAN_UUID_FILTER;
 	if (filter_mode != 0) {
 		enable_filters |= filter_mode;
-		LOG_INF("Enabling HID UUID filter + address filters for bonded devices");
+		char addr[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(&bonded_device_addr, addr, sizeof(addr));
+		LOG_INF("Enabling HID UUID + address filter for bonded device: %s", addr);
 	} else {
-		LOG_INF("Enabling HID UUID filter (no bonded devices)");
+		LOG_INF("Enabling HID UUID filter (no bonded devices - will pair with first MouthPad found)");
 	}
 
 	err = bt_scan_filter_enable(enable_filters, false);
@@ -700,9 +759,26 @@ static void scan_no_match(struct bt_scan_device_info *device_info, bool connecta
 	if (extract_device_name_from_scan(device_info, device_name, sizeof(device_name)) == 0) {
 		/* Successfully extracted name, store it */
 		store_device_name_for_addr(device_info->recv_info->addr, device_name);
-		
+
 		char addr_str[BT_ADDR_LE_STR_LEN];
 		bt_addr_le_to_str(device_info->recv_info->addr, addr_str, sizeof(addr_str));
-		LOG_INF("*** FOUND DEVICE NAME '%s' from %s ***", device_name, addr_str);
+		// LOG_INF("*** FOUND DEVICE NAME '%s' from %s ***", device_name, addr_str);
 	}
+}
+
+/* Clear bonded device tracking (called when bonds are cleared) */
+void ble_central_clear_bonded_device(void)
+{
+	if (has_bonded_device) {
+		char addr_str[18];
+		snprintf(addr_str, sizeof(addr_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+			bonded_device_addr.a.val[5], bonded_device_addr.a.val[4],
+			bonded_device_addr.a.val[3], bonded_device_addr.a.val[2],
+			bonded_device_addr.a.val[1], bonded_device_addr.a.val[0]);
+		LOG_INF("Clearing bonded device tracking: %s", addr_str);
+	}
+
+	has_bonded_device = false;
+	memset(&bonded_device_addr, 0, sizeof(bonded_device_addr));
+	LOG_INF("Bonded device tracking cleared - will pair with any MouthPad");
 }
