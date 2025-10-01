@@ -9,7 +9,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/sys/printk.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/uart.h>
 #include "MouthpadUsb.pb.h"
@@ -130,11 +129,8 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		buf->len += evt->data.rx.len;
 
 		// Debug: Print received UART data
-		printk("*** UART RX: Received %d bytes ***\n", evt->data.rx.len);
-		for (int i = 0; i < evt->data.rx.len; i++) {
-			printk("%c", evt->data.rx.buf[i]);
-		}
-		printk("***\n");
+		LOG_DBG("UART RX: Received %d bytes", evt->data.rx.len);
+		LOG_HEXDUMP_DBG(evt->data.rx.buf, evt->data.rx.len, "UART RX data:");
 
 		if (disable_req) {
 			return;

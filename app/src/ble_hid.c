@@ -9,7 +9,6 @@
 #include <stddef.h>
 #include <errno.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -146,14 +145,14 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 		
 		// Detect left click (bit 0) - press only (0->1 transition)
 		if ((current_buttons & 0x01) && !(last_buttons & 0x01)) {
-			printk("LEFT CLICK DETECTED - buzzing\n");
+			LOG_DBG("LEFT CLICK DETECTED - buzzing");
 			extern void buzzer_click_left(void);
 			buzzer_click_left();
 		}
 		
 		// Detect right click (bit 1) - press only (0->1 transition)  
 		if ((current_buttons & 0x02) && !(last_buttons & 0x02)) {
-			printk("RIGHT CLICK DETECTED - buzzing\n");
+			LOG_DBG("RIGHT CLICK DETECTED - buzzing");
 			extern void buzzer_click_right(void);
 			buzzer_click_right();
 		}
@@ -172,9 +171,9 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 
 		int ret = hid_device_submit_report(hid_dev, size + 1, report_with_id);
 		if (ret) {
-			printk("HID write error, %d", ret);
+			LOG_ERR("HID write error, %d", ret);
 		} else {
-			// printk("Report %u sent directly to USB", report_id);
+			// LOG_DBG("Report %u sent directly to USB", report_id);
 
 			/* Trigger data activity callback for LED indication */
 			if (data_received_callback) {
@@ -201,27 +200,18 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 		return BT_GATT_ITER_STOP;
 	}
 	
-	printk("Boot mouse report: size=%u, data:", size);
-	for (uint8_t i = 0; i < size; i++) {
-		printk(" 0x%02x", data[i]);
-	}
-	printk("\n");
-	
+	LOG_HEXDUMP_DBG(data, size, "Boot mouse report:");
+
 	// DEBUG: Analyze the BLE boot mouse data structure
 	if (size >= 1) {
 		uint8_t buttons = data[0] & 0x07;  // BLE boot mouse uses 3 bits for buttons
-		printk("BLE BOOT MOUSE: buttons=0x%02X (L:%c R:%c M:%c)", 
+		LOG_DBG("BLE BOOT MOUSE: buttons=0x%02X (L:%c R:%c M:%c)%s%s",
 			buttons,
 			(buttons & 0x01) ? '1' : '0',  // Left
 			(buttons & 0x02) ? '1' : '0',  // Right
-			(buttons & 0x04) ? '1' : '0'); // Middle
-		if (size >= 2) {
-			printk(" X=%d", (int8_t)data[1]);
-		}
-		if (size >= 3) {
-			printk(" Y=%d", (int8_t)data[2]);
-		}
-		printk("\n");
+			(buttons & 0x04) ? '1' : '0',  // Middle
+			(size >= 2) ? " X=" : "",
+			(size >= 2) ? (int8_t)data[1] : 0);
 	}
 	
 	/* Forward boot mouse report directly to USB as Report ID 1 */
@@ -240,9 +230,9 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	/* Send directly to USB for zero latency */
 	int ret = hid_device_submit_report(hid_dev, 3, report_with_id);  // Always 3 bytes: Report ID + Buttons + Wheel
 	if (ret) {
-		printk("HID write error, %d", ret);
+		LOG_ERR("HID write error, %d", ret);
 	} else {
-		printk("Boot mouse report sent directly to USB");
+		LOG_DBG("Boot mouse report sent directly to USB");
 	}
 	
 	return BT_GATT_ITER_CONTINUE;
@@ -294,8 +284,8 @@ static void auto_detect_and_switch_mode(void)
 {
 	enum bt_hids_pm current_mode = bt_hogp_pm_get(&hogp);
 	
-	printk("Auto-detecting optimal protocol mode...\n");
-	printk("Current mode: %s\n", 
+	LOG_INF("Auto-detecting optimal protocol mode...");
+	LOG_INF("Current mode: %s",
 	       (current_mode == BT_HIDS_PM_BOOT) ? "BOOT" : "REPORT");
 	
 	/* Check if device supports REPORT mode */
@@ -316,7 +306,7 @@ static void auto_detect_and_switch_mode(void)
 	bool has_boot_support = (hogp.rep_boot.kbd_inp != NULL || 
 	                        hogp.rep_boot.mouse_inp != NULL);
 	
-	printk("Device capabilities: BOOT=%s, REPORT=%s\n",
+	LOG_INF("Device capabilities: BOOT=%s, REPORT=%s",
 	       has_boot_support ? "YES" : "NO",
 	       has_report_support ? "YES" : "NO");
 	
@@ -324,22 +314,22 @@ static void auto_detect_and_switch_mode(void)
 	if (current_mode == BT_HIDS_PM_BOOT) {
 		if (has_report_support) {
 			/* Device supports REPORT mode - switch for better features */
-			printk("Switching to REPORT mode for enhanced functionality\n");
+			LOG_INF("Switching to REPORT mode for enhanced functionality");
 			bt_hogp_pm_update(&hogp, K_SECONDS(5));
 		} else if (has_boot_support) {
 			/* Device only supports BOOT mode */
-			printk("Device only supports BOOT mode - staying in BOOT mode\n");
+			LOG_INF("Device only supports BOOT mode - staying in BOOT mode");
 		} else {
 			/* No HID reports found */
-			printk("Warning: No HID reports found on device\n");
+			LOG_WRN("No HID reports found on device");
 		}
 	} else if (current_mode == BT_HIDS_PM_REPORT) {
 		if (has_report_support) {
 			/* Already in optimal mode */
-			printk("Already in optimal REPORT mode\n");
+			LOG_INF("Already in optimal REPORT mode");
 		} else {
 			/* REPORT mode but no report support - fallback to BOOT */
-			printk("REPORT mode but no report support - switching to BOOT mode\n");
+			LOG_INF("REPORT mode but no report support - switching to BOOT mode");
 			bt_hogp_pm_update(&hogp, K_SECONDS(5));
 		}
 	}
@@ -352,7 +342,7 @@ static void hids_on_ready(struct k_work *work)
 
 	ARG_UNUSED(work);
 
-	printk("HIDS is ready\n");
+	LOG_INF("HIDS is ready");
 
 	/* Auto-detect and switch to optimal protocol mode */
 	auto_detect_and_switch_mode();
@@ -363,7 +353,7 @@ static void hids_on_ready(struct k_work *work)
 		if (rep) {
 			err = bt_hogp_rep_subscribe(&hogp, rep, hogp_notify_cb);
 			if (err) {
-				printk("Subscribe failed, err: %d\n", err);
+				LOG_ERR("Subscribe failed, err: %d", err);
 			}
 		}
 	} while (rep);
@@ -371,25 +361,25 @@ static void hids_on_ready(struct k_work *work)
 	/* Subscribe to boot reports if in boot mode */
 	if (bt_hogp_pm_get(&hogp) == BT_HIDS_PM_BOOT) {
 		if (hogp.rep_boot.kbd_inp) {
-			printk("Subscribe to boot keyboard report\n");
+			LOG_INF("Subscribe to boot keyboard report");
 			err = bt_hogp_rep_subscribe(&hogp,
 							   hogp.rep_boot.kbd_inp,
 							   hogp_boot_kbd_report);
 			if (err) {
-				printk("Subscribe error (%d)\n", err);
+				LOG_ERR("Subscribe error (%d)", err);
 			}
 		}
 		if (hogp.rep_boot.mouse_inp) {
-			printk("Subscribe to boot mouse report\n");
+			LOG_INF("Subscribe to boot mouse report");
 			err = bt_hogp_rep_subscribe(&hogp,
 							   hogp.rep_boot.mouse_inp,
 							   hogp_boot_mouse_report);
 			if (err) {
-				printk("Subscribe error (%d)\n", err);
+				LOG_ERR("Subscribe error (%d)", err);
 			}
 		}
 	} else {
-		printk("In REPORT mode - using report protocol reports only\n");
+		LOG_INF("In REPORT mode - using report protocol reports only");
 	}
 
 	hid_ready = true;
@@ -402,14 +392,14 @@ static void hids_on_ready(struct k_work *work)
 
 static void hogp_prep_fail_cb(struct bt_hogp *hogp, int err)
 {
-	printk("HOGP prepare failed, err: %d\n", err);
+	LOG_ERR("HOGP prepare failed, err: %d", err);
 }
 
 static void hogp_pm_update_cb(struct bt_hogp *hogp)
 {
 	enum bt_hids_pm pm = bt_hogp_pm_get(hogp);
 
-	printk("HOGP PM update: %d\n", pm);
+	LOG_DBG("HOGP PM update: %d", pm);
 }
 
 /* Button handler functions */
@@ -418,7 +408,7 @@ static void button_bootmode(void)
 	enum bt_hids_pm pm = bt_hogp_pm_get(&hogp);
 	enum bt_hids_pm new_pm = ((pm == BT_HIDS_PM_BOOT) ? BT_HIDS_PM_REPORT : BT_HIDS_PM_BOOT);
 
-	printk("Switching HIDS PM from %d to %d\n", pm, new_pm);
+	LOG_INF("Switching HIDS PM from %d to %d", pm, new_pm);
 	bt_hogp_pm_update(&hogp, K_SECONDS(5));
 }
 
@@ -426,13 +416,13 @@ static void hidc_write_cb(struct bt_hogp *hidc,
 			  struct bt_hogp_rep_info *rep,
 			  uint8_t err)
 {
-	printk("HOGP write completed\n");
+	LOG_DBG("HOGP write completed");
 }
 
 static void button_capslock(void)
 {
 	if (!hogp.rep_boot.kbd_out) {
-		printk("HID device does not have Keyboard OUT report\n");
+		LOG_WRN("HID device does not have Keyboard OUT report");
 		return;
 	}
 
@@ -443,10 +433,10 @@ static void button_capslock(void)
 				       hidc_write_cb);
 
 	if (err) {
-		printk("Keyboard data write error (err: %d)\n", err);
+		LOG_ERR("Keyboard data write error (err: %d)", err);
 		return;
 	}
-	printk("Caps lock send (val: 0x%x)\n", data);
+	LOG_DBG("Caps lock send (val: 0x%x)", data);
 }
 
 static uint8_t capslock_read_cb(struct bt_hogp *hogp,
@@ -455,14 +445,14 @@ static uint8_t capslock_read_cb(struct bt_hogp *hogp,
 			     const uint8_t *data)
 {
 	if (err) {
-		printk("Capslock read error (err: %u)\n", err);
+		LOG_ERR("Capslock read error (err: %u)", err);
 		return BT_GATT_ITER_STOP;
 	}
 	if (!data) {
-		printk("Capslock read - no data\n");
+		LOG_DBG("Capslock read - no data");
 		return BT_GATT_ITER_STOP;
 	}
-	printk("Received data (size: %u, data[0]: 0x%x)\n",
+	LOG_DBG("Received data (size: %u, data[0]: 0x%x)",
 	       bt_hogp_rep_size(rep), data[0]);
 
 	return BT_GATT_ITER_STOP;
@@ -474,22 +464,22 @@ static void capslock_write_cb(struct bt_hogp *hogp,
 {
 	int ret;
 
-	printk("Capslock write result: %u\n", err);
+	LOG_DBG("Capslock write result: %u", err);
 
 	ret = bt_hogp_rep_read(hogp, rep, capslock_read_cb);
 	if (ret) {
-		printk("Cannot read capslock value (err: %d)\n", ret);
+		LOG_ERR("Cannot read capslock value (err: %d)", ret);
 	}
 }
 
 static void button_capslock_rsp(void)
 {
 	if (!bt_hogp_ready_check(&hogp)) {
-		printk("HID device not ready\n");
+		LOG_WRN("HID device not ready");
 		return;
 	}
 	if (!hogp.rep_boot.kbd_out) {
-		printk("HID device does not have Keyboard OUT report\n");
+		LOG_WRN("HID device does not have Keyboard OUT report");
 		return;
 	}
 	int err;
@@ -500,10 +490,10 @@ static void button_capslock_rsp(void)
 	err = bt_hogp_rep_write(&hogp, hogp.rep_boot.kbd_out, capslock_write_cb,
 				&data, sizeof(data));
 	if (err) {
-		printk("Keyboard data write error (err: %d)\n", err);
+		LOG_ERR("Keyboard data write error (err: %d)", err);
 		return;
 	}
-	printk("Caps lock send using write with response (val: 0x%x)\n", data);
+	LOG_DBG("Caps lock send using write with response (val: 0x%x)", data);
 }
 
 /* Public API implementations */
@@ -525,7 +515,7 @@ int ble_hid_discover(struct bt_conn *conn)
 	
 	err = bt_gatt_dm_start(conn, BT_UUID_HIDS, &discovery_cb, &hogp);
 	if (err) {
-		printk("Could not start discovery (err %d)\n", err);
+		LOG_ERR("Could not start discovery (err %d)", err);
 		return err;
 	}
 	
@@ -604,11 +594,11 @@ int ble_hid_register_ready_cb(ble_hid_ready_cb_t cb)
 int ble_hid_auto_detect_mode(void)
 {
 	if (!hid_ready) {
-		printk("HID device not ready for mode detection\n");
+		LOG_WRN("HID device not ready for mode detection");
 		return -EAGAIN;
 	}
-	
-	printk("Manual trigger: Auto-detecting protocol mode\n");
+
+	LOG_INF("Manual trigger: Auto-detecting protocol mode");
 	auto_detect_and_switch_mode();
 	return 0;
 }
@@ -619,30 +609,30 @@ static void discovery_completed_cb(struct bt_gatt_dm *dm, void *context)
 	struct bt_hogp *hogp = context;
 	int err;
 
-	printk("The discovery procedure succeeded\n");
+	LOG_INF("The discovery procedure succeeded");
 
 	bt_gatt_dm_data_print(dm);
 
 	err = bt_hogp_handles_assign(dm, hogp);
 	if (err) {
-		printk("Could not assign HOGP handles (err %d)\n", err);
+		LOG_ERR("Could not assign HOGP handles (err %d)", err);
 	}
 
 	/* CRITICAL: Must release GATT DM data to allow subsequent discoveries */
 	err = bt_gatt_dm_data_release(dm);
 	if (err) {
-		printk("Could not release discovery data (err %d)\n", err);
+		LOG_ERR("Could not release discovery data (err %d)", err);
 	}
 
-	printk("HOGP ready\n");
+	LOG_INF("HOGP ready");
 }
 
 static void discovery_service_not_found_cb(struct bt_conn *conn, void *context)
 {
-	printk("The service could not be found during the discovery\n");
+	LOG_WRN("The service could not be found during the discovery");
 }
 
 static void discovery_error_found_cb(struct bt_conn *conn, int err, void *context)
 {
-	printk("The discovery procedure failed with %d\n", err);
+	LOG_ERR("The discovery procedure failed with %d", err);
 }

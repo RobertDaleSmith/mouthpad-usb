@@ -20,13 +20,14 @@
 #include <bluetooth/services/hogp.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/printk.h>
 
 LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_INF);
 
 /* BLE Central state */
 static struct bt_conn *default_conn;
 static struct k_work scan_work;
+static struct k_work_delayable scan_indicator_work;
+static bool scanning_active = false;
 
 /* Device type detection */
 static bool is_nus_device(const struct bt_scan_device_info *device_info);
@@ -108,8 +109,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (conn_err) {
-		printk("*** CONNECTION FAILED: %s, error: 0x%02x ***\n", addr, conn_err);
-		LOG_INF("Failed to connect to %s, 0x%02x %s", addr, conn_err,
+		LOG_ERR("CONNECTION FAILED: %s, error: 0x%02x (%s)", addr, conn_err,
 			bt_hci_err_to_str(conn_err));
 
 		if (default_conn == conn) {
@@ -122,17 +122,18 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		return;
 	}
 
-	printk("*** CONNECTED TO DEVICE: %s ***\n", addr);
-	LOG_INF("Connected: %s", addr);
+	LOG_INF("CONNECTED TO DEVICE: %s", addr);
+
+	/* Stop scanning */
+	scanning_active = false;
+	err = bt_scan_stop();
+	if ((!err) && (err != -EALREADY)) {
+		LOG_ERR("Stop LE scan failed (err %d)", err);
+	}
 
 	/* Call external connected callback if registered */
 	if (connected_cb) {
 		connected_cb(conn);
-	}
-
-	err = bt_scan_stop();
-	if ((!err) && (err != -EALREADY)) {
-		LOG_ERR("Stop LE scan failed (err %d)", err);
 	}
 }
 
@@ -142,8 +143,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	printk("*** DISCONNECTED FROM DEVICE: %s, reason: 0x%02x ***\n", addr, reason);
-	LOG_INF("Disconnected: %s, reason 0x%02x %s", addr, reason, bt_hci_err_to_str(reason));
+	LOG_INF("DISCONNECTED FROM DEVICE: %s, reason: 0x%02x (%s)", addr, reason, bt_hci_err_to_str(reason));
 
 	if (default_conn != conn) {
 		return;
@@ -160,7 +160,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		disconnected_cb(conn, reason);
 	}
 
-	printk("*** RESTARTING SCAN AFTER DISCONNECTION ***\n");
+	LOG_INF("RESTARTING SCAN AFTER DISCONNECTION");
 	(void)k_work_submit(&scan_work);
 }
 
@@ -179,6 +179,16 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 	}
 }
 
+/* Scanning indicator work handler */
+static void scan_indicator_handler(struct k_work *work)
+{
+	if (scanning_active) {
+		LOG_INF("Scanning for MouthPad...");
+		/* Re-schedule for next message */
+		k_work_schedule(&scan_indicator_work, K_SECONDS(1));
+	}
+}
+
 /* Scan callback implementations */
 static void scan_filter_match(struct bt_scan_device_info *device_info,
 			      struct bt_scan_filter_match *filter_match,
@@ -192,18 +202,17 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 	log_device_type(device_info, addr);
 	/* Log RSSI information */
 	int8_t rssi = device_info->recv_info->rssi;
-	printk("*** DEVICE FOUND: %s connectable: %d RSSI: %d dBm ***\n", 
+	LOG_INF("DEVICE FOUND: %s connectable: %d RSSI: %d dBm",
 	       addr, connectable, rssi);
-	LOG_INF("Filters matched. Address: %s connectable: %d RSSI: %d dBm",
-		addr, connectable, rssi);
 	
 	/* Only connect to devices that have both NUS and HID services */
 	bool has_nus = is_nus_device(device_info);
 	bool has_hid = is_hid_device(device_info);
 	
 	if (has_nus && has_hid) {
-		printk("*** CONNECTING TO MOUTHPAD DEVICE: %s (RSSI: %d dBm) ***\n", addr, rssi);
-		LOG_INF("Connecting to MouthPad device: %s (RSSI: %d dBm)", addr, rssi);
+		/* Stop scanning indicator */
+		scanning_active = false;
+		LOG_INF("CONNECTING TO MOUTHPAD DEVICE: %s (RSSI: %d dBm)", addr, rssi);
 		
 		/* Store RSSI for later use during connection */
 		extern void ble_transport_set_rssi(int8_t rssi);
@@ -247,7 +256,7 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		oled_display_device_found(device_name);
 		
 	} else {
-		printk("*** REJECTING DEVICE (missing required services): %s ***\n", addr);
+		LOG_WRN("REJECTING DEVICE (missing required services): %s", addr);
 		LOG_INF("Rejecting device - missing required services: %s", addr);
 		/* Don't connect to this device */
 		return;
@@ -258,7 +267,7 @@ static void scan_connecting_error(struct bt_scan_device_info *device_info)
 {
 	char addr[BT_ADDR_LE_STR_LEN];
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
-	printk("*** SCAN CONNECTING ERROR: %s ***\n", addr);
+	LOG_ERR("SCAN CONNECTING ERROR: %s", addr);
 	LOG_WRN("Connecting failed");
 }
 
@@ -267,7 +276,7 @@ static void scan_connecting(struct bt_scan_device_info *device_info,
 {
 	char addr[BT_ADDR_LE_STR_LEN];
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
-	printk("*** SCAN CONNECTING: %s ***\n", addr);
+	LOG_INF("SCAN CONNECTING: %s", addr);
 	default_conn = bt_conn_ref(conn);
 }
 
@@ -347,7 +356,6 @@ static void log_device_type(const struct bt_scan_device_info *device_info, const
 {
 	/* Since we're scanning for devices with both NUS and HID services,
 	   any device that matches our scan filter is likely a MouthPad device */
-	printk("*** MOUTHPAD DEVICE FOUND (NUS + HID): %s ***\n", addr);
 	LOG_INF("MouthPad device detected (NUS + HID): %s", addr);
 }
 
@@ -363,19 +371,18 @@ int ble_central_init(void)
 {
 	int err;
 
-	printk("Starting Bluetooth initialization...\n");
+	LOG_INF("Starting Bluetooth initialization...");
 	err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("Bluetooth init failed (err %d)", err);
 		return err;
 	}
-	LOG_INF("Bluetooth initialized");
-	printk("Bluetooth initialized successfully\n");
+	LOG_INF("Bluetooth initialized successfully");
 
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		printk("Loading settings...\n");
+		LOG_INF("Loading settings...");
 		settings_load();
-		printk("Settings loaded\n");
+		LOG_INF("Settings loaded");
 	}
 
 	/* Register authentication callbacks */
@@ -384,14 +391,14 @@ int ble_central_init(void)
 		LOG_ERR("Failed to register authorization callbacks.");
 		return err;
 	}
-	printk("Authorization callbacks registered\n");
+	LOG_INF("Authorization callbacks registered");
 
 	err = bt_conn_auth_info_cb_register(&conn_auth_info_callbacks);
 	if (err) {
-		printk("Failed to register authorization info callbacks.\n");
+		LOG_ERR("Failed to register authorization info callbacks.");
 		return err;
 	}
-	printk("Authorization info callbacks registered\n");
+	LOG_INF("Authorization info callbacks registered");
 
 	/* Initialize scan */
 	struct bt_scan_init_param scan_init = {
@@ -403,6 +410,7 @@ int ble_central_init(void)
 
 	/* Initialize scan work */
 	k_work_init(&scan_work, scan_work_handler);
+	k_work_init_delayable(&scan_indicator_work, scan_indicator_handler);
 	LOG_INF("Scan module initialized");
 
 	return 0;
@@ -451,8 +459,10 @@ int ble_central_start_scan(void)
 		return err;
 	}
 
-	LOG_INF("Scan started (checking for devices with both NUS and HID services)");
-	
+	/* Start scanning indicator */
+	scanning_active = true;
+	k_work_schedule(&scan_indicator_work, K_NO_WAIT);
+
 	/* Update display to show scanning status */
 	extern int oled_display_scanning(void);
 	oled_display_scanning();

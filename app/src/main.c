@@ -9,7 +9,6 @@
  *  @brief MouthPad USB Bridge - Main Application
  */
 
-#include <zephyr/sys/printk.h>
 #include <zephyr/logging/log.h>
 
 #include "usb_cdc.h"
@@ -132,14 +131,6 @@ int main(void)
 	/* Debug: Log CDC device info */
 	const struct device *cdc0 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
 	const struct device *cdc1 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart1));
-
-	/* Use printk directly to test console output */
-	printk("\n\n=== MouthPad^USB CDC TEST ===\n");
-	printk("CDC0: %s (ready=%d)\n", cdc0->name, device_is_ready(cdc0));
-	printk("CDC1: %s (ready=%d)\n", cdc1->name, device_is_ready(cdc1));
-	printk("Console output on CDC1: %s\n", cdc1->name);
-	printk("If you see this, console is working!\n");
-	printk("================================\n\n");
 
 	LOG_INF("=== CDC DEVICE INITIALIZATION ===");
 	LOG_INF("CDC0: %s (ready=%d)", cdc0->name, device_is_ready(cdc0));

@@ -15,7 +15,6 @@
 #include <bluetooth/services/nus.h>
 #include <bluetooth/gatt_dm.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/printk.h>
 
 LOG_MODULE_REGISTER(ble_nus_client, LOG_LEVEL_INF);
 
@@ -118,16 +117,14 @@ static void exchange_func(struct bt_conn *conn, uint8_t err, struct bt_gatt_exch
 
 	if (!err) {
 		uint16_t mtu = bt_gatt_get_mtu(conn);
-		printk("*** MTU EXCHANGE SUCCESSFUL: MTU = %d bytes ***\n", mtu);
-		LOG_INF("MTU exchange done, MTU: %d", mtu);
+		LOG_INF("MTU EXCHANGE SUCCESSFUL: MTU = %d bytes", mtu);
 
 		// Call external MTU exchange callback if registered
 		if (mtu_exchange_cb) {
 			mtu_exchange_cb(mtu);
 		}
 	} else {
-		printk("*** MTU EXCHANGE FAILED: error = %d ***\n", err);
-		LOG_WRN("MTU exchange failed (err %" PRIu8 ")", err);
+		LOG_ERR("MTU EXCHANGE FAILED: error = %d", err);
 	}
 }
 

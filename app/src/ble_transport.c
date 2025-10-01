@@ -499,7 +499,7 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	
 	struct bt_hogp *hogp = ble_hid_get_hogp();
 	if (bt_hogp_assign_check(hogp)) {
-		printk("HIDS client active - releasing");
+		LOG_INF("HIDS client active - releasing");
 		bt_hogp_release(hogp);
 	}
 	
