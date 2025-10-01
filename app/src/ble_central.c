@@ -556,6 +556,25 @@ int ble_central_start_scan(void)
 		return err;
 	}
 
+	/* Set aggressive scan parameters for faster device discovery
+	 * Interval: 0x0010 = 16 * 0.625ms = 10ms (how often to start scanning)
+	 * Window: 0x0010 = 16 * 0.625ms = 10ms (how long to scan each time)
+	 * Setting interval == window means continuous scanning for fastest pairing
+	 */
+	struct bt_le_scan_param scan_param = {
+		.type = BT_LE_SCAN_TYPE_ACTIVE,
+		.options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
+		.interval = 0x0010,  /* 10ms */
+		.window = 0x0010,    /* 10ms - continuous scanning */
+	};
+
+	err = bt_scan_params_set(&scan_param);
+	if (err) {
+		LOG_WRN("Failed to set scan parameters (err %d), using defaults", err);
+	} else {
+		LOG_INF("Set aggressive scan parameters: interval=10ms, window=10ms (continuous)");
+	}
+
 	err = bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE);
 	if (err) {
 		LOG_ERR("Scanning failed to start (err %d)", err);
