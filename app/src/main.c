@@ -11,6 +11,7 @@
 
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <string.h>
 #include <nrf.h>
 
@@ -47,7 +48,31 @@ static int cmd_dfu(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Display USB serial number (device ID) */
+static int cmd_serial(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	uint8_t hwid[8];
+	ssize_t hwid_len = hwinfo_get_device_id(hwid, sizeof(hwid));
+
+	if (hwid_len > 0) {
+		shell_print(sh, "USB Serial Number: %02X%02X%02X%02X%02X%02X%02X%02X",
+			    hwid[0], hwid[1], hwid[2], hwid[3],
+			    hwid[4], hwid[5], hwid[6], hwid[7]);
+		shell_print(sh, "Port should show as: usbmodem%02X%02X%02X%02X%02X%02X%02X%02X<N>",
+			    hwid[0], hwid[1], hwid[2], hwid[3],
+			    hwid[4], hwid[5], hwid[6], hwid[7]);
+	} else {
+		shell_error(sh, "Failed to read device ID: %d", hwid_len);
+	}
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
+SHELL_CMD_REGISTER(serial, NULL, "Display USB serial number", cmd_serial);
 
 /* Battery color indication mode - automatically set based on LED hardware */
 /* GPIO LEDs use discrete mode, NeoPixel uses gradient mode */
@@ -153,15 +178,16 @@ int main(void)
 	}
 	LOG_INF("USB CDC initialized successfully");
 
-	/* Debug: Log CDC device info */
-	// const struct device *cdc0 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
-	// const struct device *cdc1 = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart1));
-
-	// LOG_INF("=== CDC DEVICE INITIALIZATION ===");
-	// LOG_INF("CDC0: %s (ready=%d)", cdc0->name, device_is_ready(cdc0));
-	// LOG_INF("CDC1: %s (ready=%d)", cdc1->name, device_is_ready(cdc1));
-	// LOG_INF("Console output should appear on CDC1: %s", cdc1->name);
-	// LOG_INF("================================");
+	/* Debug: Test HWINFO device ID reading */
+	uint8_t hwid[8];
+	ssize_t hwid_len = hwinfo_get_device_id(hwid, sizeof(hwid));
+	if (hwid_len > 0) {
+		LOG_INF("USB Serial Number: %02X%02X%02X%02X%02X%02X%02X%02X",
+			hwid[0], hwid[1], hwid[2], hwid[3],
+			hwid[4], hwid[5], hwid[6], hwid[7]);
+	} else {
+		LOG_ERR("HWINFO get_device_id failed: %d", hwid_len);
+	}
 
 	/* Initialize OLED Display */
 	LOG_INF("Initializing OLED Display...");

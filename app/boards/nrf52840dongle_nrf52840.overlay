@@ -88,7 +88,7 @@
 	/* HID device node */
 	hid_dev_0: hid_dev_0 {
 		compatible = "zephyr,hid-device";
-		label = "HID0";
+		label = "MouthPad^HID";
 		protocol-code = "mouse";
 		in-report-size = <64>;
 		in-polling-period-us = <1000>;

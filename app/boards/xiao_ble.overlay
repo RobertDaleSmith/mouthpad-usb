@@ -66,7 +66,7 @@
 	/* HID device node */
 	hid_dev_0: hid_dev_0 {
 		compatible = "zephyr,hid-device";
-		label = "HID0";
+		label = "MouthPad^HID";
 		protocol-code = "mouse";
 		in-report-size = <64>;
 		in-polling-period-us = <1000>;
@@ -98,11 +98,13 @@
 &zephyr_udc0 {
 	cdc_acm_uart0: cdc_acm_uart0 {
 		compatible = "zephyr,cdc-acm-uart";
+		/* Label will be dynamically set to device ID at runtime */
 		label = "CDC_ACM_0";
 	};
 
 	cdc_acm_uart1: cdc_acm_uart1 {
 		compatible = "zephyr,cdc-acm-uart";
+		/* Label will be dynamically set to device ID at runtime */
 		label = "CDC_ACM_1";
 	};
 };

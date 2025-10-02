@@ -616,9 +616,9 @@ static void rssi_read_work_handler(struct k_work *work)
 	int err;
 	
 	/* Allocate HCI command buffer */
-	buf = bt_hci_cmd_create(BT_HCI_OP_READ_RSSI, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
-		LOG_ERR("Failed to create HCI buffer for RSSI read");
+		LOG_ERR("Failed to allocate HCI buffer for RSSI read");
 		goto schedule_next;
 	}
 	
