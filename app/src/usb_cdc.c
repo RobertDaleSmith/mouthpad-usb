@@ -11,6 +11,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/sys/ring_buffer.h>
 #include "MouthpadUsb.pb.h"
 #include "pb_encode.h"
 
@@ -21,6 +22,11 @@ static const struct device *cdc_acm_dev;
 
 /* Work structures for UART handling */
 static struct k_work_delayable uart_work;
+
+/* Ring buffer for CDC0 RX data */
+#define CDC0_RX_RINGBUF_SIZE 1024
+static uint8_t cdc0_rx_ringbuf_data[CDC0_RX_RINGBUF_SIZE];
+static struct ring_buf cdc0_rx_ringbuf;
 
 /* Work structures for async USB CDC message sending */
 static struct k_work usb_cdc_async_work;
@@ -207,6 +213,25 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 	}
 }
 
+/* UART interrupt callback for CDC0 */
+static void cdc0_uart_callback(const struct device *dev, void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	uart_irq_update(dev);
+
+	if (uart_irq_rx_ready(dev)) {
+		uint8_t buffer[64];
+		int recv_len;
+
+		recv_len = uart_fifo_read(dev, buffer, sizeof(buffer));
+		if (recv_len > 0) {
+			LOG_INF("CDC0 IRQ RX: %d bytes", recv_len);
+			ring_buf_put(&cdc0_rx_ringbuf, buffer, recv_len);
+		}
+	}
+}
+
 /* UART work handler for delayed operations */
 static void uart_work_handler(struct k_work *item)
 {
@@ -236,12 +261,19 @@ int usb_cdc_init(void)
 		return -ENODEV;
 	}
 
+	/* Initialize ring buffer for CDC0 RX */
+	ring_buf_init(&cdc0_rx_ringbuf, sizeof(cdc0_rx_ringbuf_data), cdc0_rx_ringbuf_data);
+
+	/* Set up interrupt-driven UART for CDC0 */
+	uart_irq_callback_user_data_set(cdc_acm_dev, cdc0_uart_callback, NULL);
+	uart_irq_rx_enable(cdc_acm_dev);
+
 	/* Initialize work queue for async message sending */
 	k_work_init(&usb_cdc_async_work, usb_cdc_async_work_handler);
 
 	/* Note: USB subsystem will be initialized by USB HID later */
 	/* CDC1 (cdc_acm_uart1) is used for console/logs */
-	LOG_INF("USB CDC: CDC0 ready: %s (BLE NUS bridge)", cdc_acm_dev->name);
+	LOG_INF("USB CDC: CDC0 ready: %s (interrupt-driven)", cdc_acm_dev->name);
 	LOG_INF("USB CDC: Initialization successful");
 	return 0;
 }
@@ -294,20 +326,8 @@ int usb_cdc_receive_data(uint8_t *buffer, uint16_t max_len)
 		return 0; // No device, no data
 	}
 
-	/* Try to read data from CDC ACM */
-	int bytes_read = 0;
-	for (uint16_t i = 0; i < max_len; i++) {
-		unsigned char c;
-		int ret = uart_poll_in(cdc_acm_dev, &c);
-		if (ret == 0) {
-			buffer[bytes_read] = c;
-			bytes_read++;
-		} else {
-			break; // No more data available
-		}
-	}
-
-	return bytes_read;
+	/* Read from ring buffer (filled by interrupt callback) */
+	return ring_buf_get(&cdc0_rx_ringbuf, buffer, max_len);
 }
 
 /* Get CDC ACM device for external use */
