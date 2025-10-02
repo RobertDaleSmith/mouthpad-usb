@@ -32,6 +32,13 @@ menu "MouthPad Configuration"
         help
             GPIO pin for status LED. Set to -1 to disable LED functionality.
 
+    config MOUTHPAD_LED_ACTIVE_LOW
+        bool
+        default y if MOUTHPAD_BOARD_XIAO_ESP32S3
+        default n if MOUTHPAD_BOARD_LILYGO_T_DISPLAY_S3
+        help
+            Set to Y if the LED turns on when the GPIO is driven low.
+
     config MOUTHPAD_BUTTON_GPIO
         int
         default 0

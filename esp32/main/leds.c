@@ -22,7 +22,11 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 #ifdef BOARD_LED_GPIO
 static gpio_num_t s_gpio = BOARD_LED_GPIO;
 static bool s_output_level;
+#if defined(BOARD_LED_ACTIVE_LOW) && BOARD_LED_ACTIVE_LOW
 static const int s_hw_on_level = 0;
+#else
+static const int s_hw_on_level = 1;
+#endif
 static const int s_hw_off_level = 1 - s_hw_on_level;
 
 static bool s_scanning_phase;

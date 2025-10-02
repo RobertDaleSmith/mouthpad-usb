@@ -7,20 +7,33 @@
 BOARD ?= XIAO
 
 # Board configurations
+COMMON_SDKCONFIG := sdkconfig.defaults
+
 ifeq ($(BOARD),XIAO)
     BOARD_CONFIG = -D CONFIG_MOUTHPAD_BOARD_XIAO_ESP32S3=y
+    SDKCONFIG_BOARD := sdkconfig.board.xiao
     BOARD_NAME = XIAO ESP32-S3
 endif
 
 ifeq ($(BOARD),LILYGO)
     BOARD_CONFIG = -D CONFIG_MOUTHPAD_BOARD_LILYGO_T_DISPLAY_S3=y
+    SDKCONFIG_BOARD := sdkconfig.board.lilygo
     BOARD_NAME = LilyGo T-Display-S3
 endif
+
+SDKCONFIG_FILES := $(COMMON_SDKCONFIG)
+ifdef SDKCONFIG_BOARD
+    SDKCONFIG_FILES := $(COMMON_SDKCONFIG);$(SDKCONFIG_BOARD)
+endif
+
+init:
+	@echo "Initializing ESP-IDF"
+	@source ~/esp-idf/export.sh
 
 # Default target
 build:
 	@echo "Building for $(BOARD_NAME)"
-	idf.py build $(BOARD_CONFIG)
+	SDKCONFIG_DEFAULTS="$(SDKCONFIG_FILES)" idf.py build $(BOARD_CONFIG)
 
 # Board-specific targets
 xiao:
@@ -32,10 +45,10 @@ lilygo:
 # Flash and monitor
 flash:
 	@echo "Flashing $(BOARD_NAME)"
-	idf.py flash $(BOARD_CONFIG)
+	SDKCONFIG_DEFAULTS="$(SDKCONFIG_FILES)" idf.py flash $(BOARD_CONFIG)
 
 monitor:
-	idf.py monitor
+	SDKCONFIG_DEFAULTS="$(SDKCONFIG_FILES)" idf.py monitor
 
 # Combined targets
 flash-xiao:
@@ -46,7 +59,7 @@ flash-lilygo:
 
 # Clean
 clean:
-	idf.py fullclean
+	SDKCONFIG_DEFAULTS="$(SDKCONFIG_FILES)" idf.py fullclean
 
 # Help
 help:
