@@ -1,196 +1,99 @@
-# MouthPad^ USB 
+# MouthPad^ USB
 
-A Zephyr RTOS application that acts as a bridge between BLE HID devices and USB HID, with full Device Firmware Upgrade (DFU) support.
+Firmware for turning the **MouthPad^** wearable into a wired USB HID device without changing the
+BLE firmware that runs on the mouthpiece. The microcontroller sits between the tablet/PC and the
+MouthPad^, bridges BLE HID + NUS traffic to USB HID + CDC, mirrors LED behaviour, and exposes
+maintenance utilities over a CDC console.
 
-**Supported Boards:**
-- **Seeed XIAO nRF52840** (`xiao_ble`)
-- **Adafruit Feather nRF52840 Express** (`adafruit_feather_nrf52840`)
+The repository currently carries **two implementations that behave the same on the wire**:
 
-<div style="text-align: center;">
-   <img src="docs/images/mouthpad_usb.png" style="max-width: 420px">
-</div>
+| Firmware | MCU / SDK | Status | Notes |
+|----------|-----------|--------|-------|
+| [`app/`](app/README.md) | nRF52840 (Zephyr RTOS) | primary | Ships on Seeed XIAO nRF52840 hardware. |
+| [`esp32/`](esp32/README.md) | ESP32-S3 (ESP-IDF) | feature parity | Mirrors the bridge for ESP32-S3 based bring-up and antenna experiments. |
 
-## 🎯 Features
+Both firmwares expose the same HID descriptors, CDC command set, LED semantics, and bond-management
+behaviour so you can swap hardware without reconfiguring the host.
 
-- **BLE Central**: Connects to BLE HID devices (mice, keyboards, etc.)
-- **USB HID Device**: Emulates the same HID device over USB
-- **BLE UART**: Forwards additional data over USB CDC serial
-- **MCUboot DFU**: Full over-the-air firmware update support
-- **UF2 Support**: Easy firmware updates via UF2 bootloader
+---
 
-## 🛠️ Hardware Requirements
+## Core Capabilities
 
-- **Supported Board**: 
-  - Seeed XIAO nRF52840, or
-  - Adafruit Feather nRF52840 Express
-- USB cable for programming and USB HID functionality
-- BLE HID device to bridge (e.g., wireless mouse, keyboard)
+* **BLE HID client** – Discovers the MouthPad^ BLE HID service, subscribes to notifications, and
+  polls RSSI for diagnostics.
+* **USB HID device** – Replays the HID reports over USB using the same report descriptors as the
+  mouthpiece. Hosts see the bridge as a standard multi-interface HID mouse/consumer-control device.
+* **USB CDC (dual port)** –
+  * CDC0 exports a Protobuf/text tunnel that mirrors the BLE NUS link.
+  * CDC1 hosts a maintenance console (`dfu`, `clear`, etc.) and forwards logs.
+* **Bond management** – A long press on the hardware button or the `clear` shell command wipes stored
+  bonds, disconnects the current peer, and returns the bridge to pairing mode.
+* **DFU hand-off** – Type `dfu` on the maintenance port to reboot into the resident UF2/ROM bootloader.
+  From there you can drag a UF2 onto the mass-storage volume (nRF) or flash with `idf.py` (ESP32).
+* **Status feedback** – A single LED shows scan/connect/activity states. NeoPixel support on the nRF
+  build drives battery-dependent colours when present.
 
-## 🚀 Quick Start
+---
 
-This project supports **four different build methods**. For detailed instructions on each method, see [docs/BUILD_METHODS.md](docs/BUILD_METHODS.md).
-
-### Method 1: Docker (Recommended)
-
-The easiest way to build this project is using Docker, which provides a consistent environment and avoids local setup issues.
-
-```bash
-# Build all supported boards
-docker-compose run --rm mouthpad-build
-
-# Or start interactive development environment
-docker-compose run --rm mouthpad-dev
-```
-
-### Method 2: Make Commands
-
-For quick local builds using the included Makefile:
-
-```bash
-# Build the project
-make build
-
-# Flash to device
-make flash
-
-# Monitor serial output
-make monitor
-```
-
-### Method 3: VS Code Extension
-
-For visual development with integrated debugging:
-
-1. Install "NRF Connect for VS Code" extension
-2. Open project in VS Code
-3. Use Command Palette: `NRF Connect: Add Existing Project`
-4. Select the `/app` directory
-5. Build using the VS Code interface
-
-### Method 4: Traditional Zephyr Workspace
-
-For full NCS workspace access:
-
-```bash
-# Create workspace
-mkdir ~/zephyr_workspace
-cd ~/zephyr_workspace
-west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
-west update
-
-# Copy app and build
-cp -r /path/to/mouthpad_usb/app projects/mouthpad_usb
-west build -b xiao_ble projects/mouthpad_usb --pristine=always
-```
-
-## 🔧 DFU (Device Firmware Upgrade)
-
-### UF2 Bootloader
-
-1. **Enter UF2 Mode**: Double-tap the reset button
-2. **Copy Firmware**: Copy `build/zephyr/app.uf2` to the `XIAO-SENSE` volume
-3. **Automatic Restart**: Device restarts with new firmware
-
-## 📁 Project Structure
+## Repository Layout
 
 ```
-├── app/                  # Application source code
-│   ├── src/              # Source files
-│   ├── prj.conf          # Zephyr configuration
-│   └── CMakeLists.txt    # Build configuration
-├── docs/                 # Documentation
-│   ├── BUILD_METHODS.md  # Detailed build instructions
-│   └── images/           # Project images
-├── .github/workflows/    # CI/CD configuration
-├── docker-compose.yml    # Docker build configuration
-└── Makefile              # Local build commands
+.
+├── app/                # Zephyr firmware for nRF52840 boards (Seeed XIAO by default)
+│   └── README.md       # Build, flash, and usage instructions for the nRF build
+├── esp32/              # ESP-IDF firmware for ESP32-S3 boards (Seeed XIAO ESP32-S3)
+│   └── README.md       # Build, flash, and usage instructions for the ESP32 build
+├── docs/               # Additional documentation (e.g. alternative Zephyr build flows)
+├── docker-compose.yml  # Containerised Zephyr build targets
+├── Makefile            # West/UF2 helper targets for the nRF firmware
+└── tools/, scripts/, … # Utilities shared between the two firmware variants
 ```
 
-## ⚙️ Configuration
+---
 
-### Flash Partitions (MCUboot)
+## Getting Started
 
-The device uses the following flash layout:
-- **0x00000-0x0FFFF**: MCUboot bootloader (64KB)
-- **0x10000-0x4FFFF**: Application slot 0 (256KB)
-- **0x50000-0x8FFFF**: Application slot 1 (256KB)
-- **0x90000-0x9FFFF**: Scratch area (64KB)
-- **0xA0000-0xFFFFF**: Storage (384KB)
+Pick the firmware that matches your hardware:
 
-### Key Configuration Options
+* **nRF52840 (Zephyr)** – follow [`app/README.md`](app/README.md) for environment setup, build/flash
+  commands (Docker or native), and UF2/RTT tips. Additional Zephyr build flows are documented in
+  [`docs/BUILD_METHODS.md`](docs/BUILD_METHODS.md).
+* **ESP32-S3 (ESP-IDF)** – follow [`esp32/README.md`](esp32/README.md) for sourcing ESP-IDF, board
+  selection (`make xiao`/`make lilygo`), and TinyUSB console usage.
 
-- `CONFIG_BOOTLOADER_MCUBOOT=y`: Enable MCUboot bootloader
-- `CONFIG_USB_DFU_CLASS=y`: Enable USB DFU support
-- `CONFIG_BUILD_OUTPUT_UF2=y`: Generate UF2 files
-- `CONFIG_BT_CENTRAL=y`: Enable BLE central mode
-- `CONFIG_BT_PERIPHERAL=y`: Enable BLE peripheral mode
+Both readmes document the LED states, CDC port layout, console commands, and how to enter DFU.
 
-## 🔍 Troubleshooting
+---
 
-For detailed troubleshooting information, see [docs/BUILD_METHODS.md](docs/BUILD_METHODS.md).
+## CDC Maintenance Commands
 
-### Common Issues
+Irrespective of MCU, the secondary CDC interface enumerates as the maintenance console and accepts the
+same commands:
 
-**Problem**: Build fails with environment issues
-**Solution**: Use Docker method for consistent environment
+| Command | Firmware | Description |
+|---------|----------|-------------|
+| `dfu`   | Both | Print a confirmation, delay long enough for the message to flush, then reboot into the UF2/ROM bootloader (nRF) or ROM serial downloader (ESP32). |
+| `clear` | Both | Disconnect the active MouthPad^, erase stored BLE bonds, reset LED state to scanning. |
+| `serial` | Zephyr only | Print the USB serial number that macOS/OpenBSD/Linux use when naming the `usbmodem*` device nodes. |
 
-**Problem**: USB device not accessible
-**Solution**: Ensure proper permissions and device access
+Console logs appear on the same port, so you can verify the command succeeded before reconnecting the
+MouthPad^ for pairing.
 
-**Problem**: BLE device not connecting
-**Solution**: Check device advertising and HID service availability
+---
 
-## 📚 Available Commands
+## DFU & Updates
 
-```bash
-# Docker commands
-docker-compose run --rm mouthpad-build  # Build all boards
-docker-compose run --rm mouthpad-dev     # Interactive development
+* **nRF build** – double-tap reset to mount the bootloader volume, drag the UF2 produced by the build
+  (`build/app/zephyr/zephyr.uf2`) onto it, or run `dfu` on the maintenance port to reboot into the
+  UF2 loader without touching the board.
+* **ESP32 build** – run `dfu` to switch the TinyUSB stack into DFU mode and expose the ROM serial
+  downloader. Flash new firmware with `idf.py flash` (or `make flash`) on that port.
 
-# Make commands
-make build      # Build with MCUboot bootloader
-make clean      # Clean build directory
-make flash      # Flash via west
-make monitor    # Monitor serial output
-make help       # Show all available commands
-```
+---
 
-## 🔄 Development Workflow
+## Contributing & Support
 
-### Local Development
-
-1. **Make Changes**: Edit source files in `app/src/`
-2. **Build**: Use any of the four build methods
-3. **Test**: Monitor output and test functionality
-4. **Flash**: Flash to device for testing
-5. **Iterate**: Repeat as needed
-
-### CI/CD Pipeline
-
-This project includes GitHub Actions that automatically build and test your code:
-
-- **Automatic Builds**: Every push to `main` triggers a build
-- **Multi-board Support**: Builds for supported boards
-- **Artifact Storage**: Build artifacts are automatically uploaded
-- **Caching**: Uses ccache for faster builds
-
-## 📖 Additional Resources
-
-- [Build Methods Documentation](docs/BUILD_METHODS.md)
-- [Seeed XIAO nRF52840 Documentation](https://wiki.seeedstudio.com/XIAO-BLE/)
-- [MCUboot Documentation](https://docs.mcuboot.com/)
-- [Zephyr RTOS Documentation](https://docs.zephyrproject.org/)
-- [Nordic nRF Connect SDK](https://developer.nordicsemi.com/nRF_Connect_SDK/)
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly using one of the build methods
-5. Review the [Repository Guidelines](AGENTS.md) for coding, testing, and PR expectations
-6. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+* See [`AGENTS.md`](AGENTS.md) for coding style and review expectations.
+* Open an issue or pull request with reproduction steps; both firmware directories carry READMEs that
+  outline their respective build steps.
+* The project is licensed under the MIT License.

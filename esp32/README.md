@@ -1,77 +1,93 @@
-# ESP32 BLE HID Central Prototype
+# MouthPad^ USB – ESP32 Firmware (ESP-IDF)
 
-This directory hosts an ESP-IDF project that scans for BLE HID peripherals (e.g., the MouthPad mouse),
-connects to the first device discovered, and logs incoming HID reports with the received signal strength
-indicator (RSSI). It is adapted from the official `bluetooth/esp_hid_host` example in ESP-IDF; unnecessary
-USB/Bluetooth Classic handling has been trimmed so you can focus on BLE performance testing with the
-ESP32-S3 and an external antenna.
+ESP-IDF port of the MouthPad^ USB bridge for ESP32-S3 boards. Functionally mirrors the Zephyr/nRF
+firmware: it scans for the MouthPad^ over BLE, relays HID and NUS traffic to USB, exposes the same dual
+CDC interfaces, and offers the same maintenance commands.
+
+## Target hardware
+
+* **Seeed Studio XIAO ESP32-S3** – validated board with user button and LED on GPIO 21.
+* **LilyGo T-Display-S3** – buildable but the board lacks a dedicated user LED; the firmware disables LED
+  status on that variant.
+
+Select the board via `make xiao` or `make lilygo` (defaults to XIAO). The Makefile injects board-specific
+`sdkconfig` fragments so switching targets does not leave stale settings behind.
 
 ## Prerequisites
 
-1. Install ESP-IDF v5.1 or later and export the environment (`. $IDF_PATH/export.sh`).
-2. Connect the ESP32-S3 board over USB and note its serial port (e.g., `/dev/cu.usbserial-0001`).
-3. Optional: adjust defaults in `sdkconfig.defaults` for scan timing, stack size, or other HID host
-   parameters mirrored from the upstream example.
+1. Install ESP-IDF v5.2+ (the project assumes `~/esp-idf`).
+2. Run the helper to activate the correct Python environment before building:
+   ```bash
+   cd esp32
+   . ./env.sh
+   ```
+3. Optional: edit `sdkconfig.board.<board>` if you need custom GPIO assignments.
 
-## Hardware
-
-- Seeed Studio XIAO ESP32-S3 dev board [[amazon](https://www.amazon.com/gp/product/B0BYSB66S5)]
-- External 2.4 GHz antenna with MHF4/IPX-to-SMA pigtail adaptor [[amazon](https://www.amazon.com/gp/product/B07R21LN5P)]
-
-Attach the pigtail to the XIAO’s on-board antenna connector. The built-in single-colour user LED on GPIO 21 provides
-status feedback (slow blink while scanning, solid on when connected, quick pulses on HID traffic).
-
-## Build, Flash, and Monitor
+## Build & flash
 
 ```bash
-# Activate ESP-IDF with the pinned Python environment
-. ./env.sh
+# Build for the XIAO ESP32-S3 target
+make xiao
 
-# (First time only) fetch TinyUSB device stack component
-idf.py add-dependency espressif/esp_tinyusb^1.4.2
-
-# Initialise ESP-IDF for this shell
-make init
-
-# Build the firmware (defaults to target esp32s3)
-make build
-
-# Flash the device (override ESP32_PORT if the default wildcard does not match)
+# Flash the freshly built binary (set ESP32_PORT if the default wildcard misses your port)
 ESP32_PORT=/dev/cu.usbserial-0001 make flash
 
-# Attach a serial monitor (Ctrl+] to quit)
-ESP32_PORT=/dev/cu.usbserial-0001 make monitor
+# Combine flash + monitor
+ESP32_PORT=/dev/cu.usbserial-0001 make flash monitor
+
+# Clean generated build artefacts
+make clean
 ```
 
-`make init` sources `$(IDF_PATH)/export.sh` (default `~/esp-idf`) so subsequent
-targets run in the ESP-IDF environment. Override `IDF_PATH` when ESP-IDF lives
-elsewhere.
+The Makefile sets `SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.xiao"` (or the LilyGo variant)
+so the active configuration always matches the chosen board. If you switch boards, run `make clean`
+before building to regenerate `sdkconfig` with the new defaults.
 
-### Status LED
+## CDC console commands
 
-The single user LED on the XIAO ESP32-S3 (GPIO 21) behaves like the nRF build:
-- slow blink while scanning for a MouthPad
-- solid on when connected, with a quick off/on pulse whenever USB HID traffic is forwarded
+The TinyUSB CDC maintenance port accepts the same commands as the nRF firmware:
 
-### Entering DFU without the BOOT button
+| Command | Description |
+|---------|-------------|
+| `dfu`   | Disconnect serial, print confirmation, and reboot into the ROM serial downloader. Run `idf.py flash` while the port stays in download mode. |
+| `clear` | Disconnect, clear stored bonds (via `ble_bonds_clear_all()`), and return to scanning. |
 
-Open the TinyUSB CDC console (e.g., `screen /dev/cu.usbmodemXXXX 115200`) and send
-`dfu` followed by Enter. Close the terminal so the port is free. The firmware
-reboots, hands USB back to the ROM loader, and enumerates as the USB-Serial/JTAG
-download port. Run `idf.py flash` (or `make flash`) against that port—because the
-flasher no longer tries to reset before flashing, the ROM stays available until
-the transfer completes, after which the application restarts normally.
+Logs arrive on the same port (typically `/dev/cu.usbmodem<serial>3` on macOS).
 
-`make flash-monitor` combines flashing and monitoring for quicker cycles. Reports are truncated to 32
-bytes for readability; adjust the helper in `main/main.c` if full reports are needed.
+## LED status
 
-## Expected Output
+* **XIAO ESP32-S3** – GPIO 21 LED blinks while scanning, stays solid when connected, and pulses on HID
+  traffic.
+* **LilyGo T-Display-S3** – the firmware disables LED status because the board does not route an LED to
+  a spare GPIO.
 
-Once powered, the firmware scans continuously. When a BLE HID device is detected, the logs show the peer
-address, connection events, and HID reports alongside their RSSI value. Connected reports are forwarded
-verbatim to the TinyUSB HID interface using the same descriptor and report IDs as the nRF firmware, so a
-host sees identical mouse/consumer-control behaviour. A CDC ACM interface is enumerated in parallel and
-serves as the default console (the device now appears as both a HID mouse and USB serial port). Use these
-logs to compare signal strength under different antenna setups. If you need richer diagnostics, cross-
-reference the upstream `esp_hid_host` README for optional features (battery events, Classic Bluetooth)
-that can be re-enabled here as needed.
+## Directory layout
+
+```
+esp32/
+├── components/           # Local overrides (e.g. esp_tinyusb adjustments)
+├── main/                 # Application sources
+│   ├── ble_*             # BLE transport helpers
+│   ├── usb_*             # TinyUSB HID/CDC glue
+│   ├── leds.c            # LED state machine
+│   └── main.c            # Bridge orchestration
+├── Makefile              # Board-aware build/flash helpers
+├── env.sh                # Helper to source ESP-IDF with the pinned Python env
+├── sdkconfig.defaults    # Common ESP-IDF defaults
+└── sdkconfig.board.*     # Board-specific overrides (LED GPIO/polarity)
+```
+
+## DFU workflow
+
+1. Connect a terminal to the maintenance CDC port and type `dfu`, then close the terminal.
+2. The firmware enters DFU pending state and resets into the ROM serial downloader.
+3. Flash with `idf.py flash` (or `make flash`) targeting the ROM port.
+4. The firmware restarts and reconnects to the MouthPad^.
+
+## Troubleshooting
+
+* **LED stays off on XIAO** – ensure you ran `make clean` after switching from the LilyGo build so the
+  correct `sdkconfig` was regenerated.
+* **Device enumerates as plain serial** – you are in DFU mode. Reflash the application or power-cycle
+the board.
+
