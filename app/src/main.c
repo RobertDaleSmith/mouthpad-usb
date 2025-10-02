@@ -30,6 +30,17 @@
 #define LOG_MODULE_NAME mouthpad_usb
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
+static void clear_ble_pairings(void)
+{
+	if (ble_transport_is_connected()) {
+		LOG_INF("Disconnecting current BLE connection before clearing bonds...");
+		ble_transport_disconnect();
+	}
+
+	ble_transport_clear_bonds();
+	LOG_INF("BLE bonds cleared - ready for new pairing");
+}
+
 /* Shell command: Enter DFU bootloader mode */
 static int cmd_dfu(const struct shell *sh, size_t argc, char **argv)
 {
@@ -71,7 +82,21 @@ static int cmd_serial(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Clear BLE bonds and reset pairing state */
+static int cmd_clear(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Clearing stored BLE bonds and resetting pairing state...");
+	clear_ble_pairings();
+	shell_print(sh, "Bonds cleared. Put MouthPad into pairing mode to reconnect.");
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
+SHELL_CMD_REGISTER(clear, NULL, "Clear stored BLE bonds", cmd_clear);
 SHELL_CMD_REGISTER(serial, NULL, "Display USB serial number", cmd_serial);
 
 /* Battery color indication mode - automatically set based on LED hardware */
@@ -94,13 +119,7 @@ static void button_event_callback(button_event_t event)
 	case BUTTON_EVENT_HOLD:
 		LOG_INF("=== BUTTON HOLD - CLEARING BLE BONDS ===");
 		/* Clear BLE bonds and reset for new pairing */
-		if (ble_transport_is_connected()) {
-			LOG_INF("Disconnecting current BLE connection...");
-			ble_transport_disconnect();
-		}
-		/* Clear all BLE bonds */
-		ble_transport_clear_bonds();
-		LOG_INF("BLE bonds cleared - ready for new pairing");
+		clear_ble_pairings();
 		break;
 		
 	default:
