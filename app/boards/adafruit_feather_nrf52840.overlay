@@ -91,11 +91,6 @@
 	/* NeoPixel powered directly from 3.3V - no power enable needed */
 };
 
-/* Disable board's default CDC node if it exists */
-&board_cdc_acm_uart {
-	status = "disabled";
-};
-
 /* Add dual CDC ACM nodes */
 &zephyr_udc0 {
 	cdc_acm_uart0: cdc_acm_uart0 {
@@ -107,9 +102,13 @@
 		compatible = "zephyr,cdc-acm-uart";
 		label = "CDC_ACM_1";
 	};
+
+	board_cdc_acm_uart: board_cdc_acm_uart {
+		compatible = "zephyr,cdc-acm-uart";
+	};
 };
 
-/* Delete default MCUboot partitions and replace with UF2-compatible layout */
+/* Remove default partition map before defining UF2 layout */
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
 /delete-node/ &slot1_partition;
@@ -137,10 +136,10 @@
 			reg = <0x00000000 0x00026000>;
 		};
 
-		code_partition: partition@26000 {
-			label = "code_partition";
-			reg = <0x00026000 0x000c6000>;
-		};
+	code_partition: partition@26000 {
+		label = "code_partition";
+		reg = <0x00026000 0x000c6000>;
+	};
 
 		storage_partition: partition@ec000 {
 			label = "storage";
