@@ -121,3 +121,6 @@ docs/build/
 # Local configuration
 local.conf
 local.conf.backup
+
+# CI test build artifacts
+/builds
