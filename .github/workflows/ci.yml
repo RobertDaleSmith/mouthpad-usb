@@ -52,17 +52,39 @@ jobs:
         with:
           submodules: recursive
 
+      - name: 💾 Cache Zephyr Workspace
+        id: cache-workspace
+        uses: actions/cache@v4
+        with:
+          path: /zephyr_workspace
+          # Cache key is shared across all matrix jobs for parallel builds
+          # Only changes when NCS version changes
+          key: zephyr-workspace-ncs-v3.1.0-${{ runner.os }}
+          restore-keys: |
+            zephyr-workspace-ncs-v3.1.0-
+
       - name: ♻️ Initialize Zephyr Workspace
-        # Set up the Zephyr workspace exactly as specified
-        # Use v3.1.0 to match local builds (main branch has stricter Kconfig)
+        # Only initialize if cache miss
+        if: steps.cache-workspace.outputs.cache-hit != 'true'
         run: |
           mkdir -p /zephyr_workspace
           cd /zephyr_workspace
           west init -m https://github.com/nrfconnect/sdk-nrf.git --mr v3.1.0
           west update --narrow -o=--depth=1
 
+      - name: 📊 Workspace Cache Status
+        run: |
+          if [ "${{ steps.cache-workspace.outputs.cache-hit }}" == "true" ]; then
+            echo "✅ Workspace restored from cache (~10GB saved)"
+          else
+            echo "📥 Workspace downloaded and will be cached for next run"
+          fi
+          du -sh /zephyr_workspace 2>/dev/null || echo "Workspace size: calculating..."
+
       - name: 📁 Copy App to Workspace
         run: |
+          # Remove old app if exists (from cache)
+          rm -rf /zephyr_workspace/app
           cp -r ncs/app /zephyr_workspace/app
 
       - name: 🔧 Apply Board Variant Overlay
@@ -73,12 +95,13 @@ jobs:
           cp ${{ matrix.overlay }} nrf52840dongle_nrf52840.overlay
           echo "Overlay applied for ${{ matrix.description }}"
 
-      - name: 💾 Cache ~/.cache/ccache
-        uses: actions/cache@v3
+      - name: 💾 Cache ccache
+        uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ccache-v1-${{ runner.os }}-${{ hashFiles('ncs/west.yml') }}
+          key: ccache-v1-${{ runner.os }}-${{ matrix.board }}-${{ github.sha }}
           restore-keys: |
+            ccache-v1-${{ runner.os }}-${{ matrix.board }}-
             ccache-v1-${{ runner.os }}-
 
       - name: 🔨 Build Project
@@ -94,20 +117,20 @@ jobs:
         run: |
           cd /zephyr_workspace
           COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          
+
           # Copy and rename UF2 files with commit hash
-          cp build/app/zephyr/zephyr.uf2 mouthpad^usb_${{ matrix.board }}_${COMMIT_SHA}.uf2
-          echo "✅ ${{ matrix.board }} UF2: mouthpad^usb_${{ matrix.board }}_${COMMIT_SHA}.uf2"
+          cp build/app/zephyr/zephyr.uf2 mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2
+          echo "✅ ${{ matrix.board }} UF2: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2"
           ls -la *.uf2
-          
+
           # Export COMMIT_SHA for use in next step
           echo "COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_ENV
 
       - name: 📦 Upload Individual UF2 File
         uses: actions/upload-artifact@v4
         with:
-          name: mouthpad^usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}
-          path: /zephyr_workspace/mouthpad^usb_${{ matrix.board }}_*.uf2
+          name: mp_usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}
+          path: /zephyr_workspace/mp_usb_${{ matrix.board }}_*.uf2
           retention-days: 30
 
       - name: 🔍 Verify Build Artifacts
@@ -118,12 +141,12 @@ jobs:
           echo 'UF2 file size:'
           ls -lh build/app/zephyr/zephyr.uf2
           echo 'Renamed UF2 files:'
-          ls -lh mouthpad^usb_*.uf2
+          ls -lh mp_usb_*.uf2
 
   security-scan:
     runs-on: ubuntu-latest
     needs: build-and-test
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -138,13 +161,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-and-test, security-scan]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+
     steps:
     - name: Set commit hash
       run: |
         COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
         echo "COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_ENV
-        
+
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
@@ -156,8 +179,8 @@ jobs:
 
         # Copy all UF2 files from board-specific artifacts
         for board in xiao_ble adafruit_feather_nrf52840 nrf52840dongle_nordic nrf52840dongle_april; do
-          if [ -d "artifacts/mouthpad^usb_${board}_${COMMIT_SHA}" ]; then
-            cp artifacts/mouthpad^usb_${board}_${COMMIT_SHA}/*.uf2 release/ 2>/dev/null || true
+          if [ -d "artifacts/mp_usb_${board}_${COMMIT_SHA}" ]; then
+            cp artifacts/mp_usb_${board}_${COMMIT_SHA}/*.uf2 release/ 2>/dev/null || true
           fi
         done
 
@@ -167,6 +190,6 @@ jobs:
     - name: Upload release package
       uses: actions/upload-artifact@v4
       with:
-        name: mouthpad^usb_${{ env.COMMIT_SHA }}
+        name: mp_usb_all_boards_${{ env.COMMIT_SHA }}
         path: release/
-        retention-days: 90 
+        retention-days: 90
