@@ -102,10 +102,6 @@
 		compatible = "zephyr,cdc-acm-uart";
 		label = "CDC_ACM_1";
 	};
-
-	board_cdc_acm_uart: board_cdc_acm_uart {
-		compatible = "zephyr,cdc-acm-uart";
-	};
 };
 
 /* Remove default partition map before defining UF2 layout */

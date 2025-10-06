@@ -1,17 +1,18 @@
 # Makefile for mouthpad_usb project
 # Provides convenient targets for building, cleaning, and workspace management
 
-.PHONY: init build build-xiao build-feather build-april flash monitor clean fullclean help
+.PHONY: init build build-xiao build-feather build-nordic-dongle build-april-dongle flash monitor clean fullclean help
 
 # Default target
 all: build
 
 # Initialize the workspace
 init:
-	west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
+	west init -m https://github.com/nrfconnect/sdk-nrf.git --mr v3.1.0
+	cd nrf && git checkout 6c6e5b32496e
 	west update
 	west config build.sysbuild true
-	@echo "Workspace initialized with sysbuild enabled"
+	@echo "Workspace initialized with sysbuild enabled (NCS commit 6c6e5b32496e)"
 
 # Build the project (default to xiao_ble, can override with BOARD=)
 BOARD ?= xiao_ble
@@ -25,7 +26,14 @@ build-xiao:
 build-feather:
 	west build -b adafruit_feather_nrf52840 app --pristine=always
 
-build-april:
+build-nordic-dongle:
+	@echo "Building for Nordic PCA10059 Dongle (stock pins)..."
+	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
+	west build -b nrf52840dongle app --pristine=always
+
+build-april-dongle:
+	@echo "Building for April Brothers Dongle (non-standard LED wiring)..."
+	@cp app/boards/nrf52840dongle_nrf52840.april.overlay app/boards/nrf52840dongle_nrf52840.overlay
 	west build -b nrf52840dongle app --pristine=always
 
 # Flash the built firmware
@@ -41,7 +49,7 @@ flash-uf2:
 	elif [ -f "build/zephyr/zephyr.uf2" ]; then \
 		UF2_FILE="build/zephyr/zephyr.uf2"; \
 	else \
-		echo "Error: No UF2 file found. Please build first with 'make build-april' or similar."; \
+		echo "Error: No UF2 file found. Please build first."; \
 		exit 1; \
 	fi; \
 	if [ -d "/Volumes/NRF52BOOT" ]; then \
@@ -100,7 +108,8 @@ help:
 	@echo "  build        - Build the project (default: xiao_ble, override with BOARD=)"
 	@echo "  build-xiao   - Build specifically for Seeed XIAO nRF52840"
 	@echo "  build-feather - Build specifically for Adafruit Feather nRF52840 Express"
-	@echo "  build-april  - Build specifically for April Brothers nRF52840 Dongle"
+	@echo "  build-nordic-dongle - Build for Nordic PCA10059 nRF52840 Dongle (stock pins)"
+	@echo "  build-april-dongle - Build for April Brothers nRF52840 Dongle (non-standard LED wiring)"
 	@echo "  flash        - Flash the built firmware to device using J-Link"
 	@echo "  flash-uf2    - Flash the built firmware to device using UF2 bootloader"
 	@echo "  monitor      - Open RTT monitor (console output via J-Link RTT)"

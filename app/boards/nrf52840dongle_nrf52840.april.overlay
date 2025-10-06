@@ -1,0 +1,164 @@
+/*
+ * April Brothers nRF52840 Dongle overlay for MouthPad^USB
+ * Hardware based on PCA10059 with Adafruit nRF52 Bootloader
+ *
+ * NOTE: April Brothers claims same pin mapping as Nordic wiki but physical wiring differs!
+ * Pin mappings from: https://wiki.aprbrother.com/en/BleUsbDongle.html
+ *
+ * USAGE: To use this April Brothers variant:
+ *   mv app/boards/nrf52840dongle_nrf52840.overlay app/boards/nrf52840dongle_nrf52840_nordic.overlay.bak
+ *   mv app/boards/nrf52840dongle_nrf52840_april.overlay app/boards/nrf52840dongle_nrf52840.overlay
+ *   make build-april
+ *
+ * To switch back to Nordic PCA10059:
+ *   mv app/boards/nrf52840dongle_nrf52840.overlay app/boards/nrf52840dongle_nrf52840_april.overlay
+ *   mv app/boards/nrf52840dongle_nrf52840_nordic.overlay.bak app/boards/nrf52840dongle_nrf52840.overlay
+ */
+
+&pinctrl {
+	pwm1_default: pwm1_default {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+		};
+	};
+
+	pwm1_sleep: pwm1_sleep {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+			low-power-enable;
+		};
+	};
+};
+
+&pwm1 {
+	status = "okay";
+	pinctrl-0 = <&pwm1_default>;
+	pinctrl-1 = <&pwm1_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+/* Override LED GPIO pins to match April Brothers ACTUAL physical wiring
+ * The base board defines led0_green, led1_red, led1_green, led1_blue
+ * We override their GPIO assignments to use the RGB LED (LED2)
+ *
+ * April Brothers wiki says: Red=P0.08, Green=P1.09, Blue=P0.12
+ * Test pattern revealed actual physical LED mapping:
+ *   Code RED -> Physical BLUE (P0.08)
+ *   Code GREEN -> Physical RED (P1.09)
+ *   Code BLUE -> Physical GREEN (P0.12)
+ *
+ * Correct mapping (swap code channels to get right colors):
+ *   led0 (red in code) -> P1.09 (physical red)
+ *   led1 (green in code) -> P0.12 (physical green)
+ *   led2 (blue in code) -> P0.08 (physical blue)
+ */
+&led0_green {
+	gpios = <&gpio1 9 GPIO_ACTIVE_LOW>;  /* Code red -> Physical red (P1.09) */
+	label = "LED Red";
+};
+
+&led1_red {
+	gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;  /* Code green -> Physical green (P0.12) */
+	label = "LED Green";
+};
+
+&led1_green {
+	gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;  /* Code blue -> Physical blue (P0.08) */
+	label = "LED Blue";
+};
+
+/* Disable standalone LED1 for sanity check */
+&led1_blue {
+	status = "disabled";
+};
+
+/* Override button to match April Brothers pinout (P1.06) */
+&button0 {
+	gpios = <&gpio1 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+	label = "Push button switch SW1";
+};
+
+/ {
+	chosen {
+		nordic,nus-uart = &cdc_acm_uart0;
+		zephyr,console = &cdc_acm_uart1;
+		zephyr,shell-uart = &cdc_acm_uart1;
+	};
+
+	aliases {
+		buzzer-pwm = &pwm1;
+	};
+
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "MouthPad^HID";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	buzzer {
+		compatible = "pwm-buzzer";
+		pwms = <&pwm1 0 1000000 PWM_POLARITY_NORMAL>;
+		label = "Passive Buzzer";
+	};
+};
+
+/* Disable board's default CDC node */
+&board_cdc_acm_uart {
+	status = "disabled";
+};
+
+/* Add dual CDC ACM nodes */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
+	};
+};
+
+/* Override default partitions with SoftDevice layout */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		sd_partition: partition@0 {
+			label = "softdevice";
+			reg = <0x00000000 0x00026000>;
+		};
+
+		code_partition: partition@26000 {
+			label = "code_partition";
+			reg = <0x00026000 0x000c6000>;
+		};
+
+		storage_partition: partition@ec000 {
+			label = "storage";
+			reg = <0x000ec000 0x00008000>;
+		};
+
+		boot_partition: partition@f4000 {
+			label = "adafruit_boot";
+			reg = <0x000f4000 0x0000c000>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &code_partition;
+		zephyr,settings-partition = &storage_partition;
+	};
+};
