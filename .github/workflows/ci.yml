@@ -15,6 +15,8 @@ on:
         options:
         - xiao_ble
         - adafruit_feather_nrf52840
+        - nrf52840dongle_nordic
+        - nrf52840dongle_april
 
 jobs:
   build-and-test:
@@ -28,12 +30,22 @@ jobs:
       CMAKE_PREFIX_PATH: /opt/toolchains
     strategy:
       matrix:
-        board: [xiao_ble, adafruit_feather_nrf52840]
+        board: [xiao_ble, adafruit_feather_nrf52840, nrf52840dongle_nordic, nrf52840dongle_april]
         include:
           - board: xiao_ble
             description: "Seeed XIAO nRF52840"
+            board_target: xiao_ble
           - board: adafruit_feather_nrf52840
             description: "Adafruit Feather nRF52840 Express"
+            board_target: adafruit_feather_nrf52840
+          - board: nrf52840dongle_nordic
+            description: "Nordic nRF52840 Dongle (PCA10059 - stock pins)"
+            board_target: nrf52840dongle
+            overlay: nrf52840dongle_nrf52840.nordic.overlay
+          - board: nrf52840dongle_april
+            description: "April Brothers nRF52840 Dongle (non-standard LED wiring)"
+            board_target: nrf52840dongle
+            overlay: nrf52840dongle_nrf52840.april.overlay
 
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +64,14 @@ jobs:
         run: |
           cp -r ncs/app /zephyr_workspace/app
 
+      - name: 🔧 Apply Board Variant Overlay
+        if: matrix.overlay
+        run: |
+          cd /zephyr_workspace/app/boards
+          echo "Applying overlay: ${{ matrix.overlay }}"
+          cp ${{ matrix.overlay }} nrf52840dongle_nrf52840.overlay
+          echo "Overlay applied for ${{ matrix.description }}"
+
       - name: 💾 Cache ~/.cache/ccache
         uses: actions/cache@v3
         with:
@@ -65,7 +85,7 @@ jobs:
           cd /zephyr_workspace
           ccache -z
           west build \
-              --board ${{ matrix.board }} \
+              --board ${{ matrix.board_target }} \
               --pristine=always app
           ccache -sv
 
@@ -132,14 +152,14 @@ jobs:
     - name: Create release package
       run: |
         mkdir -p release
-        
+
         # Copy all UF2 files from board-specific artifacts
-        for board in xiao_ble adafruit_feather_nrf52840; do
+        for board in xiao_ble adafruit_feather_nrf52840 nrf52840dongle_nordic nrf52840dongle_april; do
           if [ -d "artifacts/mouthpad^usb_${board}_${COMMIT_SHA}" ]; then
             cp artifacts/mouthpad^usb_${board}_${COMMIT_SHA}/*.uf2 release/ 2>/dev/null || true
           fi
         done
-        
+
         echo "Release package created:"
         find release -type f
 
