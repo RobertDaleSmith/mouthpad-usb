@@ -20,9 +20,6 @@ LOG_MODULE_REGISTER(usb_cdc, LOG_LEVEL_INF);
 /* USB CDC ACM device reference */
 static const struct device *cdc_acm_dev;
 
-/* Work structures for UART handling */
-static struct k_work_delayable uart_work;
-
 /* Ring buffer for CDC0 RX data */
 #define CDC0_RX_RINGBUF_SIZE 1024
 static uint8_t cdc0_rx_ringbuf_data[CDC0_RX_RINGBUF_SIZE];
@@ -87,132 +84,6 @@ uint16_t calculate_crc16(const uint8_t *data, uint16_t len)
 	return crc & 0xFFFF;
 }
 
-/* UART callback for handling UART events */
-static void uart_cb(const struct device *dev, struct uart_event *evt, void *user_data)
-{
-	ARG_UNUSED(dev);
-
-	static size_t aborted_len;
-	struct uart_data_t *buf;
-	static uint8_t *aborted_buf;
-	static bool disable_req;
-
-	switch (evt->type) {
-	case UART_TX_DONE:
-		LOG_DBG("UART_TX_DONE");
-		if ((evt->data.tx.len == 0) ||
-		    (!evt->data.tx.buf)) {
-			return;
-		}
-
-		if (aborted_buf) {
-			buf = CONTAINER_OF(aborted_buf, struct uart_data_t,
-					   data[0]);
-			aborted_buf = NULL;
-			aborted_len = 0;
-		} else {
-			buf = CONTAINER_OF(evt->data.tx.buf,
-					   struct uart_data_t,
-					   data[0]);
-		}
-
-		k_free(buf);
-
-		buf = k_fifo_get(&fifo_uart_tx_data, K_NO_WAIT);
-		if (!buf) {
-			return;
-		}
-
-		if (uart_tx(cdc_acm_dev, buf->data, buf->len, SYS_FOREVER_MS)) {
-			LOG_WRN("Failed to send data over CDC ACM");
-		}
-
-		break;
-
-	case UART_RX_RDY:
-		LOG_DBG("UART_RX_RDY");
-		buf = CONTAINER_OF(evt->data.rx.buf, struct uart_data_t, data[0]);
-		buf->len += evt->data.rx.len;
-
-		// Debug: Print received UART data
-		LOG_DBG("UART RX: Received %d bytes", evt->data.rx.len);
-		LOG_HEXDUMP_DBG(evt->data.rx.buf, evt->data.rx.len, "UART RX data:");
-
-		if (disable_req) {
-			return;
-		}
-
-		if ((evt->data.rx.buf[buf->len - 1] == '\n') ||
-		    (evt->data.rx.buf[buf->len - 1] == '\r')) {
-			disable_req = true;
-			uart_rx_disable(cdc_acm_dev);
-		}
-
-		break;
-
-	case UART_RX_DISABLED:
-		LOG_DBG("UART_RX_DISABLED");
-		disable_req = false;
-
-		buf = k_malloc(sizeof(*buf));
-		if (buf) {
-			buf->len = 0;
-		} else {
-			LOG_WRN("Not able to allocate UART receive buffer");
-			k_work_reschedule(&uart_work, UART_WAIT_FOR_BUF_DELAY);
-			return;
-		}
-
-		uart_rx_enable(cdc_acm_dev, buf->data, sizeof(buf->data),
-			       UART_RX_TIMEOUT);
-
-		break;
-
-	case UART_RX_BUF_REQUEST:
-		LOG_DBG("UART_RX_BUF_REQUEST");
-		buf = k_malloc(sizeof(*buf));
-		if (buf) {
-			buf->len = 0;
-			uart_rx_buf_rsp(cdc_acm_dev, buf->data, sizeof(buf->data));
-		} else {
-			LOG_WRN("Not able to allocate CDC ACM receive buffer");
-		}
-
-		break;
-
-	case UART_RX_BUF_RELEASED:
-		LOG_DBG("UART_RX_BUF_RELEASED");
-		buf = CONTAINER_OF(evt->data.rx_buf.buf, struct uart_data_t,
-				   data[0]);
-
-		if (buf->len > 0) {
-			k_fifo_put(&fifo_uart_rx_data, buf);
-		} else {
-			k_free(buf);
-		}
-
-		break;
-
-	case UART_TX_ABORTED:
-		LOG_DBG("UART_TX_ABORTED");
-		if (!aborted_buf) {
-			aborted_buf = (uint8_t *)evt->data.tx.buf;
-		}
-
-		aborted_len += evt->data.tx.len;
-		buf = CONTAINER_OF(aborted_buf, struct uart_data_t,
-				   data[0]);
-
-		uart_tx(cdc_acm_dev, &buf->data[aborted_len],
-			buf->len - aborted_len, SYS_FOREVER_MS);
-
-		break;
-
-	default:
-		break;
-	}
-}
-
 /* UART interrupt callback for CDC0 */
 static void cdc0_uart_callback(const struct device *dev, void *user_data)
 {
@@ -230,23 +101,6 @@ static void cdc0_uart_callback(const struct device *dev, void *user_data)
 			ring_buf_put(&cdc0_rx_ringbuf, buffer, recv_len);
 		}
 	}
-}
-
-/* UART work handler for delayed operations */
-static void uart_work_handler(struct k_work *item)
-{
-	struct uart_data_t *buf;
-
-	buf = k_malloc(sizeof(*buf));
-	if (buf) {
-		buf->len = 0;
-	} else {
-		LOG_WRN("Not able to allocate UART receive buffer");
-		k_work_reschedule(&uart_work, UART_WAIT_FOR_BUF_DELAY);
-		return;
-	}
-
-	uart_rx_enable(cdc_acm_dev, buf->data, sizeof(buf->data), UART_RX_TIMEOUT);
 }
 
 /* Initialize USB CDC functionality */

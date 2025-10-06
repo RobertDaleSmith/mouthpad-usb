@@ -221,7 +221,7 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	// DEBUG: Analyze the BLE boot mouse data structure
 	if (size >= 1) {
 		uint8_t buttons = data[0] & 0x07;  // BLE boot mouse uses 3 bits for buttons
-		LOG_DBG("BLE BOOT MOUSE: buttons=0x%02X (L:%c R:%c M:%c)%s%s",
+		LOG_DBG("BLE BOOT MOUSE: buttons=0x%02X (L:%c R:%c M:%c)%s%d",
 			buttons,
 			(buttons & 0x01) ? '1' : '0',  // Left
 			(buttons & 0x02) ? '1' : '0',  // Right

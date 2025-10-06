@@ -49,7 +49,6 @@ static K_MUTEX_DEFINE(tracked_devices_mutex);
 /* Device type detection */
 static bool is_nus_device(const struct bt_scan_device_info *device_info);
 static bool is_hid_device(const struct bt_scan_device_info *device_info);
-static void log_device_type(const struct bt_scan_device_info *device_info, const char *addr);
 
 /* Callback functions for external modules */
 static ble_central_connected_cb_t connected_cb;

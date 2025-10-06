@@ -60,8 +60,6 @@ static int8_t last_rssi_dbm = 0;
 /* Private function declarations */
 static int oled_display_setup_font(void);
 static int oled_display_invert(void);
-static void draw_battery_icon(uint8_t battery_level, uint16_t x, uint16_t y);
-static void draw_connection_status(bool is_connected, uint16_t x, uint16_t y);
 static int oled_display_set_contrast(uint8_t contrast);
 static void oled_display_invert_bitmap(const uint8_t *src, uint8_t *dst, size_t size);
 static int oled_display_invert_framebuffer(void);
@@ -366,7 +364,7 @@ static int oled_display_setup_font(void)
 }
 
 /* Private function to set normal (non-inverted) SSD1306 display via I2C command */
-static int oled_display_normal(void)
+__maybe_unused static int oled_display_normal(void)
 {
     const struct device *i2c_dev;
     uint8_t cmd_buffer[2] = {0x00, 0xA6}; /* Command prefix + SSD1306 normal display command */
@@ -769,14 +767,13 @@ int oled_display_pairing(void)
 }
 
 /* Custom framebuffer inversion function that directly manipulates pixel data */
-static int oled_display_invert_framebuffer(void)
+__maybe_unused static int oled_display_invert_framebuffer(void)
 {
     if (!display_available || !display_ready) {
         return 0;  /* Silently skip if no display */
     }
 
     /* Get direct access to the display buffer */
-    uint8_t *buffer;
     size_t buffer_size;
     
     /* For SSD1306 128x64 display = 128 * 64 / 8 = 1024 bytes */

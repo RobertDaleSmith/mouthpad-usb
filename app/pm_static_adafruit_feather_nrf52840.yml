@@ -10,7 +10,8 @@ settings_storage:
   address: 0xec000
   size: 0x8000
   region: flash_primary
-mcuboot_pad:
+# Adafruit UF2 bootloader space (not MCUboot)
+adafruit_boot:
   address: 0xf4000
   size: 0xc000
   region: flash_primary

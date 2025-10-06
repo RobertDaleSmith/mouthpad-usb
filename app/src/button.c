@@ -241,6 +241,11 @@ static void process_button_state_machine(void)
             LOG_DBG("Button released after hold");
         }
         break;
+
+    case BUTTON_STATE_RELEASED:
+        /* Unused state - retained for compatibility */
+        button_state = BUTTON_STATE_IDLE;
+        break;
     }
 }
 

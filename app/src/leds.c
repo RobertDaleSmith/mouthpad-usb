@@ -60,10 +60,12 @@ static uint8_t neopixel_brightness = 25;
 
 /* Private function declarations */
 static void set_rgb_color(ble_bas_rgb_color_t color);
-static void set_neopixel_color(ble_bas_rgb_color_t color);
 static void set_gpio_leds(ble_bas_rgb_color_t color);
-static int init_neopixel(void);
 static int init_gpio_leds(void);
+#if HAS_NEOPIXEL
+static void set_neopixel_color(ble_bas_rgb_color_t color);
+static int init_neopixel(void);
+#endif
 
 int leds_init(void)
 {
@@ -221,23 +223,23 @@ static void set_rgb_color(ble_bas_rgb_color_t color)
 #endif
 }
 
+#if HAS_NEOPIXEL
 static void set_neopixel_color(ble_bas_rgb_color_t color)
 {
-#if HAS_NEOPIXEL
     if (!device_is_ready(neopixel_dev)) {
         return;
     }
-    
+
     /* Scale colors by brightness to prevent blinding brightness */
     neopixel_color.r = (color.red * neopixel_brightness) / 255;
     neopixel_color.g = (color.green * neopixel_brightness) / 255;
     neopixel_color.b = (color.blue * neopixel_brightness) / 255;
-    
-    led_strip_update_rgb(neopixel_dev, &neopixel_color, 1);
-#endif
-}
 
-static void set_gpio_leds(ble_bas_rgb_color_t color)
+    led_strip_update_rgb(neopixel_dev, &neopixel_color, 1);
+}
+#endif
+
+__maybe_unused static void set_gpio_leds(ble_bas_rgb_color_t color)
 {
 #if !HAS_NEOPIXEL
     /* GPIO_ACTIVE_LOW in devicetree handles inversion automatically */
@@ -259,32 +261,30 @@ static void set_gpio_leds(ble_bas_rgb_color_t color)
 #endif
 }
 
+#if HAS_NEOPIXEL
 static int init_neopixel(void)
 {
-#if HAS_NEOPIXEL
     if (!device_is_ready(neopixel_dev)) {
         LOG_WRN("NeoPixel device not ready");
         return -ENODEV;
     }
-    
+
     LOG_INF("NeoPixel initialized successfully");
-    
+
     /* Brief startup indication - short blue pulse */
     struct led_rgb startup_blue = {0, 0, (64 * neopixel_brightness) / 255};
     led_strip_update_rgb(neopixel_dev, &startup_blue, 1);
     k_sleep(K_MSEC(200));
-    
+
     /* Turn off after startup indication */
     struct led_rgb off = {0, 0, 0};
     led_strip_update_rgb(neopixel_dev, &off, 1);
-    
-    return 0;
-#else
-    return -ENOTSUP;
-#endif
-}
 
-static int init_gpio_leds(void)
+    return 0;
+}
+#endif
+
+__maybe_unused static int init_gpio_leds(void)
 {
 #if !HAS_NEOPIXEL
     int ret = 0;

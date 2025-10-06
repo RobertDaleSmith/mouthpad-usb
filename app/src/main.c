@@ -411,7 +411,7 @@ int main(void)
 								if (ble_transport_is_nus_ready()) {
 									/* Forward data to MouthPad via BLE NUS - log to console (CDC1) only */
 									LOG_DBG("CDC→NUS: %d bytes", message.message_body.pass_through_to_mouthpad_request.data.size);
-									err = ble_transport_send_nus_data(&message.message_body.pass_through_to_mouthpad_request.data.bytes, message.message_body.pass_through_to_mouthpad_request.data.size);
+									err = ble_transport_send_nus_data(message.message_body.pass_through_to_mouthpad_request.data.bytes, message.message_body.pass_through_to_mouthpad_request.data.size);
 									if (err) {
 										LOG_WRN("CDC→NUS failed (err %d)", err);
 									}
