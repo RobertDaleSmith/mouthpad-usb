@@ -1,37 +1,3 @@
-# Zephyr/NCS Build Artifacts
-build/
-build-*/
-*.elf
-*.bin
-*.uf2
-*.map
-*.lst
-*.o
-*.a
-*.so
-*.d
-*.d.ts
-
-# CMake generated files
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-compile_commands.json
-*.cmake
-!CMakeLists.txt
-
-# Ninja build files
-.ninja_deps
-.ninja_log
-build.ninja
-
-# West workspace
-.west/
-
-# Zephyr SDK and toolchain
-zephyr-sdk-*/
-toolchain/
-
 # IDE and editor files
 .vscode/
 .idea/
@@ -134,43 +100,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-
-# Zephyr specific
-zephyr/
-nrf/
-nrfxlib/
-modules/
-bootloader/
-tools/
-test/
-
-# SDK config backup
-sdk_config/sdk_config.h.backup
-
-# Generated headers
-include/generated/
-zephyr/include/generated/
-
-# Kconfig generated files
-Kconfig.dts
-Kconfig.modules
-
-# Device tree generated files
-*.dts.pre.tmp
-*.dts.pre.tmp.d
-*.dts.pre.tmp.d.tmp
-
-# Partition manager generated files
-pm_config.h
-pm_config.c
-
-# MCUboot generated files
-mcuboot_secondary.bin
-mcuboot_secondary.hex
-
-# Nordic specific
-nrf_connect_sdk_version.txt
-nrf_connect_sdk_version.h
 
 # Temporary files
 *.tmp

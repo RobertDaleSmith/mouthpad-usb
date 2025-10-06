@@ -9,8 +9,8 @@ The repository currently carries **two implementations that behave the same on t
 
 | Firmware | MCU / SDK | Status | Notes |
 |----------|-----------|--------|-------|
-| [`app/`](app/README.md) | nRF52840 (Zephyr RTOS) | primary | Ships on Seeed XIAO nRF52840 hardware. |
-| [`esp32/`](esp32/README.md) | ESP32-S3 (ESP-IDF) | feature parity | Mirrors the bridge for ESP32-S3 based bring-up and antenna experiments. |
+| [`ncs/app/`](ncs/app/README.md) | nRF52840 (Nordic Connect SDK / Zephyr) | primary | Ships on Seeed XIAO nRF52840 hardware. |
+| [`esp/`](esp/README.md) | ESP32-S3 (ESP-IDF) | feature parity | Mirrors the bridge for ESP32-S3 based bring-up and antenna experiments. |
 
 Both firmwares expose the same HID descriptors, CDC command set, LED semantics, and bond-management
 behaviour so you can swap hardware without reconfiguring the host.
@@ -39,14 +39,15 @@ behaviour so you can swap hardware without reconfiguring the host.
 
 ```
 .
-├── app/                # Zephyr firmware for nRF52840 boards (Seeed XIAO by default)
-│   └── README.md       # Build, flash, and usage instructions for the nRF build
-├── esp32/              # ESP-IDF firmware for ESP32-S3 boards (Seeed XIAO ESP32-S3)
-│   └── README.md       # Build, flash, and usage instructions for the ESP32 build
-├── docs/               # Additional documentation (e.g. alternative Zephyr build flows)
-├── docker-compose.yml  # Containerised Zephyr build targets
-├── Makefile            # West/UF2 helper targets for the nRF firmware
-└── tools/, scripts/, … # Utilities shared between the two firmware variants
+├── ncs/                # Nordic Connect SDK workspace (nRF52840 + Zephyr RTOS)
+│   ├── app/            # Application source code for nRF52840 boards
+│   │   └── README.md   # Build, flash, and usage instructions
+│   ├── Makefile        # West/UF2 helper targets
+│   └── docker-compose.yml # Containerised Zephyr build targets
+├── esp/                # ESP32-S3 firmware and workspace (ESP-IDF)
+│   └── README.md       # Build, flash, and usage instructions
+├── docs/               # Additional documentation
+└── scripts/, web_interface/, … # Shared utilities
 ```
 
 ---
@@ -55,10 +56,10 @@ behaviour so you can swap hardware without reconfiguring the host.
 
 Pick the firmware that matches your hardware:
 
-* **nRF52840 (Zephyr)** – follow [`app/README.md`](app/README.md) for environment setup, build/flash
-  commands (Docker or native), and UF2/RTT tips. Additional Zephyr build flows are documented in
-  [`docs/BUILD_METHODS.md`](docs/BUILD_METHODS.md).
-* **ESP32-S3 (ESP-IDF)** – follow [`esp32/README.md`](esp32/README.md) for sourcing ESP-IDF, board
+* **nRF52840 (NCS/Zephyr)** – follow [`ncs/app/README.md`](ncs/app/README.md) for environment setup, build/flash
+  commands (Docker or native), and UF2/RTT tips. All NCS development happens in the `ncs/` directory with its
+  own West workspace. Additional Zephyr build flows are documented in [`docs/BUILD_METHODS.md`](docs/BUILD_METHODS.md).
+* **ESP32-S3 (ESP-IDF)** – follow [`esp/README.md`](esp/README.md) for sourcing ESP-IDF, board
   selection (`make xiao`/`make lilygo`), and TinyUSB console usage.
 
 Both readmes document the LED states, CDC port layout, console commands, and how to enter DFU.
@@ -84,7 +85,7 @@ MouthPad^ for pairing.
 ## DFU & Updates
 
 * **nRF build** – double-tap reset to mount the bootloader volume, drag the UF2 produced by the build
-  (`build/app/zephyr/zephyr.uf2`) onto it, or run `dfu` on the maintenance port to reboot into the
+  (`ncs/build/app/zephyr/zephyr.uf2`) onto it, or run `dfu` on the maintenance port to reboot into the
   UF2 loader without touching the board.
 * **ESP32 build** – run `dfu` to switch the TinyUSB stack into DFU mode and expose the ROM serial
   downloader. Flash new firmware with `idf.py flash` (or `make flash`) on that port.
