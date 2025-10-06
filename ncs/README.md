@@ -19,9 +19,10 @@ The nRF52840 firmware is the **primary production firmware** that ships on Seeed
 
 | Board | Status | Notes |
 |-------|--------|-------|
-| **Seeed XIAO nRF52840** (`xiao_ble`) | ✅ Production | Ships on production hardware |
-| **Adafruit Feather nRF52840** (`adafruit_feather_nrf52840`) | ⚠️ Experimental | Requires custom bootloader config |
-| **Nordic nRF52840 Dongle** (`nrf52840dongle`) | ⚠️ Experimental | PCA10059 with nordic/april variants |
+| **Seeed XIAO nRF52840** (`xiao_ble`) | ✅ Production | Primary shipping target |
+| **Adafruit Feather nRF52840** (`adafruit_feather_nrf52840`) | ✅ Production | Requires custom bootloader config |
+| **Nordic nRF52840 Dongle** (`nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins |
+| **April Brothers nRF52840 Dongle** (`nrf52840dongle`) | ✅ Production | PCA10059 with non-standard LED wiring |
 
 ## Quick Start
 
@@ -93,8 +94,8 @@ ncs/
 - **[app/README.md](app/README.md)** – Application architecture, build instructions, CDC commands, LED states
 - **[Makefile](Makefile)** – Build targets and helper commands
 - **[docker-compose.yml](docker-compose.yml)** – Docker build configuration
-- **[../docs/BUILD_METHODS.md](../docs/BUILD_METHODS.md)** – Alternative Zephyr build flows
-- **[../docs/ADAFRUIT_FEATHER_BOOTLOADER.md](../docs/ADAFRUIT_FEATHER_BOOTLOADER.md)** – Feather bootloader setup
+- **[../resources/notes/BUILD_METHODS.md](../resources/notes/BUILD_METHODS.md)** – Alternative Zephyr build flows
+- **[../resources/notes/ADAFRUIT_FEATHER_BOOTLOADER.md](../resources/notes/ADAFRUIT_FEATHER_BOOTLOADER.md)** – Feather bootloader setup
 
 ## Flashing Firmware
 

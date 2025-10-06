@@ -7,11 +7,13 @@ and turns a MouthPad^ wearable into a wired USB HID device without touching the 
 
 | Board | Status | Notes |
 |-------|--------|-------|
-| Seeed XIAO nRF52840 (`xiao_ble`) | ✅ maintained | Shipping target. Provides button + single-colour LED. |
-| Adafruit Feather nRF52840 (`adafruit_feather_nrf52840`) | ⚠ experimental | Build files exist but are not part of the regular test loop. |
+| Seeed XIAO nRF52840 (`xiao_ble`) | ✅ Production | Primary shipping target. Button + single-colour LED. |
+| Adafruit Feather nRF52840 (`adafruit_feather_nrf52840`) | ✅ Production | Requires custom bootloader config. |
+| Nordic nRF52840 Dongle (`nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins. |
+| April Brothers nRF52840 Dongle (`nrf52840dongle`) | ✅ Production | PCA10059 with non-standard LED wiring. |
 
-The default overlays assume a single status LED and a user button. Other boards will require matching
-overlays and DTS updates.
+The default overlays assume a single status LED and a user button. Dongle variants use different overlays
+for Nordic (stock pins) vs April Brothers (non-standard LED wiring).
 
 ## Features
 
@@ -29,6 +31,8 @@ You can build the Zephyr firmware inside the provided Docker image or in your ow
 ### Option 1 – Docker (no local toolchain)
 
 ```bash
+cd ncs  # Navigate to NCS workspace directory
+
 # Build the XIAO nRF52840 target and drop UF2 artefacts in build/
 docker-compose run --rm mouthpad-build
 
@@ -101,5 +105,5 @@ app/
 ```
 
 Common build tips and alternative workflows (VS Code, standalone west workspace) live in
-[`docs/BUILD_METHODS.md`](../docs/BUILD_METHODS.md).
+[`resources/notes/BUILD_METHODS.md`](../../resources/notes/BUILD_METHODS.md).
 

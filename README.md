@@ -83,12 +83,10 @@ make flash             # Flash firmware
 │   ├── main/               # Application source
 │   ├── Makefile            # Build helpers
 │   └── README.md           # 👈 ESP32-S3 documentation
-├── docs/                   # Additional documentation
-│   ├── BUILD_METHODS.md    # Alternative Zephyr build flows
-│   ├── ADAFRUIT_FEATHER_BOOTLOADER.md
-│   └── ...
-├── web_interface/          # Web-based configuration tool
-└── assets/                 # Logos and graphics
+├── resources/              # Additional documentation and assets
+│   ├── notes/              # Technical documentation
+│   └── images/             # Diagrams and photos
+└── web/                    # Web-based configuration tool
 ```
 
 ## CDC Maintenance Commands
@@ -112,9 +110,10 @@ Both firmwares expose a maintenance console on the second CDC port:
 
 | Board | Status | Notes |
 |-------|--------|-------|
-| Seeed XIAO nRF52840 | ✅ Production | Ships on production hardware |
-| Adafruit Feather nRF52840 Express | ⚠️ Experimental | Requires bootloader config |
-| Nordic nRF52840 Dongle (PCA10059) | ⚠️ Experimental | Nordic/April pin variants |
+| Seeed XIAO nRF52840 | ✅ Production | Primary shipping target |
+| Adafruit Feather nRF52840 Express | ✅ Production | Requires custom bootloader config |
+| Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins |
+| April Brothers nRF52840 Dongle (PCA10059) | ✅ Production | Non-standard LED wiring |
 
 ### ESP32-S3 Boards
 
