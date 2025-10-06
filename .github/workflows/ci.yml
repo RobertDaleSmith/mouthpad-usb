@@ -50,13 +50,13 @@ jobs:
 
       - name: 📁 Copy App to Workspace
         run: |
-          cp -r app /zephyr_workspace/app
+          cp -r ncs/app /zephyr_workspace/app
 
       - name: 💾 Cache ~/.cache/ccache
         uses: actions/cache@v3
         with:
           path: ~/.cache/ccache
-          key: ccache-v1-${{ runner.os }}-${{ hashFiles('west.yml') }}
+          key: ccache-v1-${{ runner.os }}-${{ hashFiles('ncs/west.yml') }}
           restore-keys: |
             ccache-v1-${{ runner.os }}-
 
@@ -111,7 +111,7 @@ jobs:
       run: |
         echo "Running security analysis..."
         # Check for common security issues in C code
-        find app/src -name '*.c' -o -name '*.h' | xargs grep -l 'strcpy\|sprintf\|gets' || echo 'No obvious security issues found'
+        find ncs/app/src -name '*.c' -o -name '*.h' | xargs grep -l 'strcpy\|sprintf\|gets' || echo 'No obvious security issues found'
 
   release:
     runs-on: ubuntu-latest
