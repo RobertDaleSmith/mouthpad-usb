@@ -84,9 +84,14 @@ jobs:
         run: |
           cd /zephyr_workspace
           ccache -z
+          # Disable sysbuild for dongle boards (has issues with BOARD_HAS_NRF5_BOOTLOADER)
+          SYSBUILD_FLAG=""
+          if [[ "${{ matrix.board }}" == *"dongle"* ]]; then
+            SYSBUILD_FLAG="--no-sysbuild"
+          fi
           west build \
               --board ${{ matrix.board_target }} \
-              --pristine=always app
+              --pristine=always $SYSBUILD_FLAG app
           ccache -sv
 
       - name: 📦 Rename and Upload UF2 Artifacts
