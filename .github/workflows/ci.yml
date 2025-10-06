@@ -54,10 +54,11 @@ jobs:
 
       - name: ♻️ Initialize Zephyr Workspace
         # Set up the Zephyr workspace exactly as specified
+        # Use v3.1.0 to match local builds (main branch has stricter Kconfig)
         run: |
           mkdir -p /zephyr_workspace
           cd /zephyr_workspace
-          west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
+          west init -m https://github.com/nrfconnect/sdk-nrf.git --mr v3.1.0
           west update --narrow -o=--depth=1
 
       - name: 📁 Copy App to Workspace
@@ -84,14 +85,9 @@ jobs:
         run: |
           cd /zephyr_workspace
           ccache -z
-          # Disable sysbuild for dongle boards (has issues with BOARD_HAS_NRF5_BOOTLOADER)
-          SYSBUILD_FLAG=""
-          if [[ "${{ matrix.board }}" == *"dongle"* ]]; then
-            SYSBUILD_FLAG="--no-sysbuild"
-          fi
           west build \
               --board ${{ matrix.board_target }} \
-              --pristine=always $SYSBUILD_FLAG app
+              --pristine=always app
           ccache -sv
 
       - name: 📦 Rename and Upload UF2 Artifacts

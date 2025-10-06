@@ -29,12 +29,12 @@ build-feather:
 build-nordic-dongle:
 	@echo "Building for Nordic PCA10059 Dongle (stock pins)..."
 	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
-	west build -b nrf52840dongle app --pristine=always --no-sysbuild
+	west build -b nrf52840dongle app --pristine=always
 
 build-april-dongle:
 	@echo "Building for April Brothers Dongle (non-standard LED wiring)..."
 	@cp app/boards/nrf52840dongle_nrf52840.april.overlay app/boards/nrf52840dongle_nrf52840.overlay
-	west build -b nrf52840dongle app --pristine=always --no-sysbuild
+	west build -b nrf52840dongle app --pristine=always
 
 # Flash the built firmware
 flash:
