@@ -316,21 +316,23 @@ int usb_hid_send_report(const uint8_t *data, uint16_t len)
 int usb_hid_send_release_all(void)
 {
 	int ret;
-	
-	LOG_INF("=== SENDING HID RELEASE-ALL REPORTS ===");
-	
+	int failed_count = 0;
+
+	LOG_INF("=== SENDING HID RELEASE-ALL REPORTS (MULTIPLE ROUNDS) ===");
+
 	if (hid_dev == NULL) {
 		LOG_ERR("USB HID device not initialized");
 		return -ENODEV;
 	}
-	
+
 	/* Report ID 1: Release all buttons and wheel */
 	uint8_t report1[] = {
 		0x01,  /* Report ID 1 */
 		0x00,  /* No buttons pressed */
-		0x00   /* No wheel movement */
+		0x00,  /* No wheel movement */
+		0x00   /* No AC Pan */
 	};
-	
+
 	/* Report ID 2: No X/Y movement */
 	uint8_t report2[] = {
 		0x02,  /* Report ID 2 */
@@ -338,34 +340,56 @@ int usb_hid_send_release_all(void)
 		0x00,  /* X high/Y low = 0 */
 		0x00   /* Y high byte = 0 */
 	};
-	
+
 	/* Report ID 3: Release all consumer controls */
 	uint8_t report3[] = {
 		0x03,  /* Report ID 3 */
 		0x00   /* No consumer controls pressed */
 	};
-	
-	/* Send Report 1 - Release all buttons/wheel */
-	ret = usb_hid_send_report(report1, sizeof(report1));
-	if (ret != 0) {
-		LOG_ERR("Failed to send release report 1 (err %d)", ret);
-		return ret;
+
+	/* Send clear reports 3 times to ensure USB host processes them */
+	for (int round = 0; round < 3; round++) {
+		LOG_INF("Clear reports round %d/3", round + 1);
+
+		/* Send Report 1 - Release all buttons/wheel */
+		ret = usb_hid_send_report(report1, sizeof(report1));
+		if (ret != 0) {
+			LOG_ERR("Failed to send release report 1 round %d (err %d)", round + 1, ret);
+			failed_count++;
+		} else {
+			LOG_INF("Release report 1 sent round %d (buttons/wheel cleared)", round + 1);
+		}
+		k_msleep(10);  /* 10ms delay between reports */
+
+		/* Send Report 2 - Stop all movement */
+		ret = usb_hid_send_report(report2, sizeof(report2));
+		if (ret != 0) {
+			LOG_ERR("Failed to send release report 2 round %d (err %d)", round + 1, ret);
+			failed_count++;
+		} else {
+			LOG_INF("Release report 2 sent round %d (X/Y movement cleared)", round + 1);
+		}
+		k_msleep(10);  /* 10ms delay between reports */
+
+		/* Send Report 3 - Release consumer controls */
+		ret = usb_hid_send_report(report3, sizeof(report3));
+		if (ret != 0) {
+			LOG_ERR("Failed to send release report 3 round %d (err %d)", round + 1, ret);
+			failed_count++;
+		} else {
+			LOG_INF("Release report 3 sent round %d (consumer controls cleared)", round + 1);
+		}
+
+		if (round < 2) {
+			k_msleep(20);  /* Longer delay between rounds */
+		}
 	}
-	
-	/* Send Report 2 - Stop all movement */
-	ret = usb_hid_send_report(report2, sizeof(report2));
-	if (ret != 0) {
-		LOG_ERR("Failed to send release report 2 (err %d)", ret);
-		return ret;
+
+	if (failed_count > 0) {
+		LOG_WRN("HID release-all completed with %d failed report(s)", failed_count);
+		return -EIO;
 	}
-	
-	/* Send Report 3 - Release consumer controls */
-	ret = usb_hid_send_report(report3, sizeof(report3));
-	if (ret != 0) {
-		LOG_ERR("Failed to send release report 3 (err %d)", ret);
-		return ret;
-	}
-	
-	LOG_INF("HID release-all reports sent successfully");
+
+	LOG_INF("=== HID RELEASE-ALL COMPLETE - 3 ROUNDS SENT ===");
 	return 0;
 }

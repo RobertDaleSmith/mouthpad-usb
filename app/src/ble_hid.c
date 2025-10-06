@@ -32,6 +32,9 @@
 extern const struct device *hid_dev;
 extern struct k_sem ep_write_sem;
 
+/* Forward declaration for connection state check */
+extern bool ble_transport_is_connected(void);
+
 LOG_MODULE_REGISTER(ble_hid, LOG_LEVEL_INF);
 
 /* Callback registration */
@@ -127,6 +130,13 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 	if (!data) {
 		return BT_GATT_ITER_STOP;
 	}
+
+	/* Check if still connected - prevent forwarding stale HID data during disconnect */
+	if (!ble_transport_is_connected()) {
+		LOG_DBG("Ignoring HID report - BLE disconnected");
+		return BT_GATT_ITER_STOP;
+	}
+
 	LOG_DBG("Notification, id: %u, size: %u, data:",
 	       bt_hogp_rep_id(rep),
 	       size);
@@ -134,7 +144,7 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 		LOG_DBG(" 0x%x", data[i]);
 	}
 	LOG_DBG("\n");
-	
+
 	// Handle different report types based on Report ID
 	uint8_t report_id = bt_hogp_rep_id(rep);
 	
@@ -199,7 +209,13 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	if (!data) {
 		return BT_GATT_ITER_STOP;
 	}
-	
+
+	/* Check if still connected - prevent forwarding stale HID data during disconnect */
+	if (!ble_transport_is_connected()) {
+		LOG_DBG("Ignoring HID report - BLE disconnected");
+		return BT_GATT_ITER_STOP;
+	}
+
 	LOG_HEXDUMP_DBG(data, size, "Boot mouse report:");
 
 	// DEBUG: Analyze the BLE boot mouse data structure
@@ -213,17 +229,17 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 			(size >= 2) ? " X=" : "",
 			(size >= 2) ? (int8_t)data[1] : 0);
 	}
-	
+
 	/* Forward boot mouse report directly to USB as Report ID 1 */
 	/* Convert BLE boot mouse format to USB HID Report ID 1 format */
 	uint8_t report_with_id[3];  // Report ID + Buttons + Wheel
 	report_with_id[0] = 1;  // Report ID 1 for boot mouse
-	
+
 	/* Convert BLE boot mouse buttons (3 bits) to USB HID buttons (5 bits) */
 	uint8_t ble_buttons = data[0] & 0x07;  // Extract 3 button bits from BLE
 	uint8_t usb_buttons = ble_buttons;      // Map directly (left=bit0, right=bit1, middle=bit2)
 	report_with_id[1] = usb_buttons;        // Buttons byte (5 bits used, 3 bits padding)
-	
+
 	/* Set wheel to 0 for now (BLE boot mouse doesn't have wheel in standard format) */
 	report_with_id[2] = 0x00;  // Wheel byte
 
@@ -234,7 +250,7 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 	} else {
 		LOG_DBG("Boot mouse report sent directly to USB");
 	}
-	
+
 	return BT_GATT_ITER_CONTINUE;
 }
 

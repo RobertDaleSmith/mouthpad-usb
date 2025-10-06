@@ -27,7 +27,7 @@
 #include "pb_decode.h"
 #include "pb_encode.h"
 
-#define LOG_MODULE_NAME mouthpad_usb
+#define LOG_MODULE_NAME main
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 static void clear_ble_pairings(void)
@@ -177,7 +177,7 @@ int main(void)
 {
 	int err;
 
-	LOG_INF("=== MouthPad^USB Starting ===");
+	LOG_INF("=== MouthPad^USB Starting === Built: %s %s", __DATE__, __TIME__);
 
 	/* Initialize USB device stack (HID + CDC) */
 	LOG_INF("Initializing USB device stack...");
@@ -292,7 +292,6 @@ int main(void)
 	}
 
 	LOG_INF("Entering main loop...");
-	LOG_INF("Type 'dfu' in the shell to enter bootloader mode");
 
 	for (;;) {
 		/* USB CDC ↔ BLE NUS Bridge */

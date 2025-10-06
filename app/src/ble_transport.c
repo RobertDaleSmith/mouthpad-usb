@@ -453,23 +453,23 @@ static void ble_central_connected_cb(struct bt_conn *conn)
 static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 {
 	ARG_UNUSED(conn);
-	
+
 	LOG_INF("BLE Central disconnected (reason: 0x%02x) - cleaning up and resetting states", reason);
-	
-	/* Only play disconnection sound if we were fully connected (not during connection failures) */
+
+	/* FIRST: Send USB HID release-all report immediately to prevent stuck inputs */
+	LOG_INF("Sending USB HID release-all to clear any stuck inputs");
+	int ret = usb_hid_send_release_all();
+	if (ret != 0) {
+		LOG_ERR("Failed to send USB HID release-all (err %d)", ret);
+	}
+
+	/* Then play disconnection sound if we were fully connected */
 	if (fully_connected) {
 		extern void buzzer_disconnected(void);
 		buzzer_disconnected();
 		LOG_INF("Played disconnection sound (was fully connected)");
 	} else {
 		LOG_INF("Skipped disconnection sound (was not fully connected)");
-	}
-	
-	/* Send USB HID release-all report to prevent stuck inputs */
-	LOG_INF("Sending USB HID release-all to clear any stuck inputs");
-	int ret = usb_hid_send_release_all();
-	if (ret != 0) {
-		LOG_ERR("Failed to send USB HID release-all (err %d)", ret);
 	}
 	
 	// Reset ready states for both NUS and HID
