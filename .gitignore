@@ -124,3 +124,7 @@ local.conf.backup
 
 # CI test build artifacts
 /builds
+
+# ESP-IDF managed components (auto-downloaded from registry)
+esp/managed_components/
+esp/build/
