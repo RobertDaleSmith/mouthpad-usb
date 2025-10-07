@@ -12,7 +12,6 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/drivers/hwinfo.h>
-#include <zephyr/sys/reboot.h>
 #include <string.h>
 #include <nrf.h>
 
@@ -104,7 +103,9 @@ static int cmd_restart(const struct shell *sh, size_t argc, char **argv)
 
 	shell_print(sh, "Restarting firmware...");
 	k_sleep(K_MSEC(100));  // Give log time to flush
-	sys_reboot(SYS_REBOOT_COLD);
+
+	/* Perform system reset */
+	NVIC_SystemReset();
 
 	return 0;
 }
@@ -117,7 +118,6 @@ static int cmd_version(const struct shell *sh, size_t argc, char **argv)
 
 	shell_print(sh, "=== MouthPad^USB (nRF52) ===");
 	shell_print(sh, "Built: %s %s", __DATE__, __TIME__);
-	shell_print(sh, "Zephyr: %s", KERNEL_VERSION_STRING);
 #ifdef BUILD_VERSION
 	shell_print(sh, "App Version: %s", STRINGIFY(BUILD_VERSION));
 #endif

@@ -24,7 +24,7 @@ services:
         if [ ! -d '.west' ] || [ ! -f '.west/config' ]; then
           echo 'Initializing workspace (first time or corrupted)...'
           rm -rf .west nrf zephyr nrfxlib bootloader build
-          west init -m https://github.com/nrfconnect/sdk-nrf.git --mr main
+          west init -m https://github.com/nrfconnect/sdk-nrf.git --mr v3.1.0
           west update --narrow -o=--depth=1
         else
           echo 'Workspace already exists, skipping initialization...'
