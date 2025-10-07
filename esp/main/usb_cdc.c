@@ -20,6 +20,7 @@
 #include "usb_dfu.h"
 #include "ble_bonds.h"
 #include "ble_hid.h"
+#include "ble_dis.h"
 #include "leds.h"
 #include "transport_hid.h"
 #include "esp_gap_ble_api.h"
@@ -273,6 +274,15 @@ static void process_log_line(void) {
     ESP_LOGI(TAG, "ESP-IDF: %s", IDF_VER);
     ESP_LOGI(TAG, "Chip: %s rev%d, %d CPU core(s)",
              CONFIG_IDF_TARGET, chip_info.revision, chip_info.cores);
+  } else if ((end - start) == 6 && strncmp(&s_log_cmd_buf[start], "device", 6) == 0) {
+    ESP_LOGI(TAG, "DEVICE command received on CDC1 - displaying connected device info");
+
+    const ble_device_info_t *device_info = ble_device_info_get_current();
+    if (device_info && device_info->info_complete) {
+        ble_device_info_print(device_info);
+    } else {
+        ESP_LOGI(TAG, "No device info available - device may not be connected or DIS not yet discovered");
+    }
   } else {
     ESP_LOGW(TAG, "Ignoring command on CDC1: %.*s", (int)(end - start),
              &s_log_cmd_buf[start]);

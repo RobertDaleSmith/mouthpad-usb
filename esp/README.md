@@ -60,6 +60,7 @@ The TinyUSB CDC maintenance port accepts the same commands as the nRF firmware:
 | `restart` | Restart firmware (software reset via `esp_restart()`). |
 | `serial` | Display USB serial number (MAC address). |
 | `version` | Display firmware build timestamp, ESP-IDF version, and chip information. |
+| `device` | Display connected MouthPad^ device information from BLE Device Information Service (manufacturer, model, serial, firmware version, etc.). |
 
 Logs arrive on the same port (typically `/dev/cu.usbmodem<serial>3` on macOS).
 
