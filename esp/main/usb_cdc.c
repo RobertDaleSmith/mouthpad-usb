@@ -209,8 +209,8 @@ static void process_log_line(void) {
     } else {
         ESP_LOGI(TAG, "No active device to disconnect");
     }
-  } else if ((end - start) == 5 && strncmp(&s_log_cmd_buf[start], "clear", 5) == 0) {
-    ESP_LOGI(TAG, "CLEAR command received on CDC1 - clearing all bonds");
+  } else if ((end - start) == 5 && strncmp(&s_log_cmd_buf[start], "reset", 5) == 0) {
+    ESP_LOGI(TAG, "RESET command received on CDC1 - clearing all bonds");
 
     // Get bond info for logging
     char bond_info[32];

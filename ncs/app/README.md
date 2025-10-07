@@ -20,7 +20,7 @@ for Nordic (stock pins) vs April Brothers (non-standard LED wiring).
 * Bridges BLE HID and Nordic UART Service (NUS) traffic to USB HID + dual CDC ACM.
 * Mirrors LED behaviour from the ESP32 build: slow blink while scanning, solid when connected, short
   pulses on activity.
-* Maintains a maintenance console on the second CDC port with `dfu`, `clear`, and `serial` commands.
+* Maintains a maintenance console on the second CDC port with `dfu`, `reset`, and `serial` commands.
 * Uses TinyUSB for USB descriptors, matching those exposed by the ESP32 firmware.
 * Supports UF2 updates (drag-and-drop or via the `dfu` command).
 

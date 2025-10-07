@@ -82,13 +82,13 @@ static int cmd_serial(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-/* Shell command: Clear BLE bonds and reset pairing state */
-static int cmd_clear(const struct shell *sh, size_t argc, char **argv)
+/* Shell command: Reset BLE bonds and pairing state */
+static int cmd_reset(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	shell_print(sh, "Clearing stored BLE bonds and resetting pairing state...");
+	shell_print(sh, "Resetting stored BLE bonds and pairing state...");
 	clear_ble_pairings();
 	shell_print(sh, "Bonds cleared. Put MouthPad into pairing mode to reconnect.");
 
@@ -96,7 +96,7 @@ static int cmd_clear(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
-SHELL_CMD_REGISTER(clear, NULL, "Clear stored BLE bonds", cmd_clear);
+SHELL_CMD_REGISTER(reset, NULL, "Reset stored BLE bonds", cmd_reset);
 SHELL_CMD_REGISTER(serial, NULL, "Display USB serial number", cmd_serial);
 
 /* Battery color indication mode - automatically set based on LED hardware */

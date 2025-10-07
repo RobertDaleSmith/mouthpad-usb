@@ -96,7 +96,7 @@ Both firmwares expose a maintenance console on the second CDC port:
 | Command | Description |
 |---------|-------------|
 | `dfu` | Reboot into bootloader (UF2 for nRF, ROM downloader for ESP32) |
-| `clear` | Disconnect MouthPad^, erase BLE bonds, return to pairing mode |
+| `reset` | Disconnect MouthPad^, erase BLE bonds, return to pairing mode |
 | `serial` | Print USB serial number (nRF only) |
 
 **Port names:**

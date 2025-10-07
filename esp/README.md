@@ -56,7 +56,7 @@ The TinyUSB CDC maintenance port accepts the same commands as the nRF firmware:
 | Command | Description |
 |---------|-------------|
 | `dfu`   | Disconnect serial, print confirmation, and reboot into the ROM serial downloader. Run `idf.py flash` while the port stays in download mode. |
-| `clear` | Disconnect, clear stored bonds (via `ble_bonds_clear_all()`), and return to scanning. |
+| `reset` | Disconnect, clear stored bonds (via `ble_bonds_clear_all()`), and return to scanning. |
 
 Logs arrive on the same port (typically `/dev/cu.usbmodem<serial>3` on macOS).
 
