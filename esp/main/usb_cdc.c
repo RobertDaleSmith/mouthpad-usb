@@ -275,11 +275,59 @@ static void process_log_line(void) {
     ESP_LOGI(TAG, "Chip: %s rev%d, %d CPU core(s)",
              CONFIG_IDF_TARGET, chip_info.revision, chip_info.cores);
   } else if ((end - start) == 6 && strncmp(&s_log_cmd_buf[start], "device", 6) == 0) {
-    ESP_LOGI(TAG, "DEVICE command received on CDC1 - displaying connected device info");
-
     const ble_device_info_t *device_info = ble_device_info_get_current();
     if (device_info && device_info->info_complete) {
-        ble_device_info_print(device_info);
+        // Format device info and write directly to CDC to avoid log interleaving
+        char info_buf[512];
+        int len = 0;
+
+        len += snprintf(info_buf + len, sizeof(info_buf) - len, "\r\n=== DEVICE INFORMATION ===\r\n");
+        if (strlen(device_info->device_name) > 0) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Name: %s\r\n", device_info->device_name);
+        }
+
+        // Add BLE address
+        esp_bd_addr_t active_addr;
+        if (transport_hid_get_active_address(active_addr) == ESP_OK) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Address: %02X:%02X:%02X:%02X:%02X:%02X\r\n",
+                          active_addr[0], active_addr[1], active_addr[2],
+                          active_addr[3], active_addr[4], active_addr[5]);
+        }
+        if (strlen(device_info->manufacturer_name) > 0) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Manufacturer: %s\r\n", device_info->manufacturer_name);
+        }
+        if (strlen(device_info->model_number) > 0) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Model Number: %s\r\n", device_info->model_number);
+        }
+        if (strlen(device_info->serial_number) > 0) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Serial Number: %s\r\n", device_info->serial_number);
+        }
+        if (strlen(device_info->hardware_revision) > 0) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Hardware Revision: %s\r\n", device_info->hardware_revision);
+        }
+        if (strlen(device_info->firmware_revision) > 0) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Firmware Revision: %s\r\n", device_info->firmware_revision);
+        }
+        if (strlen(device_info->software_revision) > 0) {
+            len += snprintf(info_buf + len, sizeof(info_buf) - len, "Software Revision: %s\r\n", device_info->software_revision);
+        }
+        if (device_info->has_pnp_id) {
+            const char* vendor_source = (device_info->pnp_id.vendor_id_source == 0x02) ? "USB Forum" :
+                                       (device_info->pnp_id.vendor_id_source == 0x01) ? "Bluetooth SIG" : "Unknown";
+            len += snprintf(info_buf + len, sizeof(info_buf) - len,
+                          "Vendor ID: 0x%04X (%s)\r\n", device_info->pnp_id.vendor_id, vendor_source);
+            len += snprintf(info_buf + len, sizeof(info_buf) - len,
+                          "Product ID: 0x%04X\r\n", device_info->pnp_id.product_id);
+            len += snprintf(info_buf + len, sizeof(info_buf) - len,
+                          "Product Version: 0x%04X\r\n", device_info->pnp_id.product_version);
+        }
+        len += snprintf(info_buf + len, sizeof(info_buf) - len, "==========================\r\n");
+
+        // Write directly to CDC bypassing logging system to prevent interleaving
+        if (s_cdc_connected[USB_CDC_PORT_LOG]) {
+            tinyusb_cdcacm_write_queue(USB_CDC_PORT_LOG, (const uint8_t *)info_buf, len);
+            tinyusb_cdcacm_write_flush(USB_CDC_PORT_LOG, 0);
+        }
     } else {
         ESP_LOGI(TAG, "No device info available - device may not be connected or DIS not yet discovered");
     }
