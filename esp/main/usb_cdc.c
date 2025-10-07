@@ -2,6 +2,7 @@
 
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_mac.h"
 #include "tusb_cdc_acm.h"
 // #include "tusb_console.h" // Not needed since we're not using CDC as console
 #include "esp_check.h"
@@ -247,6 +248,19 @@ static void process_log_line(void) {
     ESP_LOGI(TAG, "RESTART command received on CDC1 - restarting firmware");
     vTaskDelay(pdMS_TO_TICKS(100));  // Give log time to flush
     esp_restart();
+  } else if ((end - start) == 6 && strncmp(&s_log_cmd_buf[start], "serial", 6) == 0) {
+    ESP_LOGI(TAG, "SERIAL command received on CDC1 - displaying USB serial number");
+
+    uint8_t mac[6] = {0};
+    esp_err_t ret = esp_efuse_mac_get_default(mac);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "USB Serial Number: %02X%02X%02X%02X%02X%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        ESP_LOGI(TAG, "Port should show as: usbmodem%02X%02X%02X%02X%02X%02X<N>",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    } else {
+        ESP_LOGW(TAG, "Failed to read MAC address: %s", esp_err_to_name(ret));
+    }
   } else {
     ESP_LOGW(TAG, "Ignoring command on CDC1: %.*s", (int)(end - start),
              &s_log_cmd_buf[start]);
