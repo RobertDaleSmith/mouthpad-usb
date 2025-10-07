@@ -1,6 +1,7 @@
 #include "usb_cdc.h"
 
 #include "esp_log.h"
+#include "esp_system.h"
 #include "tusb_cdc_acm.h"
 // #include "tusb_console.h" // Not needed since we're not using CDC as console
 #include "esp_check.h"
@@ -242,6 +243,10 @@ static void process_log_line(void) {
     } else {
         ESP_LOGW(TAG, "Failed to clear bonds: %s", esp_err_to_name(ret));
     }
+  } else if ((end - start) == 7 && strncmp(&s_log_cmd_buf[start], "restart", 7) == 0) {
+    ESP_LOGI(TAG, "RESTART command received on CDC1 - restarting firmware");
+    vTaskDelay(pdMS_TO_TICKS(100));  // Give log time to flush
+    esp_restart();
   } else {
     ESP_LOGW(TAG, "Ignoring command on CDC1: %.*s", (int)(end - start),
              &s_log_cmd_buf[start]);

@@ -12,6 +12,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/drivers/hwinfo.h>
+#include <zephyr/sys/reboot.h>
 #include <string.h>
 #include <nrf.h>
 
@@ -95,8 +96,22 @@ static int cmd_reset(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Restart firmware */
+static int cmd_restart(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Restarting firmware...");
+	k_sleep(K_MSEC(100));  // Give log time to flush
+	sys_reboot(SYS_REBOOT_COLD);
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
 SHELL_CMD_REGISTER(reset, NULL, "Reset stored BLE bonds", cmd_reset);
+SHELL_CMD_REGISTER(restart, NULL, "Restart firmware", cmd_restart);
 SHELL_CMD_REGISTER(serial, NULL, "Display USB serial number", cmd_serial);
 
 /* Battery color indication mode - automatically set based on LED hardware */
