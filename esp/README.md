@@ -29,15 +29,21 @@ Select the board via `make xiao` or `make lilygo` (defaults to XIAO). The Makefi
 # Build for the XIAO ESP32-S3 target
 make xiao
 
-# Flash the freshly built binary (set ESP32_PORT if the default wildcard misses your port)
-ESP32_PORT=/dev/cu.usbserial-0001 make flash
+# Flash the firmware
+make flash
 
-# Combine flash + monitor
-ESP32_PORT=/dev/cu.usbserial-0001 make flash monitor
+# Monitor console output (auto-detects CDC port 1, exit with Ctrl+C)
+make monitor
+
+# Or use standard ESP-IDF commands
+source env.sh
+idf.py build flash monitor
 
 # Clean generated build artefacts
 make clean
 ```
+
+**Note:** `idf.py monitor` does **not work** with TinyUSB CDC ports (it expects a traditional USB-serial chip with hardware flow control). Use `make monitor` instead, which uses `pyserial miniterm` with proper CDC support and line ending handling.
 
 The Makefile sets `SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.xiao"` (or the LilyGo variant)
 so the active configuration always matches the chosen board. If you switch boards, run `make clean`

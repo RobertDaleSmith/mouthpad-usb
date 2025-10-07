@@ -1,7 +1,7 @@
 # Makefile for mouthpad_usb project
 # Provides convenient targets for building, cleaning, and workspace management
 
-.PHONY: init build build-xiao build-feather build-nordic-dongle build-april-dongle flash monitor clean fullclean help
+.PHONY: init build build-xiao build-feather build-nordic-dongle build-april-dongle flash monitor monitor-rtt monitor-cdc clean fullclean help
 
 # Default target
 all: build
@@ -71,9 +71,33 @@ flash-uf2:
 		exit 1; \
 	fi
 
-# Open RTT monitor (console output via J-Link RTT)
-# NOTE: Segger RTT Viewer app is recommended for better user experience
+# Monitor console output via USB CDC (default for UF2-based boards)
 monitor:
+	@$(MAKE) monitor-cdc
+
+# Monitor via USB CDC (for XIAO, Feather, dongles with UF2 bootloader)
+monitor-cdc:
+	@echo "Opening serial monitor on maintenance console (CDC port 1)"
+	@echo "NOTE: Use Ctrl+C to exit"
+	@echo ""
+	@if [ -z "$(PORT)" ]; then \
+		PORT=$$(ls /dev/cu.usbmodem* 2>/dev/null | grep '3$$' | head -1); \
+		if [ -n "$$PORT" ]; then \
+			echo "Auto-detected port: $$PORT"; \
+			echo "Connecting at 115200 baud..."; \
+			python3 -m serial.tools.miniterm $$PORT 115200 --eol LF --raw; \
+		else \
+			echo "No port auto-detected. Specify with: make monitor-cdc PORT=/dev/cu.usbmodem..."; \
+			echo "Available ports:"; \
+			ls -1 /dev/cu.usbmodem* 2>/dev/null || echo "  (none found)"; \
+		fi \
+	else \
+		echo "Connecting to $(PORT) at 115200 baud..."; \
+		python3 -m serial.tools.miniterm $(PORT) 115200 --eol LF --raw; \
+	fi
+
+# Monitor via J-Link RTT (requires J-Link debugger hardware)
+monitor-rtt:
 	@echo "Starting J-Link RTT monitor (press Ctrl+C to exit)..."
 	@echo "Note: Segger RTT Viewer app provides better experience with GUI"
 	@/Applications/SEGGER/JLink_V794e/JLinkGDBServerCLExe -device nRF52840_xxAA -if SWD -speed 4000 -rtttelnetport 19021 -silent & \
@@ -112,7 +136,9 @@ help:
 	@echo "  build-april-dongle - Build for April Brothers nRF52840 Dongle (non-standard LED wiring)"
 	@echo "  flash        - Flash the built firmware to device using J-Link"
 	@echo "  flash-uf2    - Flash the built firmware to device using UF2 bootloader"
-	@echo "  monitor      - Open RTT monitor (console output via J-Link RTT)"
+	@echo "  monitor      - Monitor serial output via USB CDC (auto-detect port)"
+	@echo "  monitor-cdc  - Monitor via USB CDC console (for UF2 boards)"
+	@echo "  monitor-rtt  - Monitor via J-Link RTT (requires J-Link hardware)"
 	@echo "  clean        - Remove build directory only"
 	@echo "  fullclean    - Remove all workspace files (requires re-initialization)"
 	@echo "  help         - Show this help message" 

@@ -48,7 +48,24 @@ flash:
 	SDKCONFIG_DEFAULTS="$(SDKCONFIG_FILES)" idf.py flash $(BOARD_CONFIG)
 
 monitor:
-	SDKCONFIG_DEFAULTS="$(SDKCONFIG_FILES)" idf.py monitor
+	@echo "Opening serial monitor on maintenance console (CDC port 1)"
+	@echo "NOTE: Use Ctrl+C to exit"
+	@echo ""
+	@if [ -z "$(PORT)" ]; then \
+		PORT=$$(ls /dev/cu.usbmodem* 2>/dev/null | grep '3$$' | head -1); \
+		if [ -n "$$PORT" ]; then \
+			echo "Auto-detected port: $$PORT"; \
+			echo "Connecting at 115200 baud..."; \
+			python3 -m serial.tools.miniterm $$PORT 115200 --eol LF --raw; \
+		else \
+			echo "No port auto-detected. Specify with: make monitor PORT=/dev/cu.usbmodem..."; \
+			echo "Available ports:"; \
+			ls -1 /dev/cu.usbmodem* 2>/dev/null || echo "  (none found)"; \
+		fi \
+	else \
+		echo "Connecting to $(PORT) at 115200 baud..."; \
+		python3 -m serial.tools.miniterm $(PORT) 115200 --eol LF --raw; \
+	fi
 
 # Combined targets
 flash-xiao:
@@ -73,9 +90,11 @@ help:
 	@echo "  make flash-xiao           - Flash XIAO ESP32-S3"
 	@echo "  make flash-lilygo         - Flash LilyGo T-Display-S3"
 	@echo ""
-	@echo "  make monitor              - Monitor serial output"
+	@echo "  make monitor [PORT=...]   - Monitor serial output (auto-detects CDC port 1)"
+	@echo "                              Exit with Ctrl+C"
 	@echo "  make clean                - Clean build files"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make BOARD=LILYGO         # Build for T-Display-S3"
 	@echo "  make xiao && make flash   # Build and flash XIAO"
+	@echo "  make monitor              # Auto-detect and monitor maintenance console"
