@@ -1,0 +1,104 @@
+name: Build ESP32 Firmware
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'esp/**'
+      - '.github/workflows/build-esp32.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'esp/**'
+      - '.github/workflows/build-esp32.yml'
+  workflow_dispatch:
+
+jobs:
+  build-esp32:
+    name: Build ESP32-S3 Firmware
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        board:
+          - name: xiao
+            display_name: "XIAO ESP32-S3"
+            sdkconfig: "sdkconfig.defaults;sdkconfig.board.xiao"
+          - name: lilygo
+            display_name: "LilyGo T-Display-S3"
+            sdkconfig: "sdkconfig.defaults;sdkconfig.board.lilygo"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build ${{ matrix.board.display_name }}
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.2
+          target: esp32s3
+          path: esp
+          command: |
+            . ~/esp-idf/export.sh
+            cd esp
+            export SDKCONFIG_DEFAULTS="${{ matrix.board.sdkconfig }}"
+            idf.py build
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts
+          cd esp/build
+          # Get build timestamp
+          BUILD_DATE=$(date +%Y%m%d_%H%M%S)
+
+          # Copy main firmware binaries with descriptive names
+          cp bootloader/bootloader.bin ../../artifacts/mouthpad_usb_${{ matrix.board.name }}_bootloader_${BUILD_DATE}.bin || true
+          cp partition_table/partition-table.bin ../../artifacts/mouthpad_usb_${{ matrix.board.name }}_partitions_${BUILD_DATE}.bin || true
+          cp mouthpad_usb.bin ../../artifacts/mouthpad_usb_${{ matrix.board.name }}_${BUILD_DATE}.bin || true
+
+          # Copy merged flashable binary (single file for easy flashing)
+          cp flash_project_args ../../artifacts/ || true
+
+          # Create a flash command reference
+          cat > ../../artifacts/FLASH_README_${{ matrix.board.name }}.txt << 'EOF'
+          === MouthPad^USB ESP32 Firmware - ${{ matrix.board.display_name }} ===
+
+          Flash using esptool.py:
+
+            esptool.py --chip esp32s3 write_flash \
+              0x0 mouthpad_usb_${{ matrix.board.name }}_bootloader_*.bin \
+              0x8000 mouthpad_usb_${{ matrix.board.name }}_partitions_*.bin \
+              0x10000 mouthpad_usb_${{ matrix.board.name }}_*.bin
+
+          Or use idf.py from the esp/ directory:
+
+            cd esp
+            idf.py -p /dev/ttyUSB0 flash
+
+          Build timestamp: $(date)
+          EOF
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mouthpad-usb-esp32-${{ matrix.board.name }}-firmware
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Build summary
+        run: |
+          echo "### ✅ ${{ matrix.board.display_name }} Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Board:** ${{ matrix.board.display_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**SDK Config:** \`${{ matrix.board.sdkconfig }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f esp/build/project_description.json ]; then
+            SIZE=$(stat -f%z esp/build/mouthpad_usb.bin 2>/dev/null || stat -c%s esp/build/mouthpad_usb.bin 2>/dev/null || echo "unknown")
+            echo "**Firmware size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts uploaded as: \`mouthpad-usb-esp32-${{ matrix.board.name }}-firmware\`" >> $GITHUB_STEP_SUMMARY
