@@ -59,6 +59,7 @@ The TinyUSB CDC maintenance port accepts the same commands as the nRF firmware:
 | `reset` | Disconnect, clear stored bonds (via `ble_bonds_clear_all()`), and return to scanning. |
 | `restart` | Restart firmware (software reset via `esp_restart()`). |
 | `serial` | Display USB serial number (MAC address). |
+| `version` | Display firmware build timestamp, ESP-IDF version, and chip information. |
 
 Logs arrive on the same port (typically `/dev/cu.usbmodem<serial>3` on macOS).
 

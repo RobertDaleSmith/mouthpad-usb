@@ -99,6 +99,7 @@ Both firmwares expose a maintenance console on the second CDC port:
 | `reset` | Disconnect MouthPad^, erase BLE bonds, return to pairing mode |
 | `restart` | Restart firmware (software reset) |
 | `serial` | Print USB serial number |
+| `version` | Display firmware version, build timestamp, and platform info |
 
 **Port names:**
 - **macOS:** `/dev/cu.usbmodem<serial>3`

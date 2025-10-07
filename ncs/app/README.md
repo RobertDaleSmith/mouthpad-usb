@@ -81,8 +81,10 @@ Override the board with `BOARD=<board>` when calling `make build`.
 | Command | Description |
 |---------|-------------|
 | `dfu`   | Reboot into the UF2 bootloader. |
-| `clear` | Disconnect and clear all BLE bonds, then return to pairing mode. |
+| `reset` | Disconnect and clear all BLE bonds, then return to pairing mode. |
+| `restart` | Restart firmware (software reset). |
 | `serial` | Print the USB serial number used in the `usbmodem` node name. |
+| `version` | Display firmware build timestamp and Zephyr version. |
 
 ## LED behaviour
 

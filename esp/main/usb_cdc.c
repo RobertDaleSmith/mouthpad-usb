@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_mac.h"
+#include "esp_chip_info.h"
 #include "tusb_cdc_acm.h"
 // #include "tusb_console.h" // Not needed since we're not using CDC as console
 #include "esp_check.h"
@@ -261,6 +262,17 @@ static void process_log_line(void) {
     } else {
         ESP_LOGW(TAG, "Failed to read MAC address: %s", esp_err_to_name(ret));
     }
+  } else if ((end - start) == 7 && strncmp(&s_log_cmd_buf[start], "version", 7) == 0) {
+    ESP_LOGI(TAG, "VERSION command received on CDC1 - displaying firmware version");
+
+    esp_chip_info_t chip_info;
+    esp_chip_info(&chip_info);
+
+    ESP_LOGI(TAG, "=== MouthPad^USB (ESP32) ===");
+    ESP_LOGI(TAG, "Built: %s %s", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "ESP-IDF: %s", IDF_VER);
+    ESP_LOGI(TAG, "Chip: %s rev%d, %d CPU core(s)",
+             CONFIG_IDF_TARGET, chip_info.revision, chip_info.cores);
   } else {
     ESP_LOGW(TAG, "Ignoring command on CDC1: %.*s", (int)(end - start),
              &s_log_cmd_buf[start]);

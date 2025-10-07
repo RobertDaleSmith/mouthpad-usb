@@ -109,10 +109,27 @@ static int cmd_restart(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Display firmware version information */
+static int cmd_version(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "=== MouthPad^USB (nRF52) ===");
+	shell_print(sh, "Built: %s %s", __DATE__, __TIME__);
+	shell_print(sh, "Zephyr: %s", KERNEL_VERSION_STRING);
+#ifdef BUILD_VERSION
+	shell_print(sh, "App Version: %s", STRINGIFY(BUILD_VERSION));
+#endif
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
 SHELL_CMD_REGISTER(reset, NULL, "Reset stored BLE bonds", cmd_reset);
 SHELL_CMD_REGISTER(restart, NULL, "Restart firmware", cmd_restart);
 SHELL_CMD_REGISTER(serial, NULL, "Display USB serial number", cmd_serial);
+SHELL_CMD_REGISTER(version, NULL, "Display firmware version", cmd_version);
 
 /* Battery color indication mode - automatically set based on LED hardware */
 /* GPIO LEDs use discrete mode, NeoPixel uses gradient mode */
