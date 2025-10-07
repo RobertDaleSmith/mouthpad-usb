@@ -1,6 +1,12 @@
 /*
  * Nordic nRF52840 Dongle (PCA10059) overlay for MouthPad^USB
- * With Adafruit UF2 Bootloader + SoftDevice S140 6.1.1
+ * Hardware: Nordic PCA10059 with Adafruit nRF52 Bootloader (no SoftDevice)
+ *
+ * Bootloader: Adafruit nRF52 UF2 bootloader at 0x0-0x1000
+ * USB Drive: Shows as "NRF52BOOT" when in bootloader mode (reset button)
+ *
+ * NOTE: Uses no-SoftDevice memory layout (code starts at 0x1000)
+ *       App runs Zephyr BLE controller (no actual SoftDevice binary)
  *
  * This uses STOCK Nordic pin assignments per wiki:
  *   LD1 Green: P0.06
@@ -102,7 +108,7 @@
 	};
 };
 
-/* Override default partitions with SoftDevice layout */
+/* Override default partitions for Adafruit bootloader (no SoftDevice) */
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
 /delete-node/ &slot1_partition;
@@ -114,24 +120,25 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		sd_partition: partition@0 {
-			label = "softdevice";
-			reg = <0x00000000 0x00026000>;
-		};
-
-		code_partition: partition@26000 {
-			label = "code_partition";
-			reg = <0x00026000 0x000c6000>;
-		};
-
-		storage_partition: partition@ec000 {
-			label = "storage";
-			reg = <0x000ec000 0x00008000>;
-		};
-
-		boot_partition: partition@f4000 {
+		/* Adafruit bootloader resides at 0x0-0x1000 */
+		boot_partition: partition@0 {
 			label = "adafruit_boot";
-			reg = <0x000f4000 0x0000c000>;
+			reg = <0x00000000 0x00001000>;
+		};
+
+		/* Application code starts immediately after bootloader (no SoftDevice) */
+		code_partition: partition@1000 {
+			label = "code_partition";
+			reg = <0x00001000 0x000ed000>;
+		};
+
+		/*
+		 * MBR params page (0xfe000) must not be included in our partitions
+		 * Storage ends before MBR params
+		 */
+		storage_partition: partition@ee000 {
+			label = "storage";
+			reg = <0x000ee000 0x00010000>;
 		};
 	};
 };

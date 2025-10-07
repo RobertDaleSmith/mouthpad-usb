@@ -1,17 +1,23 @@
-sd:
+# Adafruit UF2 bootloader (no SoftDevice variant)
+adafruit_boot:
   address: 0x0
-  size: 0x26000
+  size: 0x1000
   region: flash_primary
 app:
-  address: 0x26000
-  size: 0xc6000
+  address: 0x1000
+  size: 0xed000
   region: flash_primary
 settings_storage:
-  address: 0xec000
-  size: 0x8000
+  address: 0xee000
+  size: 0x10000
   region: flash_primary
-# Adafruit UF2 bootloader space (not MCUboot)
-adafruit_boot:
-  address: 0xf4000
-  size: 0xc000
+# MBR params page - reserved by bootloader, must not be used
+mbr_params:
+  address: 0xfe000
+  size: 0x1000
+  region: flash_primary
+# Bootloader settings page
+bootloader_settings:
+  address: 0xff000
+  size: 0x1000
   region: flash_primary

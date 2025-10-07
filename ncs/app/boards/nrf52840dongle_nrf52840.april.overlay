@@ -2,6 +2,12 @@
  * April Brothers nRF52840 Dongle overlay for MouthPad^USB
  * Hardware based on PCA10059 with Adafruit nRF52 Bootloader
  *
+ * Bootloader: Adafruit nRF52 UF2 bootloader with SoftDevice S140 v6.1.1 layout
+ * USB Drive: Shows as "NRF52BOOT" when in bootloader mode (double-tap reset)
+ *
+ * NOTE: Uses SoftDevice memory layout for bootloader compatibility
+ *       but app runs Zephyr BLE controller (no actual SoftDevice binary)
+ *
  * NOTE: April Brothers claims same pin mapping as Nordic wiki but physical wiring differs!
  * Pin mappings from: https://wiki.aprbrother.com/en/BleUsbDongle.html
  *
@@ -122,7 +128,7 @@
 	};
 };
 
-/* Override default partitions with SoftDevice layout */
+/* Override default partitions for Adafruit bootloader (no SoftDevice) */
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
 /delete-node/ &slot1_partition;
@@ -134,24 +140,25 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		sd_partition: partition@0 {
-			label = "softdevice";
-			reg = <0x00000000 0x00026000>;
-		};
-
-		code_partition: partition@26000 {
-			label = "code_partition";
-			reg = <0x00026000 0x000c6000>;
-		};
-
-		storage_partition: partition@ec000 {
-			label = "storage";
-			reg = <0x000ec000 0x00008000>;
-		};
-
-		boot_partition: partition@f4000 {
+		/* Adafruit bootloader resides at 0x0-0x1000 */
+		boot_partition: partition@0 {
 			label = "adafruit_boot";
-			reg = <0x000f4000 0x0000c000>;
+			reg = <0x00000000 0x00001000>;
+		};
+
+		/* Application code starts immediately after bootloader (no SoftDevice) */
+		code_partition: partition@1000 {
+			label = "code_partition";
+			reg = <0x00001000 0x000ed000>;
+		};
+
+		/*
+		 * MBR params page (0xfe000) must not be included in our partitions
+		 * Storage ends before MBR params
+		 */
+		storage_partition: partition@ee000 {
+			label = "storage";
+			reg = <0x000ee000 0x00010000>;
 		};
 	};
 };

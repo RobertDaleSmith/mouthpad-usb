@@ -1,4 +1,4 @@
-# MouthPad^ USB
+# MouthPad^USB
 
 Firmware for turning the **MouthPad^** wearable into a wired USB HID device. The microcontroller sits between the tablet/PC and the MouthPad^, bridging BLE HID + NUS traffic to USB HID + CDC, without changing the MouthPad^ firmware.
 
