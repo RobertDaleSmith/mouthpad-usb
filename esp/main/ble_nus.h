@@ -95,6 +95,13 @@ void ble_nus_client_set_server_bda(const esp_bd_addr_t bda);
  */
 void ble_nus_client_debug_status(void);
 
+/**
+ * @brief Notify NUS client that connection params have been updated
+ * Call this when ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT fires to signal that
+ * the connection is stable and ready for CCCD writes
+ */
+void ble_nus_client_connection_ready(void);
+
 #ifdef __cplusplus
 }
 #endif

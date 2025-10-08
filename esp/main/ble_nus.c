@@ -7,6 +7,7 @@
 #include "esp_gatt_common_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 #include "string.h"
 
 static const char *TAG = "BLE_NUS";
@@ -18,11 +19,13 @@ static esp_bd_addr_t nus_server_bda = {0};  // Server's BD address
 static bool nus_connected = false;
 static bool nus_service_discovered = false;
 static bool nus_tx_notify_enabled = false;
+static bool nus_connection_ready = false;  // Set when GAP conn params updated
 
 // Service and characteristic handles
 static esp_gatt_id_t nus_service_handle = {0};
 static uint16_t nus_char_tx_handle = 0;   // Handle for TX characteristic (notifications from server)
 static uint16_t nus_char_rx_handle = 0;   // Handle for RX characteristic (write to server)
+static uint16_t nus_cccd_handle = 0;      // Handle for CCCD descriptor
 static uint16_t nus_service_start_handle = 0;  // Start handle of NUS service
 static uint16_t nus_service_end_handle = 0;    // End handle of NUS service
 
@@ -33,6 +36,9 @@ static ble_nus_client_config_t nus_config = {0};
 // Queue for sending data
 static QueueHandle_t nus_tx_queue = NULL;
 
+// Flag to trigger CCCD write from dedicated task
+static volatile bool cccd_write_pending = false;
+
 // Data structure for TX queue
 typedef struct {
     uint8_t data[NUS_MAX_DATA_LEN];
@@ -41,6 +47,9 @@ typedef struct {
 
 // Task for handling TX data
 static void nus_tx_task(void *pvParameters);
+
+// Task for handling CCCD write
+static void nus_cccd_task(void *pvParameters);
 
 esp_err_t ble_nus_client_init(const ble_nus_client_config_t *config)
 {
@@ -63,6 +72,13 @@ esp_err_t ble_nus_client_init(const ble_nus_client_config_t *config)
     BaseType_t task_ret = xTaskCreate(nus_tx_task, "nus_tx", 4096, NULL, 5, NULL);
     if (task_ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create TX task");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Create CCCD task for deferred CCCD write operations
+    task_ret = xTaskCreate(nus_cccd_task, "nus_cccd", 4096, NULL, 5, NULL);
+    if (task_ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create CCCD task");
         return ESP_ERR_NO_MEM;
     }
 
@@ -173,6 +189,7 @@ void ble_nus_client_debug_status(void)
     ESP_LOGI(TAG, "Connected: %s", nus_connected ? "YES" : "NO");
     ESP_LOGI(TAG, "Service discovered: %s", nus_service_discovered ? "YES" : "NO");
     ESP_LOGI(TAG, "TX notifications enabled: %s", nus_tx_notify_enabled ? "YES" : "NO");
+    ESP_LOGI(TAG, "Connection ready: %s", nus_connection_ready ? "YES" : "NO");
     ESP_LOGI(TAG, "Connection ID: %d", nus_conn_id);
     ESP_LOGI(TAG, "GATT interface: %d", nus_gattc_if);
     ESP_LOGI(TAG, "Service range: %d-%d", nus_service_start_handle, nus_service_end_handle);
@@ -181,6 +198,12 @@ void ble_nus_client_debug_status(void)
     ESP_LOGI(TAG, "Server BD address: %02x:%02x:%02x:%02x:%02x:%02x",
              nus_server_bda[0], nus_server_bda[1], nus_server_bda[2],
              nus_server_bda[3], nus_server_bda[4], nus_server_bda[5]);
+}
+
+void ble_nus_client_connection_ready(void)
+{
+    ESP_LOGI(TAG, "Connection params updated - connection now stable");
+    nus_connection_ready = true;
 }
 
 void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
@@ -214,15 +237,16 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
         break;
 
     case ESP_GATTC_DISCONNECT_EVT:
-        ESP_LOGI(TAG, "GATT client disconnected, conn_id: %d, reason: %d", 
+        ESP_LOGI(TAG, "GATT client disconnected, conn_id: %d, reason: %d",
                  param->disconnect.conn_id, param->disconnect.reason);
-        
+
         if (param->disconnect.conn_id == nus_conn_id) {
             nus_connected = false;
             nus_service_discovered = false;
             nus_tx_notify_enabled = false;
+            nus_connection_ready = false;
             nus_conn_id = 0xFFFF;
-            
+
             if (nus_config.disconnected_cb) {
                 nus_config.disconnected_cb();
             }
@@ -304,14 +328,6 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
                         if (char_elem_result[i].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY) {
                             nus_char_tx_handle = char_elem_result[i].char_handle;
                             ESP_LOGI(TAG, "Found NUS TX characteristic (NOTIFY) at handle %d", nus_char_tx_handle);
-
-                            // Register for notifications
-                            esp_err_t ret = esp_ble_gattc_register_for_notify(nus_gattc_if,
-                                                             nus_server_bda,
-                                                             nus_char_tx_handle);
-                            if (ret != ESP_OK) {
-                                ESP_LOGE(TAG, "Failed to register for notifications: %s", esp_err_to_name(ret));
-                            }
                         }
                         // Check for WRITE property - this is where we send data TO the device
                         if (char_elem_result[i].properties & (ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_WRITE_NR)) {
@@ -326,7 +342,12 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
                 if (nus_char_tx_handle != 0 && nus_char_rx_handle != 0) {
                     ESP_LOGI(TAG, "NUS service configured - TX: %d, RX: %d",
                              nus_char_tx_handle, nus_char_rx_handle);
-                    nus_connected = true;  // Now we can set this to true - service is fully discovered
+
+                    // Signal CCCD task to write CCCD descriptor
+                    ESP_LOGI(TAG, "Signaling CCCD task to enable notifications");
+                    cccd_write_pending = true;
+
+                    nus_connected = true;  // Service is fully discovered
                 } else {
                     ESP_LOGW(TAG, "Failed to find all NUS characteristics");
                     nus_connected = false;
@@ -336,20 +357,6 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
             }
         } else if (!nus_service_discovered) {
             ESP_LOGW(TAG, "NUS service not found on this device");
-        }
-        break;
-
-
-    case ESP_GATTC_REG_FOR_NOTIFY_EVT:
-        ESP_LOGI(TAG, "Notification registration: handle=%d, status=%d",
-                 param->reg_for_notify.handle, param->reg_for_notify.status);
-
-        if (param->reg_for_notify.status == ESP_GATT_OK &&
-            param->reg_for_notify.handle == nus_char_tx_handle) {
-            nus_tx_notify_enabled = true;
-            ESP_LOGI(TAG, "NUS TX notifications enabled successfully");
-        } else if (param->reg_for_notify.status != ESP_GATT_OK) {
-            ESP_LOGE(TAG, "Failed to register for notifications: status=%d", param->reg_for_notify.status);
         }
         break;
 
@@ -386,21 +393,40 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
         }
         break;
 
+    case ESP_GATTC_CFG_MTU_EVT:
+        ESP_LOGI(TAG, "=== MTU CONFIGURED ===");
+        ESP_LOGI(TAG, "conn_id: %d, status: %d, mtu: %d",
+                 param->cfg_mtu.conn_id, param->cfg_mtu.status, param->cfg_mtu.mtu);
+        break;
+
     case ESP_GATTC_WRITE_DESCR_EVT:
         ESP_LOGI(TAG, "=== WRITE DESCRIPTOR RESPONSE ===");
-        ESP_LOGI(TAG, "conn_id: %d, handle: %d, status: %d", 
+        ESP_LOGI(TAG, "conn_id: %d, handle: %d, status: %d",
                  param->write.conn_id, param->write.handle, param->write.status);
-        ESP_LOGI(TAG, "Expected CCC handles: %d, %d", nus_char_tx_handle + 2, nus_char_tx_handle + 3);
-        
-        if (param->write.handle == nus_char_tx_handle + 2 || param->write.handle == nus_char_tx_handle + 3) {
+        ESP_LOGI(TAG, "Expected CCCD handle: %d", nus_cccd_handle);
+
+        // Check if this is the CCCD write response for NUS TX notifications
+        if (param->write.handle == nus_cccd_handle) {
             if (param->write.status == ESP_GATT_OK) {
-                ESP_LOGI(TAG, "CCC descriptor write successful - notifications enabled!");
-                nus_tx_notify_enabled = true;
+                ESP_LOGI(TAG, "✓ CCCD write successful - registering notification handler");
+
+                // Now register client-side notification handler
+                esp_err_t ret = esp_ble_gattc_register_for_notify(nus_gattc_if,
+                                                                  nus_server_bda,
+                                                                  nus_char_tx_handle);
+                if (ret == ESP_OK) {
+                    ESP_LOGI(TAG, "Notification handler registered");
+                    nus_tx_notify_enabled = true;
+                } else {
+                    ESP_LOGE(TAG, "Failed to register notification handler: %s",
+                            esp_err_to_name(ret));
+                }
             } else {
-                ESP_LOGE(TAG, "CCC descriptor write failed with status: %d", param->write.status);
+                ESP_LOGE(TAG, "✗ CCCD write failed with status: %d", param->write.status);
             }
         } else {
-            ESP_LOGI(TAG, "Write descriptor response for unexpected handle %d", param->write.handle);
+            ESP_LOGD(TAG, "Write descriptor response for different handle %d (expected %d)",
+                    param->write.handle, nus_cccd_handle);
         }
         break;
 
@@ -413,7 +439,7 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
 static void nus_tx_task(void *pvParameters)
 {
     nus_tx_data_t tx_data;
-    
+
     while (1) {
         if (xQueueReceive(nus_tx_queue, &tx_data, portMAX_DELAY) == pdTRUE) {
             ESP_LOGD(TAG, "Sending %d bytes to NUS", tx_data.len);
@@ -428,5 +454,60 @@ static void nus_tx_task(void *pvParameters)
                 ESP_LOGW(TAG, "NUS client not ready for transmission");
             }
         }
+    }
+}
+
+// Dedicated task for CCCD write operations
+// Waits for connection params to be updated (via ble_nus_client_connection_ready)
+// before writing CCCD to ensure BLE stack is stable
+static void nus_cccd_task(void *pvParameters)
+{
+    while (1) {
+        // Only write CCCD when:
+        // 1. CCCD write is pending (service discovered)
+        // 2. Connection params have been updated (connection is stable)
+        // 3. TX handle is valid
+        if (cccd_write_pending && nus_connection_ready && nus_char_tx_handle != 0) {
+            // Add 100ms delay after connection ready to let stack fully stabilize
+            // Connection params event fires, but stack may need a moment to settle
+            vTaskDelay(pdMS_TO_TICKS(100));
+
+            ESP_LOGI(TAG, "CCCD task: Connection stable, preparing CCCD write");
+            ESP_LOGI(TAG, "State check - gattc_if: %d, conn_id: %d, tx_handle: %d, connected: %d",
+                     nus_gattc_if, nus_conn_id, nus_char_tx_handle, nus_connected);
+
+            if (nus_gattc_if == ESP_GATT_IF_NONE || nus_conn_id == 0xFFFF) {
+                ESP_LOGE(TAG, "Invalid GATT state, skipping CCCD write");
+                cccd_write_pending = false;
+                vTaskDelay(pdMS_TO_TICKS(50));
+                continue;
+            }
+
+            // CCCD is typically at characteristic handle + 1
+            nus_cccd_handle = nus_char_tx_handle + 1;
+            ESP_LOGI(TAG, "Using CCCD handle %d (TX handle %d + 1)", nus_cccd_handle, nus_char_tx_handle);
+
+            // Write CCCD to enable notifications (0x01, 0x00 = notifications enabled)
+            uint8_t notify_en[] = {0x01, 0x00};
+            esp_err_t write_ret = esp_ble_gattc_write_char_descr(
+                nus_gattc_if,
+                nus_conn_id,
+                nus_cccd_handle,
+                sizeof(notify_en),
+                notify_en,
+                ESP_GATT_WRITE_TYPE_RSP,  // Back to RSP for proper response handling
+                ESP_GATT_AUTH_REQ_NONE
+            );
+
+            if (write_ret == ESP_OK) {
+                ESP_LOGI(TAG, "CCCD write initiated successfully");
+            } else {
+                ESP_LOGE(TAG, "CCCD write failed: %s", esp_err_to_name(write_ret));
+            }
+
+            cccd_write_pending = false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));  // Check every 50ms
     }
 }

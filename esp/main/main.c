@@ -148,6 +148,9 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
                      param->update_conn_params.conn_int,
                      param->update_conn_params.latency,
                      param->update_conn_params.timeout);
+
+            // Notify NUS client that connection is now stable
+            ble_nus_client_connection_ready();
         } else {
             ESP_LOGW(TAG, "Connection params update failed: 0x%x", param->update_conn_params.status);
         }
