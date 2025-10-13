@@ -21,6 +21,7 @@
 #include "ble_nus_client.h"
 #include "ble_hid.h"
 #include "ble_bas.h"
+#include "ble_dis.h"
 #include "usb_cdc.h"
 #include "usb_hid.h"
 
@@ -132,6 +133,13 @@ int ble_transport_init(void)
 	err = ble_bas_init();
 	if (err != 0) {
 		LOG_ERR("ble_bas_init failed (err %d)", err);
+		return err;
+	}
+
+	/* Initialize Device Information Service client */
+	err = ble_dis_init();
+	if (err != 0) {
+		LOG_ERR("ble_dis_init failed (err %d)", err);
 		return err;
 	}
 
@@ -360,8 +368,9 @@ static void ble_hid_discovery_complete_cb(void)
 	/* Play happy connection sound - full bridge is now operational! */
 	extern void buzzer_connected(void);
 	buzzer_connected();
-	
+
 	/* Start Battery Service discovery after HID is complete */
+	/* BAS will trigger DIS discovery when it completes */
 	ble_bas_discover(ble_central_get_default_conn());
 }
 
@@ -491,7 +500,10 @@ static void ble_central_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	
 	// Reset battery service state
 	ble_bas_reset();
-	
+
+	// Reset device information service state
+	ble_dis_reset();
+
 	// Release HOGP if active - like Nordic sample does
 	extern struct bt_hogp *ble_hid_get_hogp(void);
 	extern bool bt_hogp_assign_check(const struct bt_hogp *hogp);

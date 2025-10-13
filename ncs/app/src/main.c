@@ -18,7 +18,9 @@
 #include "usb_cdc.h"
 #include "usb_hid.h"
 #include "ble_transport.h"
+#include "ble_central.h"
 #include "ble_bas.h"
+#include "ble_dis.h"
 #include "oled_display.h"
 #include "buzzer.h"
 #include "leds.h"
@@ -177,6 +179,22 @@ static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
 	} else {
 		LOG_DBG("HID client not ready - waiting for service discovery");
 	}
+}
+
+/* nanopb string encoding callback for device info strings */
+static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field, void * const *arg)
+{
+	const char *str = (const char *)(*arg);
+
+	if (!str || str[0] == '\0') {
+		return true;  /* Empty string, nothing to encode */
+	}
+
+	if (!pb_encode_tag_for_field(stream, field)) {
+		return false;
+	}
+
+	return pb_encode_string(stream, (const uint8_t *)str, strlen(str));
 }
 
 int usb_cdc_send_proto_message(mouthware_message_RelayToAppMessage message)
@@ -439,6 +457,52 @@ int main(void)
 								}
 								response.message_body.ble_connection_status_response.rssi = rssi_dbm;
 								response.message_body.ble_connection_status_response.battery_level = battery_level;
+								usb_cdc_send_proto_message_async(response);
+							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_device_info_read_tag) {
+								/* Handle DeviceInfoRead request */
+								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
+								response.which_message_body = mouthware_message_RelayToAppMessage_device_info_response_tag;
+
+								/* Get advertised device name from BLE transport */
+								const char *device_name = ble_transport_get_device_name();
+								if (device_name && device_name[0] != '\0') {
+									response.message_body.device_info_response.name.funcs.encode = encode_string_callback;
+									response.message_body.device_info_response.name.arg = (void *)device_name;
+								}
+
+								/* Get device info from DIS client */
+								const ble_dis_info_t *info = ble_dis_get_info();
+								if (info) {
+									/* Firmware version */
+									if (info->has_firmware_version) {
+										response.message_body.device_info_response.firmware.funcs.encode = encode_string_callback;
+										response.message_body.device_info_response.firmware.arg = (void *)info->firmware_version;
+									}
+									/* VID and PID from PnP ID */
+									if (info->has_pnp_id) {
+										response.message_body.device_info_response.vid = info->vendor_id;
+										response.message_body.device_info_response.pid = info->product_id;
+									}
+								}
+
+								/* Get MouthPad BLE address */
+								static char ble_addr_str[BT_ADDR_STR_LEN];
+								struct bt_conn *conn = ble_central_get_default_conn();
+								if (conn) {
+									const bt_addr_le_t *addr_le = bt_conn_get_dst(conn);
+									bt_addr_to_str(&addr_le->a, ble_addr_str, sizeof(ble_addr_str));
+
+									response.message_body.device_info_response.address.funcs.encode = encode_string_callback;
+									response.message_body.device_info_response.address.arg = (void *)ble_addr_str;
+								}
+
+								LOG_INF("Sending device info: Name=%s, FW=%s, Addr=%s, VID=0x%04X, PID=0x%04X",
+									device_name ? device_name : "(none)",
+									(info && info->has_firmware_version) ? info->firmware_version : "(none)",
+									conn ? ble_addr_str : "(none)",
+									(info && info->has_pnp_id) ? info->vendor_id : 0,
+									(info && info->has_pnp_id) ? info->product_id : 0);
+
 								usb_cdc_send_proto_message_async(response);
 							}
 							break;

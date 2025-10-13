@@ -38,6 +38,10 @@ typedef struct _mouthware_message_BleConnectionStatusRead {
     char dummy_field;
 } mouthware_message_BleConnectionStatusRead;
 
+typedef struct _mouthware_message_DeviceInfoRead {
+    char dummy_field;
+} mouthware_message_DeviceInfoRead;
+
 typedef PB_BYTES_ARRAY_T(240) mouthware_message_PassThroughToMouthpad_data_t;
 typedef struct _mouthware_message_PassThroughToMouthpad {
     mouthware_message_PassThroughToMouthpad_data_t data;
@@ -53,6 +57,8 @@ typedef struct _mouthware_message_AppToRelayMessage {
         mouthware_message_BleConnectionStatusRead ble_connection_status_read;
         /* / Message to forward to the MouthPad through the Relay. */
         mouthware_message_PassThroughToMouthpad pass_through_to_mouthpad;
+        /* / Request device information from the connected MouthPad */
+        mouthware_message_DeviceInfoRead device_info_read;
     } message_body;
 } mouthware_message_AppToRelayMessage;
 
@@ -61,6 +67,14 @@ typedef struct _mouthware_message_BleConnectionStatusResponse {
     int32_t rssi;
     uint32_t battery_level; /* Battery level percentage (0-100) from BLE Battery Service */
 } mouthware_message_BleConnectionStatusResponse;
+
+typedef struct _mouthware_message_DeviceInfoResponse {
+    pb_callback_t name; /* Advertised device name */
+    pb_callback_t firmware; /* Firmware version */
+    pb_callback_t address; /* BLE MAC address */
+    uint32_t vid; /* USB Vendor ID from PnP ID characteristic */
+    uint32_t pid; /* USB Product ID from PnP ID characteristic */
+} mouthware_message_DeviceInfoResponse;
 
 typedef struct _mouthware_message_PassThroughToMouthpadResponse {
     mouthware_message_PassThroughToMouthpadErrorCode error_code;
@@ -81,6 +95,8 @@ typedef struct _mouthware_message_RelayToAppMessage {
         mouthware_message_PassThroughToMouthpadResponse pass_through_to_mouthpad_response;
         /* / Message from the MouthPad for the app. */
         mouthware_message_PassThroughToApp pass_through_to_app;
+        /* / Response to a DeviceInfoRead */
+        mouthware_message_DeviceInfoResponse device_info_response;
     } message_body;
 } mouthware_message_RelayToAppMessage;
 
@@ -104,9 +120,11 @@ extern "C" {
 
 
 
+
 #define mouthware_message_AppToRelayMessage_destination_ENUMTYPE mouthware_message_AppToRelayMessageDestination
 
 #define mouthware_message_BleConnectionStatusResponse_connection_status_ENUMTYPE mouthware_message_RelayBleConnectionStatus
+
 
 #define mouthware_message_PassThroughToMouthpadResponse_error_code_ENUMTYPE mouthware_message_PassThroughToMouthpadErrorCode
 
@@ -115,16 +133,20 @@ extern "C" {
 
 /* Initializer values for message structs */
 #define mouthware_message_BleConnectionStatusRead_init_default {0}
+#define mouthware_message_DeviceInfoRead_init_default {0}
 #define mouthware_message_PassThroughToMouthpad_init_default {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_default {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_default}}
 #define mouthware_message_BleConnectionStatusResponse_init_default {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
+#define mouthware_message_DeviceInfoResponse_init_default {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_default {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
 #define mouthware_message_PassThroughToApp_init_default {{0, {0}}}
 #define mouthware_message_RelayToAppMessage_init_default {0, {mouthware_message_BleConnectionStatusResponse_init_default}}
 #define mouthware_message_BleConnectionStatusRead_init_zero {0}
+#define mouthware_message_DeviceInfoRead_init_zero {0}
 #define mouthware_message_PassThroughToMouthpad_init_zero {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_zero {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_zero}}
 #define mouthware_message_BleConnectionStatusResponse_init_zero {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
+#define mouthware_message_DeviceInfoResponse_init_zero {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_zero {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
 #define mouthware_message_PassThroughToApp_init_zero {{0, {0}}}
 #define mouthware_message_RelayToAppMessage_init_zero {0, {mouthware_message_BleConnectionStatusResponse_init_zero}}
@@ -134,20 +156,32 @@ extern "C" {
 #define mouthware_message_AppToRelayMessage_destination_tag 1
 #define mouthware_message_AppToRelayMessage_ble_connection_status_read_tag 2
 #define mouthware_message_AppToRelayMessage_pass_through_to_mouthpad_tag 3
+#define mouthware_message_AppToRelayMessage_device_info_read_tag 4
 #define mouthware_message_BleConnectionStatusResponse_connection_status_tag 1
 #define mouthware_message_BleConnectionStatusResponse_rssi_tag 2
 #define mouthware_message_BleConnectionStatusResponse_battery_level_tag 3
+#define mouthware_message_DeviceInfoResponse_name_tag 1
+#define mouthware_message_DeviceInfoResponse_firmware_tag 2
+#define mouthware_message_DeviceInfoResponse_address_tag 3
+#define mouthware_message_DeviceInfoResponse_vid_tag 4
+#define mouthware_message_DeviceInfoResponse_pid_tag 5
 #define mouthware_message_PassThroughToMouthpadResponse_error_code_tag 1
 #define mouthware_message_PassThroughToApp_data_tag 1
 #define mouthware_message_RelayToAppMessage_ble_connection_status_response_tag 1
 #define mouthware_message_RelayToAppMessage_pass_through_to_mouthpad_response_tag 2
 #define mouthware_message_RelayToAppMessage_pass_through_to_app_tag 3
+#define mouthware_message_RelayToAppMessage_device_info_response_tag 4
 
 /* Struct field encoding specification for nanopb */
 #define mouthware_message_BleConnectionStatusRead_FIELDLIST(X, a) \
 
 #define mouthware_message_BleConnectionStatusRead_CALLBACK NULL
 #define mouthware_message_BleConnectionStatusRead_DEFAULT NULL
+
+#define mouthware_message_DeviceInfoRead_FIELDLIST(X, a) \
+
+#define mouthware_message_DeviceInfoRead_CALLBACK NULL
+#define mouthware_message_DeviceInfoRead_DEFAULT NULL
 
 #define mouthware_message_PassThroughToMouthpad_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BYTES,    data,              1)
@@ -157,11 +191,13 @@ X(a, STATIC,   SINGULAR, BYTES,    data,              1)
 #define mouthware_message_AppToRelayMessage_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    destination,       1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,ble_connection_status_read,message_body.ble_connection_status_read),   2) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_mouthpad,message_body.pass_through_to_mouthpad),   3)
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_mouthpad,message_body.pass_through_to_mouthpad),   3) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,device_info_read,message_body.device_info_read),   4)
 #define mouthware_message_AppToRelayMessage_CALLBACK NULL
 #define mouthware_message_AppToRelayMessage_DEFAULT NULL
 #define mouthware_message_AppToRelayMessage_message_body_ble_connection_status_read_MSGTYPE mouthware_message_BleConnectionStatusRead
 #define mouthware_message_AppToRelayMessage_message_body_pass_through_to_mouthpad_MSGTYPE mouthware_message_PassThroughToMouthpad
+#define mouthware_message_AppToRelayMessage_message_body_device_info_read_MSGTYPE mouthware_message_DeviceInfoRead
 
 #define mouthware_message_BleConnectionStatusResponse_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    connection_status,   1) \
@@ -169,6 +205,15 @@ X(a, STATIC,   SINGULAR, INT32,    rssi,              2) \
 X(a, STATIC,   SINGULAR, UINT32,   battery_level,     3)
 #define mouthware_message_BleConnectionStatusResponse_CALLBACK NULL
 #define mouthware_message_BleConnectionStatusResponse_DEFAULT NULL
+
+#define mouthware_message_DeviceInfoResponse_FIELDLIST(X, a) \
+X(a, CALLBACK, SINGULAR, STRING,   name,              1) \
+X(a, CALLBACK, SINGULAR, STRING,   firmware,          2) \
+X(a, CALLBACK, SINGULAR, STRING,   address,           3) \
+X(a, STATIC,   SINGULAR, UINT32,   vid,               4) \
+X(a, STATIC,   SINGULAR, UINT32,   pid,               5)
+#define mouthware_message_DeviceInfoResponse_CALLBACK pb_default_field_callback
+#define mouthware_message_DeviceInfoResponse_DEFAULT NULL
 
 #define mouthware_message_PassThroughToMouthpadResponse_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    error_code,        1)
@@ -183,39 +228,47 @@ X(a, STATIC,   SINGULAR, BYTES,    data,              1)
 #define mouthware_message_RelayToAppMessage_FIELDLIST(X, a) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,ble_connection_status_response,message_body.ble_connection_status_response),   1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_mouthpad_response,message_body.pass_through_to_mouthpad_response),   2) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_app,message_body.pass_through_to_app),   3)
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_app,message_body.pass_through_to_app),   3) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,device_info_response,message_body.device_info_response),   4)
 #define mouthware_message_RelayToAppMessage_CALLBACK NULL
 #define mouthware_message_RelayToAppMessage_DEFAULT NULL
 #define mouthware_message_RelayToAppMessage_message_body_ble_connection_status_response_MSGTYPE mouthware_message_BleConnectionStatusResponse
 #define mouthware_message_RelayToAppMessage_message_body_pass_through_to_mouthpad_response_MSGTYPE mouthware_message_PassThroughToMouthpadResponse
 #define mouthware_message_RelayToAppMessage_message_body_pass_through_to_app_MSGTYPE mouthware_message_PassThroughToApp
+#define mouthware_message_RelayToAppMessage_message_body_device_info_response_MSGTYPE mouthware_message_DeviceInfoResponse
 
 extern const pb_msgdesc_t mouthware_message_BleConnectionStatusRead_msg;
+extern const pb_msgdesc_t mouthware_message_DeviceInfoRead_msg;
 extern const pb_msgdesc_t mouthware_message_PassThroughToMouthpad_msg;
 extern const pb_msgdesc_t mouthware_message_AppToRelayMessage_msg;
 extern const pb_msgdesc_t mouthware_message_BleConnectionStatusResponse_msg;
+extern const pb_msgdesc_t mouthware_message_DeviceInfoResponse_msg;
 extern const pb_msgdesc_t mouthware_message_PassThroughToMouthpadResponse_msg;
 extern const pb_msgdesc_t mouthware_message_PassThroughToApp_msg;
 extern const pb_msgdesc_t mouthware_message_RelayToAppMessage_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
 #define mouthware_message_BleConnectionStatusRead_fields &mouthware_message_BleConnectionStatusRead_msg
+#define mouthware_message_DeviceInfoRead_fields &mouthware_message_DeviceInfoRead_msg
 #define mouthware_message_PassThroughToMouthpad_fields &mouthware_message_PassThroughToMouthpad_msg
 #define mouthware_message_AppToRelayMessage_fields &mouthware_message_AppToRelayMessage_msg
 #define mouthware_message_BleConnectionStatusResponse_fields &mouthware_message_BleConnectionStatusResponse_msg
+#define mouthware_message_DeviceInfoResponse_fields &mouthware_message_DeviceInfoResponse_msg
 #define mouthware_message_PassThroughToMouthpadResponse_fields &mouthware_message_PassThroughToMouthpadResponse_msg
 #define mouthware_message_PassThroughToApp_fields &mouthware_message_PassThroughToApp_msg
 #define mouthware_message_RelayToAppMessage_fields &mouthware_message_RelayToAppMessage_msg
 
 /* Maximum encoded size of messages (where known) */
-#define MOUTHWARE_MESSAGE_MOUTHPADRELAY_PB_H_MAX_SIZE mouthware_message_RelayToAppMessage_size
+/* mouthware_message_DeviceInfoResponse_size depends on runtime parameters */
+/* mouthware_message_RelayToAppMessage_size depends on runtime parameters */
+#define MOUTHWARE_MESSAGE_MOUTHPADRELAY_PB_H_MAX_SIZE mouthware_message_PassThroughToApp_size
 #define mouthware_message_AppToRelayMessage_size 248
 #define mouthware_message_BleConnectionStatusRead_size 0
 #define mouthware_message_BleConnectionStatusResponse_size 19
+#define mouthware_message_DeviceInfoRead_size    0
 #define mouthware_message_PassThroughToApp_size  258
 #define mouthware_message_PassThroughToMouthpadResponse_size 2
 #define mouthware_message_PassThroughToMouthpad_size 243
-#define mouthware_message_RelayToAppMessage_size 261
 
 #ifdef __cplusplus
 } /* extern "C" */
