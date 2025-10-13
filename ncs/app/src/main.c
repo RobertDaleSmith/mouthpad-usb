@@ -23,7 +23,7 @@
 #include "buzzer.h"
 #include "leds.h"
 #include "button.h"
-#include "MouthpadUsb.pb.h"
+#include "MouthpadRelay.pb.h"
 #include "pb_decode.h"
 #include "pb_encode.h"
 
@@ -179,11 +179,11 @@ static void usb_hid_data_callback(const uint8_t *data, uint16_t len)
 	}
 }
 
-int usb_cdc_send_proto_message(mouthware_message_UsbDongleToMouthpadAppMessage message)
+int usb_cdc_send_proto_message(mouthware_message_RelayToAppMessage message)
 {
 	uint8_t dataPacket[1024];
 	pb_ostream_t stream = pb_ostream_from_buffer(dataPacket, sizeof(dataPacket));
-	if (!pb_encode(&stream, mouthware_message_UsbDongleToMouthpadAppMessage_fields, &message)) {
+	if (!pb_encode(&stream, mouthware_message_RelayToAppMessage_fields, &message)) {
 		LOG_ERR("Encoding failed: %s\n", PB_GET_ERROR(&stream));
 		return -1;
 	}
@@ -195,9 +195,9 @@ int mouthpad_nus_data_received_callback(const uint8_t *data, uint16_t len)
 	/* Forward data from MouthPad (BLE NUS) to USB CDC0 - minimal logging to keep CDC0 clean */
 	LOG_DBG("NUS→CDC: %d bytes", len);
 
-	// take binary data received via BLE, wrap it in a UsbDongleToMouthpadAppMessage and send it to the USB CDC
-	mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
-	message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_pass_through_to_app_tag;
+	// take binary data received via BLE, wrap it in a RelayToAppMessage and send it to the USB CDC
+	mouthware_message_RelayToAppMessage message = mouthware_message_RelayToAppMessage_init_zero;
+	message.which_message_body = mouthware_message_RelayToAppMessage_pass_through_to_app_tag;
 	message.message_body.pass_through_to_app.data.size = len;
 	memcpy(message.message_body.pass_through_to_app.data.bytes, data, len);
 
@@ -323,6 +323,22 @@ int main(void)
 		oled_display_reset_state();
 	}
 
+	/* Packet framing state machine for CDC RX */
+	enum {
+		FRAME_STATE_SEARCH_MAGIC1,  // Looking for 0xAA
+		FRAME_STATE_SEARCH_MAGIC2,  // Looking for 0x55
+		FRAME_STATE_LENGTH_HIGH,    // Reading length high byte
+		FRAME_STATE_LENGTH_LOW,     // Reading length low byte
+		FRAME_STATE_PAYLOAD,        // Reading payload
+		FRAME_STATE_CRC_HIGH,       // Reading CRC high byte
+		FRAME_STATE_CRC_LOW         // Reading CRC low byte
+	} frame_state = FRAME_STATE_SEARCH_MAGIC1;
+
+	static uint8_t frame_buffer[512];
+	static uint16_t frame_length = 0;
+	static uint16_t frame_pos = 0;
+	static uint16_t expected_crc = 0;
+
 	LOG_INF("Entering main loop...");
 
 	for (;;) {
@@ -334,131 +350,120 @@ int main(void)
 		uint8_t battery_level = ble_bas_get_battery_level();
 		int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
 
-		// Check for data from USB CDC and send to NUS
-		// Supports two modes with explicit detection:
-		// 1. Text mode: Plain text commands ending with \n (for testing/debugging)
-		// 2. Protobuf mode: Length-prefixed protobuf messages (for production app)
-		//
-		// Detection strategy:
-		// - If message starts with printable ASCII letter (A-Z, a-z), assume text mode
-		// - Otherwise assume protobuf mode (length prefix is a small number < 32)
-		static uint8_t cdc_buffer[UART_BUF_SIZE];
-		static int cdc_pos = 0;
-		static bool text_mode = false;
-
+		// Check for data from USB CDC - parse framed packets [0xAA 0x55][len][payload][CRC]
 		uint8_t c;
 		int bytes_read = usb_cdc_receive_data(&c, 1);
 
-		if (bytes_read > 0) { // Data received from CDC
-			LOG_DBG("CDC0 RX byte: 0x%02X ('%c')", c, (c >= 32 && c < 127) ? c : '.');
+		if (bytes_read > 0) {
+			data_activity = true;
 
-			// Detect mode on first byte
-			if (cdc_pos == 0) {
-				// Text mode: starts with A-Z or a-z (typical commands like "StartStream")
-				// Protobuf mode: starts with length byte
-				//
-				// Since protobuf messages are length-prefixed, the first byte indicates
-				// the message length. For typical protobuf messages (<64 bytes), the first
-				// byte will be 0-63, which doesn't overlap with A-Z/a-z (65-90, 97-122).
-				//
-				// Edge case: Protobuf messages of length 65-90 or 97-122 bytes will be
-				// misdetected as text, but this is unlikely for typical control messages.
-				text_mode = ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
-				LOG_INF("Mode detected: %s (first byte: 0x%02X)", text_mode ? "TEXT" : "PROTOBUF", c);
-			}
+			switch (frame_state) {
+				case FRAME_STATE_SEARCH_MAGIC1:
+					if (c == 0xAA) {
+						frame_state = FRAME_STATE_SEARCH_MAGIC2;
+					}
+					break;
 
-			cdc_buffer[cdc_pos] = c;
-			cdc_pos++;
-			data_activity = true;  // Mark data activity
+				case FRAME_STATE_SEARCH_MAGIC2:
+					if (c == 0x55) {
+						frame_state = FRAME_STATE_LENGTH_HIGH;
+						frame_pos = 0;
+					} else if (c != 0xAA) {
+						// Not magic byte sequence, restart search
+						frame_state = FRAME_STATE_SEARCH_MAGIC1;
+					}
+					// If c == 0xAA, stay in SEARCH_MAGIC2 (could be start of new frame)
+					break;
 
-			if (cdc_pos >= UART_BUF_SIZE) {
-				LOG_ERR("CDC buffer overflow");
-				cdc_pos = 0;
-				continue;
-			}
+				case FRAME_STATE_LENGTH_HIGH:
+					frame_length = (uint16_t)c << 8;
+					frame_state = FRAME_STATE_LENGTH_LOW;
+					break;
 
-			// Text mode: wait for newline
-			if (text_mode && (c == '\n' || c == '\r')) {
-				cdc_buffer[cdc_pos - 1] = '\0'; // Null terminate, remove newline
-				LOG_INF("Text command: '%s' (%d bytes)", cdc_buffer, cdc_pos - 1);
-
-				if (ble_transport_is_nus_ready()) {
-					LOG_INF("Sending to MouthPad via NUS...");
-					err = ble_transport_send_nus_data(cdc_buffer, cdc_pos - 1);
-					if (err) {
-						LOG_ERR("CDC→NUS failed (err %d)", err);
+				case FRAME_STATE_LENGTH_LOW:
+					frame_length |= c;
+					if (frame_length > sizeof(frame_buffer)) {
+						LOG_ERR("Frame too large: %d bytes", frame_length);
+						frame_state = FRAME_STATE_SEARCH_MAGIC1;
 					} else {
-						LOG_INF("Sent successfully");
+						frame_state = FRAME_STATE_PAYLOAD;
+						frame_pos = 0;
 					}
-				} else {
-					LOG_WRN("NUS not ready - is MouthPad connected?");
-				}
+					break;
 
-				cdc_pos = 0;
-				text_mode = false;
-				continue;
-			}
+				case FRAME_STATE_PAYLOAD:
+					frame_buffer[frame_pos++] = c;
+					if (frame_pos >= frame_length) {
+						frame_state = FRAME_STATE_CRC_HIGH;
+					}
+					break;
 
-			// Protobuf mode: wait for length-prefixed packet
-			if (!text_mode) {
-				int expected_len = cdc_buffer[0];
+				case FRAME_STATE_CRC_HIGH:
+					expected_crc = (uint16_t)c << 8;
+					frame_state = FRAME_STATE_CRC_LOW;
+					break;
 
-				if (cdc_pos == expected_len + 1) {
-					LOG_INF("Protobuf packet: len=%d, total=%d bytes", expected_len, cdc_pos);
-					LOG_HEXDUMP_INF(cdc_buffer, cdc_pos, "CDC RX");
+				case FRAME_STATE_CRC_LOW:
+					expected_crc |= c;
 
-					// decode the byte string as
-					mouthware_message_MouthpadAppToUsbMessage message;
-					pb_istream_t stream = pb_istream_from_buffer(&cdc_buffer[1], cdc_pos - 1);
-					if (!pb_decode(&stream, mouthware_message_MouthpadAppToUsbMessage_fields, &message)) {
+					// Validate CRC
+					uint16_t calculated_crc = calculate_crc16(frame_buffer, frame_length);
+					if (calculated_crc != expected_crc) {
+						LOG_ERR("CRC mismatch: calc=0x%04X, expected=0x%04X", calculated_crc, expected_crc);
+						frame_state = FRAME_STATE_SEARCH_MAGIC1;
+						break;
+					}
+
+					// Valid framed packet received!
+					LOG_DBG("Framed packet RX: %d bytes", frame_length);
+
+					// Decode protobuf message
+					mouthware_message_AppToRelayMessage message;
+					pb_istream_t stream = pb_istream_from_buffer(frame_buffer, frame_length);
+					if (!pb_decode(&stream, mouthware_message_AppToRelayMessage_fields, &message)) {
 						LOG_ERR("Protobuf decode failed: %s", PB_GET_ERROR(&stream));
-						cdc_pos = 0;
-						continue;
+						frame_state = FRAME_STATE_SEARCH_MAGIC1;
+						break;
 					}
 
+					// Handle message
 					switch (message.destination) {
-						case mouthware_message_MouthpadAppToUsbMessageDestination_MOUTHPAD_USB_MESSAGE_DESTINATION_DONGLE:
-							if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_connection_status_request_tag) {
-								mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
-								message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_connection_status_response_tag;
-								message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
+						case mouthware_message_AppToRelayMessageDestination_APP_RELAY_MESSAGE_DESTINATION_RELAY:
+							if (message.which_message_body == mouthware_message_AppToRelayMessage_ble_connection_status_read_tag) {
+								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
+								response.which_message_body = mouthware_message_RelayToAppMessage_ble_connection_status_response_tag;
 								if (is_connected) {
-									message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_CONNECTED;
+									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTED;
 								} else {
-									message.message_body.connection_status_response.connection_status = mouthware_message_UsbDongleConnectionStatus_USB_DONGLE_CONNECTION_STATUS_DISCONNECTED;
-
+									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_DISCONNECTED;
 								}
-
-								usb_cdc_send_proto_message_async(message);
-							}
-							else if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_rssi_request_tag) {
-								mouthware_message_UsbDongleToMouthpadAppMessage message = mouthware_message_UsbDongleToMouthpadAppMessage_init_zero;
-								message.which_message_body = mouthware_message_UsbDongleToMouthpadAppMessage_rssi_status_response_tag;
-								message.message_body.rssi_status_response.rssi = rssi_dbm;
-								usb_cdc_send_proto_message_async(message);
+								response.message_body.ble_connection_status_response.rssi = rssi_dbm;
+								usb_cdc_send_proto_message_async(response);
 							}
 							break;
-						case mouthware_message_MouthpadAppToUsbMessageDestination_MOUTHPAD_USB_MESSAGE_DESTINATION_MOUTHPAD:
-							if (message.which_message_body == mouthware_message_MouthpadAppToUsbMessage_pass_through_to_mouthpad_request_tag) {
+
+						case mouthware_message_AppToRelayMessageDestination_APP_RELAY_MESSAGE_DESTINATION_MOUTHPAD:
+							if (message.which_message_body == mouthware_message_AppToRelayMessage_pass_through_to_mouthpad_tag) {
 								if (ble_transport_is_nus_ready()) {
-									/* Forward data to MouthPad via BLE NUS - log to console (CDC1) only */
-									LOG_DBG("CDC→NUS: %d bytes", message.message_body.pass_through_to_mouthpad_request.data.size);
-									err = ble_transport_send_nus_data(message.message_body.pass_through_to_mouthpad_request.data.bytes, message.message_body.pass_through_to_mouthpad_request.data.size);
+									LOG_DBG("CDC→NUS: %d bytes", message.message_body.pass_through_to_mouthpad.data.size);
+									err = ble_transport_send_nus_data(message.message_body.pass_through_to_mouthpad.data.bytes, message.message_body.pass_through_to_mouthpad.data.size);
 									if (err) {
 										LOG_WRN("CDC→NUS failed (err %d)", err);
 									}
 								} else {
-									LOG_DBG("NUS not ready, dropping %d bytes", message.message_body.pass_through_to_mouthpad_request.data.size);
+									LOG_DBG("NUS not ready, dropping %d bytes", message.message_body.pass_through_to_mouthpad.data.size);
 								}
 							}
 							break;
+
 						default:
 							LOG_WRN("Invalid destination: %d", message.destination);
 							break;
 					}
 
-					cdc_pos = 0;
-				}
+					// Reset for next frame
+					frame_state = FRAME_STATE_SEARCH_MAGIC1;
+					break;
 			}
 		}
 		

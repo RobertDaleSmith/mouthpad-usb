@@ -12,7 +12,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/ring_buffer.h>
-#include "MouthpadUsb.pb.h"
+#include "MouthpadRelay.pb.h"
 #include "pb_encode.h"
 
 LOG_MODULE_REGISTER(usb_cdc, LOG_LEVEL_INF);
@@ -38,7 +38,7 @@ static K_FIFO_DEFINE(fifo_usb_cdc_async_data);
 /* Data structure for async USB CDC message sending */
 struct usb_cdc_async_data_t {
 	void *fifo_reserved;
-	mouthware_message_UsbDongleToMouthpadAppMessage message;
+	mouthware_message_RelayToAppMessage message;
 };
 
 /* Work handler for async USB CDC message sending */
@@ -55,7 +55,7 @@ static void usb_cdc_async_work_handler(struct k_work *work)
 	/* Send the message synchronously (this will be quick) */
 	uint8_t dataPacket[1024];
 	pb_ostream_t stream = pb_ostream_from_buffer(dataPacket, sizeof(dataPacket));
-	if (!pb_encode(&stream, mouthware_message_UsbDongleToMouthpadAppMessage_fields, &async_data->message)) {
+	if (!pb_encode(&stream, mouthware_message_RelayToAppMessage_fields, &async_data->message)) {
 		LOG_ERR("Async encoding failed: %s\n", PB_GET_ERROR(&stream));
 	} else {
 		usb_cdc_send_data(dataPacket, stream.bytes_written);
@@ -191,7 +191,7 @@ const struct device *usb_cdc_get_uart_device(void)
 }
 
 /* Send USB CDC proto message asynchronously (non-blocking) */
-int usb_cdc_send_proto_message_async(mouthware_message_UsbDongleToMouthpadAppMessage message)
+int usb_cdc_send_proto_message_async(mouthware_message_RelayToAppMessage message)
 {
 	struct usb_cdc_async_data_t *async_data;
 	

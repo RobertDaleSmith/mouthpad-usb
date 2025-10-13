@@ -28,7 +28,7 @@ target_include_directories(app PRIVATE
     src/leds.c
     src/button.c
     src/main.c
-    src/mouthpad-proto/src/C/MouthpadUsb.pb.c
+    src/mouthpad-proto/src/C/MouthpadRelay.pb.c
     src/mouthpad-proto/nanopb/pb_common.c
     src/mouthpad-proto/nanopb/pb_decode.c
     src/mouthpad-proto/nanopb/pb_encode.c
