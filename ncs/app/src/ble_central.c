@@ -24,11 +24,19 @@
 
 LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_INF);
 
+/* BLE Central connection state */
+enum ble_central_state {
+	BLE_CENTRAL_STATE_DISCONNECTED,
+	BLE_CENTRAL_STATE_SCANNING,
+	BLE_CENTRAL_STATE_CONNECTING,
+	BLE_CENTRAL_STATE_CONNECTED
+};
+
 /* BLE Central state */
 static struct bt_conn *default_conn;
 static struct k_work scan_work;
 static struct k_work_delayable scan_indicator_work;
-static bool scanning_active = false;
+static enum ble_central_state connection_state = BLE_CENTRAL_STATE_DISCONNECTED;
 
 /* Bonded device tracking */
 static bt_addr_le_t bonded_device_addr;
@@ -128,6 +136,10 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		LOG_ERR("CONNECTION FAILED: %s, error: 0x%02x (%s)", addr, conn_err,
 			bt_hci_err_to_str(conn_err));
 
+		/* Connection failed - return to disconnected state */
+		connection_state = BLE_CENTRAL_STATE_DISCONNECTED;
+		LOG_INF("*** STATE SET TO DISCONNECTED (connection failed) ***");
+
 		if (default_conn == conn) {
 			bt_conn_unref(default_conn);
 			default_conn = NULL;
@@ -143,8 +155,11 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	/* Store connection reference */
 	default_conn = bt_conn_ref(conn);
 
+	/* Update state to connected */
+	connection_state = BLE_CENTRAL_STATE_CONNECTED;
+	LOG_INF("*** STATE SET TO CONNECTED ***");
+
 	/* Stop scanning */
-	scanning_active = false;
 	err = bt_scan_stop();
 	if ((!err) && (err != -EALREADY)) {
 		LOG_ERR("Stop LE scan failed (err %d)", err);
@@ -170,6 +185,10 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	bt_conn_unref(default_conn);
 	default_conn = NULL;
+
+	/* Update state to disconnected */
+	connection_state = BLE_CENTRAL_STATE_DISCONNECTED;
+	LOG_INF("*** STATE SET TO DISCONNECTED (device disconnected) ***");
 
 	/* Stop any background scanning */
 	stop_background_scan();
@@ -201,7 +220,7 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 /* Scanning indicator work handler */
 static void scan_indicator_handler(struct k_work *work)
 {
-	if (scanning_active) {
+	if (connection_state == BLE_CENTRAL_STATE_SCANNING) {
 		if (has_bonded_device) {
 			/* Format address without type suffix like "(random)" */
 			char addr_str[18]; // "XX:XX:XX:XX:XX:XX\0"
@@ -291,12 +310,15 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		return;
 	}
 
+	/* CRITICAL: Set connecting state IMMEDIATELY before any logging or processing
+	 * This ensures status queries return CONNECTING as soon as we decide to connect */
+	connection_state = BLE_CENTRAL_STATE_CONNECTING;
+	LOG_INF("*** STATE SET TO CONNECTING ***");
+
 	/* Device has both services - log and proceed with connection */
 	LOG_INF("MouthPad device found: %s (RSSI: %d dBm)", addr, rssi);
 	LOG_INF("CONNECTING TO MOUTHPAD DEVICE: %s", addr);
 
-	/* Stop scanning indicator */
-	scanning_active = false;
 
 	/* Store RSSI for later use during connection */
 	extern void ble_transport_set_rssi(int8_t rssi);
@@ -362,7 +384,8 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 	if (err) {
 		LOG_ERR("Failed to create connection (err %d)", err);
 		/* Restart scanning on error */
-		scanning_active = true;
+		connection_state = BLE_CENTRAL_STATE_DISCONNECTED;
+		LOG_INF("*** STATE SET TO DISCONNECTED (bt_conn_le_create failed) ***");
 		k_work_schedule(&scan_indicator_work, K_SECONDS(1));
 		(void)k_work_submit(&scan_work);
 		return;
@@ -617,6 +640,18 @@ int ble_central_start_scan(void)
 	int err;
 	uint8_t filter_mode = 0;
 
+	/* Don't start scanning if we're currently connecting - let the connection complete */
+	if (connection_state == BLE_CENTRAL_STATE_CONNECTING) {
+		LOG_DBG("Cannot start scan: connection in progress");
+		return -EBUSY;
+	}
+
+	/* Don't start scanning if we're already connected */
+	if (connection_state == BLE_CENTRAL_STATE_CONNECTED) {
+		LOG_DBG("Cannot start scan: already connected");
+		return -EALREADY;
+	}
+
 	err = bt_scan_stop();
 	if (err) {
 		LOG_ERR("Failed to stop scanning (err %d)", err);
@@ -691,14 +726,17 @@ int ble_central_start_scan(void)
 		return err;
 	}
 
+	/* Update state to scanning */
+	connection_state = BLE_CENTRAL_STATE_SCANNING;
+	LOG_INF("*** STATE SET TO SCANNING ***");
+
 	/* Start scanning indicator */
-	scanning_active = true;
 	k_work_schedule(&scan_indicator_work, K_NO_WAIT);
 
 	/* Update display to show scanning status */
 	extern int oled_display_scanning(void);
 	oled_display_scanning();
-	
+
 	return 0;
 }
 
@@ -959,5 +997,23 @@ void ble_central_clear_bonded_device(void)
 /* Query if actively scanning for devices */
 bool ble_central_is_scanning(void)
 {
-	return scanning_active;
+	bool result = connection_state == BLE_CENTRAL_STATE_SCANNING;
+	LOG_INF("is_scanning query: state=%d, returning %d", connection_state, result);
+	return result;
+}
+
+/* Query if connection attempt is in progress */
+bool ble_central_is_connecting(void)
+{
+	bool result = connection_state == BLE_CENTRAL_STATE_CONNECTING;
+	LOG_INF("is_connecting query: state=%d, returning %d", connection_state, result);
+	return result;
+}
+
+/* Query if connected to a device */
+bool ble_central_is_connected(void)
+{
+	bool result = connection_state == BLE_CENTRAL_STATE_CONNECTED;
+	LOG_INF("is_connected query: state=%d, returning %d", connection_state, result);
+	return result;
 }

@@ -450,13 +450,30 @@ int main(void)
 							if (message.which_message_body == mouthware_message_AppToRelayMessage_ble_connection_status_read_tag) {
 								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
 								response.which_message_body = mouthware_message_RelayToAppMessage_ble_connection_status_response_tag;
-								if (is_connected) {
-									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTED;
-								} else if (ble_central_is_scanning()) {
+
+								/* Use ble_central state machine as the ONLY source of truth for connection status */
+								LOG_INF("=== BLE STATUS QUERY ===");
+								bool central_connecting = ble_central_is_connecting();
+								bool central_scanning = ble_central_is_scanning();
+								bool central_connected = ble_central_is_connected();
+								LOG_INF("Query state: connecting=%d, scanning=%d, connected=%d (transport is_connected=%d)",
+								        central_connecting, central_scanning, central_connected, is_connected);
+
+								if (central_connecting) {
+									LOG_INF("Reporting: CONNECTING");
+									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTING;
+								} else if (central_scanning) {
+									LOG_INF("Reporting: SEARCHING");
 									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_SEARCHING;
+								} else if (central_connected) {
+									LOG_INF("Reporting: CONNECTED (via ble_central state)");
+									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTED;
 								} else {
+									/* Default to DISCONNECTED if all other checks fail */
+									LOG_INF("Reporting: DISCONNECTED");
 									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_DISCONNECTED;
 								}
+
 								response.message_body.ble_connection_status_response.rssi = rssi_dbm;
 								response.message_body.ble_connection_status_response.battery_level = battery_level;
 								usb_cdc_send_proto_message_async(response);

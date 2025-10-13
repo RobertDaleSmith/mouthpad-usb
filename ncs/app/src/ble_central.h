@@ -46,4 +46,10 @@ void ble_central_clear_bonded_device(void);
 /* Scanning state query */
 bool ble_central_is_scanning(void);
 
+/* Connecting state query */
+bool ble_central_is_connecting(void);
+
+/* Connected state query */
+bool ble_central_is_connected(void);
+
 #endif /* BLE_CENTRAL_H */
