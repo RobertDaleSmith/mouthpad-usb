@@ -59,6 +59,7 @@ typedef struct _mouthware_message_AppToRelayMessage {
 typedef struct _mouthware_message_BleConnectionStatusResponse {
     mouthware_message_RelayBleConnectionStatus connection_status;
     int32_t rssi;
+    uint32_t battery_level; /* Battery level percentage (0-100) from BLE Battery Service */
 } mouthware_message_BleConnectionStatusResponse;
 
 typedef struct _mouthware_message_PassThroughToMouthpadResponse {
@@ -116,14 +117,14 @@ extern "C" {
 #define mouthware_message_BleConnectionStatusRead_init_default {0}
 #define mouthware_message_PassThroughToMouthpad_init_default {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_default {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_default}}
-#define mouthware_message_BleConnectionStatusResponse_init_default {_mouthware_message_RelayBleConnectionStatus_MIN, 0}
+#define mouthware_message_BleConnectionStatusResponse_init_default {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_default {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
 #define mouthware_message_PassThroughToApp_init_default {{0, {0}}}
 #define mouthware_message_RelayToAppMessage_init_default {0, {mouthware_message_BleConnectionStatusResponse_init_default}}
 #define mouthware_message_BleConnectionStatusRead_init_zero {0}
 #define mouthware_message_PassThroughToMouthpad_init_zero {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_zero {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_zero}}
-#define mouthware_message_BleConnectionStatusResponse_init_zero {_mouthware_message_RelayBleConnectionStatus_MIN, 0}
+#define mouthware_message_BleConnectionStatusResponse_init_zero {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_zero {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
 #define mouthware_message_PassThroughToApp_init_zero {{0, {0}}}
 #define mouthware_message_RelayToAppMessage_init_zero {0, {mouthware_message_BleConnectionStatusResponse_init_zero}}
@@ -135,6 +136,7 @@ extern "C" {
 #define mouthware_message_AppToRelayMessage_pass_through_to_mouthpad_tag 3
 #define mouthware_message_BleConnectionStatusResponse_connection_status_tag 1
 #define mouthware_message_BleConnectionStatusResponse_rssi_tag 2
+#define mouthware_message_BleConnectionStatusResponse_battery_level_tag 3
 #define mouthware_message_PassThroughToMouthpadResponse_error_code_tag 1
 #define mouthware_message_PassThroughToApp_data_tag 1
 #define mouthware_message_RelayToAppMessage_ble_connection_status_response_tag 1
@@ -163,7 +165,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_mouthpad,messag
 
 #define mouthware_message_BleConnectionStatusResponse_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    connection_status,   1) \
-X(a, STATIC,   SINGULAR, INT32,    rssi,              2)
+X(a, STATIC,   SINGULAR, INT32,    rssi,              2) \
+X(a, STATIC,   SINGULAR, UINT32,   battery_level,     3)
 #define mouthware_message_BleConnectionStatusResponse_CALLBACK NULL
 #define mouthware_message_BleConnectionStatusResponse_DEFAULT NULL
 
@@ -208,7 +211,7 @@ extern const pb_msgdesc_t mouthware_message_RelayToAppMessage_msg;
 #define MOUTHWARE_MESSAGE_MOUTHPADRELAY_PB_H_MAX_SIZE mouthware_message_RelayToAppMessage_size
 #define mouthware_message_AppToRelayMessage_size 248
 #define mouthware_message_BleConnectionStatusRead_size 0
-#define mouthware_message_BleConnectionStatusResponse_size 13
+#define mouthware_message_BleConnectionStatusResponse_size 19
 #define mouthware_message_PassThroughToApp_size  258
 #define mouthware_message_PassThroughToMouthpadResponse_size 2
 #define mouthware_message_PassThroughToMouthpad_size 243

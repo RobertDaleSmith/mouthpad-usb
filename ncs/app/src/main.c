@@ -438,6 +438,7 @@ int main(void)
 									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_DISCONNECTED;
 								}
 								response.message_body.ble_connection_status_response.rssi = rssi_dbm;
+								response.message_body.ble_connection_status_response.battery_level = battery_level;
 								usb_cdc_send_proto_message_async(response);
 							}
 							break;
