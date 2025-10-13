@@ -452,6 +452,8 @@ int main(void)
 								response.which_message_body = mouthware_message_RelayToAppMessage_ble_connection_status_response_tag;
 								if (is_connected) {
 									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTED;
+								} else if (ble_central_is_scanning()) {
+									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_SEARCHING;
 								} else {
 									response.message_body.ble_connection_status_response.connection_status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_DISCONNECTED;
 								}

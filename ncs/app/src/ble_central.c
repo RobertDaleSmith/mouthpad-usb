@@ -955,3 +955,9 @@ void ble_central_clear_bonded_device(void)
 	memset(&bonded_device_addr, 0, sizeof(bonded_device_addr));
 	LOG_INF("Bonded device tracking cleared - will pair with any MouthPad");
 }
+
+/* Query if actively scanning for devices */
+bool ble_central_is_scanning(void)
+{
+	return scanning_active;
+}

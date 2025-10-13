@@ -43,4 +43,7 @@ int ble_central_start_background_scan_for_rssi(void);
 /* Bonding management */
 void ble_central_clear_bonded_device(void);
 
+/* Scanning state query */
+bool ble_central_is_scanning(void);
+
 #endif /* BLE_CENTRAL_H */
