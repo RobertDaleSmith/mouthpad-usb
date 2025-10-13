@@ -20,6 +20,7 @@ target_include_directories(app PRIVATE
     src/ble_nus_client.c
     src/ble_hid.c
     src/ble_bas.c
+    src/ble_dis.c
     src/usb_cdc.c
     src/usb_hid.c
     src/sample_usbd_init.c
