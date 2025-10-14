@@ -41,6 +41,7 @@ static enum ble_central_state connection_state = BLE_CENTRAL_STATE_DISCONNECTED;
 /* Bonded device tracking */
 static bt_addr_le_t bonded_device_addr;
 static bool has_bonded_device = false;
+static char bonded_device_name[32] = {0};  /* Cached device name for bonded device */
 
 /* Device UUID tracking - to verify both HID and NUS across multiple packets */
 struct device_uuid_state {
@@ -89,6 +90,12 @@ static bool background_scan_active = false;
 static void auth_cancel(struct bt_conn *conn);
 static void pairing_complete(struct bt_conn *conn, bool bonded);
 static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason);
+
+/* Settings persistence for bonded device name */
+static int bonded_name_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg);
+static int bonded_name_commit(void);
+
+SETTINGS_STATIC_HANDLER_DEFINE(ble_central, "ble_central", NULL, bonded_name_set, bonded_name_commit, NULL);
 
 /* Connection callbacks structure */
 BT_CONN_CB_DEFINE(conn_callbacks) = {
@@ -438,7 +445,29 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 	if (bonded) {
 		bt_addr_le_copy(&bonded_device_addr, bt_conn_get_dst(conn));
 		has_bonded_device = true;
-		LOG_INF("Device bonded - will only reconnect to this MouthPad: %s", addr);
+
+		/* Cache the device name from transport layer */
+		extern const char *ble_transport_get_device_name(void);
+		const char *device_name = ble_transport_get_device_name();
+		if (device_name && device_name[0] != '\0') {
+			strncpy(bonded_device_name, device_name, sizeof(bonded_device_name) - 1);
+			bonded_device_name[sizeof(bonded_device_name) - 1] = '\0';
+			LOG_INF("Device bonded - cached name: '%s', address: %s", bonded_device_name, addr);
+
+			/* Save device name to persistent settings */
+			if (IS_ENABLED(CONFIG_SETTINGS)) {
+				int err = settings_save_one("ble_central/bonded_name", bonded_device_name, strlen(bonded_device_name));
+				if (err) {
+					LOG_ERR("Failed to save bonded device name to settings (err %d)", err);
+				} else {
+					LOG_INF("Saved bonded device name to persistent storage");
+				}
+			}
+		} else {
+			bonded_device_name[0] = '\0';
+			LOG_INF("Device bonded - no name available, address: %s", addr);
+		}
+		LOG_INF("Will only reconnect to this MouthPad");
 	}
 }
 
@@ -450,6 +479,41 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 
 	LOG_WRN("Pairing failed conn: %s, reason %d %s", addr, reason,
 		bt_security_err_to_str(reason));
+}
+
+/* Settings handlers for persisting bonded device name */
+static int bonded_name_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
+{
+	const char *next;
+	int rc;
+
+	LOG_INF("Settings callback: name='%s', len=%d", name, len);
+
+	if (settings_name_steq(name, "bonded_name", &next) && !next) {
+		/* This is the "bonded_name" setting */
+		if (len > sizeof(bonded_device_name)) {
+			LOG_ERR("Bonded name too long: %d bytes", len);
+			return -EINVAL;
+		}
+
+		rc = read_cb(cb_arg, bonded_device_name, len);
+		if (rc >= 0) {
+			bonded_device_name[rc] = '\0';
+			LOG_INF("Loaded bonded device name from settings: '%s'", bonded_device_name);
+			return 0;
+		}
+
+		LOG_ERR("Failed to read bonded name from settings (err %d)", rc);
+		return rc;
+	}
+
+	return -ENOENT;
+}
+
+static int bonded_name_commit(void)
+{
+	/* Settings have been loaded */
+	return 0;
 }
 
 /* Helper to check and store bonded device */
@@ -592,7 +656,8 @@ int ble_central_init(void)
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		LOG_INF("Loading settings...");
 		settings_load();
-		LOG_INF("Settings loaded");
+		LOG_INF("Settings loaded - bonded_device_name='%s'",
+			bonded_device_name[0] ? bonded_device_name : "(empty)");
 	}
 
 	/* Register authentication callbacks */
@@ -986,12 +1051,54 @@ void ble_central_clear_bonded_device(void)
 			bonded_device_addr.a.val[5], bonded_device_addr.a.val[4],
 			bonded_device_addr.a.val[3], bonded_device_addr.a.val[2],
 			bonded_device_addr.a.val[1], bonded_device_addr.a.val[0]);
-		LOG_INF("Clearing bonded device tracking: %s", addr_str);
+		LOG_INF("Clearing bonded device tracking: %s (name: '%s')", addr_str,
+			bonded_device_name[0] ? bonded_device_name : "(none)");
 	}
 
 	has_bonded_device = false;
 	memset(&bonded_device_addr, 0, sizeof(bonded_device_addr));
+	memset(bonded_device_name, 0, sizeof(bonded_device_name));
+
+	/* Delete saved device name from persistent settings */
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		int err = settings_delete("ble_central/bonded_name");
+		if (err) {
+			LOG_ERR("Failed to delete bonded device name from settings (err %d)", err);
+		} else {
+			LOG_INF("Deleted bonded device name from persistent storage");
+		}
+	}
+
 	LOG_INF("Bonded device tracking cleared - will pair with any MouthPad");
+}
+
+/* Get bonded device address and name if one exists */
+bool ble_central_get_bonded_device_addr(bt_addr_le_t *out_addr, char *out_name, size_t name_size)
+{
+	if (!out_addr) {
+		return false;
+	}
+
+	if (has_bonded_device) {
+		bt_addr_le_copy(out_addr, &bonded_device_addr);
+
+		/* Copy cached device name if requested */
+		if (out_name && name_size > 0) {
+			if (bonded_device_name[0] != '\0') {
+				strncpy(out_name, bonded_device_name, name_size - 1);
+				out_name[name_size - 1] = '\0';
+				LOG_INF("Returning bonded device with name: '%s'", out_name);
+			} else {
+				out_name[0] = '\0';
+				LOG_INF("Returning bonded device with NO cached name");
+			}
+		}
+
+		return true;
+	}
+
+	LOG_INF("No bonded device found");
+	return false;
 }
 
 /* Query if actively scanning for devices */

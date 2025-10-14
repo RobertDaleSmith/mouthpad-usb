@@ -43,6 +43,9 @@ int ble_central_start_background_scan_for_rssi(void);
 /* Bonding management */
 void ble_central_clear_bonded_device(void);
 
+/* Get bonded device address and name (returns true if bonded device exists, address/name copied to out params) */
+bool ble_central_get_bonded_device_addr(bt_addr_le_t *out_addr, char *out_name, size_t name_size);
+
 /* Scanning state query */
 bool ble_central_is_scanning(void);
 

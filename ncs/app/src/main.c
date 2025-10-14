@@ -482,46 +482,82 @@ int main(void)
 								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
 								response.which_message_body = mouthware_message_RelayToAppMessage_device_info_response_tag;
 
-								/* Get advertised device name from BLE transport */
-								const char *device_name = ble_transport_get_device_name();
+								/* Check if we have a bonded device (even if disconnected) */
+								bt_addr_le_t bonded_addr;
+								static char bonded_name[32];
+								bool has_bonded = ble_central_get_bonded_device_addr(&bonded_addr, bonded_name, sizeof(bonded_name));
+
+								/* Get BLE address - prefer active connection, fallback to bonded address */
+								static char ble_addr_str[BT_ADDR_STR_LEN];
+								struct bt_conn *conn = ble_central_get_default_conn();
+
+								if (conn) {
+									/* Device is currently connected - get address from connection */
+									const bt_addr_le_t *addr_le = bt_conn_get_dst(conn);
+									bt_addr_to_str(&addr_le->a, ble_addr_str, sizeof(ble_addr_str));
+									response.message_body.device_info_response.address.funcs.encode = encode_string_callback;
+									response.message_body.device_info_response.address.arg = (void *)ble_addr_str;
+								} else if (has_bonded) {
+									/* Device is bonded but not connected - return cached address */
+									bt_addr_to_str(&bonded_addr.a, ble_addr_str, sizeof(ble_addr_str));
+									response.message_body.device_info_response.address.funcs.encode = encode_string_callback;
+									response.message_body.device_info_response.address.arg = (void *)ble_addr_str;
+								}
+
+								/* Get device name - prefer live name from active connection, fallback to cached name */
+								const char *device_name = NULL;
+								if (conn) {
+									/* Get advertised device name from BLE transport (live connection) */
+									device_name = ble_transport_get_device_name();
+								}
+
+								/* If no live name available but we have a cached bonded name, use that */
+								if ((!device_name || device_name[0] == '\0') && has_bonded && bonded_name[0] != '\0') {
+									device_name = bonded_name;
+								}
+
+								/* Encode device name if we have one */
 								if (device_name && device_name[0] != '\0') {
 									response.message_body.device_info_response.name.funcs.encode = encode_string_callback;
 									response.message_body.device_info_response.name.arg = (void *)device_name;
 								}
 
-								/* Get device info from DIS client */
-								const ble_dis_info_t *info = ble_dis_get_info();
-								if (info) {
-									/* Firmware version */
-									if (info->has_firmware_version) {
-										response.message_body.device_info_response.firmware.funcs.encode = encode_string_callback;
-										response.message_body.device_info_response.firmware.arg = (void *)info->firmware_version;
-									}
-									/* VID and PID from PnP ID */
-									if (info->has_pnp_id) {
-										response.message_body.device_info_response.vid = info->vendor_id;
-										response.message_body.device_info_response.pid = info->product_id;
-									}
-								}
-
-								/* Get MouthPad BLE address */
-								static char ble_addr_str[BT_ADDR_STR_LEN];
-								struct bt_conn *conn = ble_central_get_default_conn();
+								/* Get device info from DIS client (only available when connected) */
 								if (conn) {
-									const bt_addr_le_t *addr_le = bt_conn_get_dst(conn);
-									bt_addr_to_str(&addr_le->a, ble_addr_str, sizeof(ble_addr_str));
-
-									response.message_body.device_info_response.address.funcs.encode = encode_string_callback;
-									response.message_body.device_info_response.address.arg = (void *)ble_addr_str;
+									const ble_dis_info_t *info = ble_dis_get_info();
+									if (info) {
+										/* Firmware version */
+										if (info->has_firmware_version) {
+											response.message_body.device_info_response.firmware.funcs.encode = encode_string_callback;
+											response.message_body.device_info_response.firmware.arg = (void *)info->firmware_version;
+										}
+										/* VID and PID from PnP ID */
+										if (info->has_pnp_id) {
+											response.message_body.device_info_response.vid = info->vendor_id;
+											response.message_body.device_info_response.pid = info->product_id;
+										}
+									}
 								}
 
-								LOG_INF("Sending device info: Name=%s, FW=%s, Addr=%s, VID=0x%04X, PID=0x%04X",
-									device_name ? device_name : "(none)",
-									(info && info->has_firmware_version) ? info->firmware_version : "(none)",
-									conn ? ble_addr_str : "(none)",
-									(info && info->has_pnp_id) ? info->vendor_id : 0,
-									(info && info->has_pnp_id) ? info->product_id : 0);
+								LOG_INF("Sending device info: bonded=%d, connected=%d, Addr=%s, Name=%s",
+									has_bonded, conn != NULL,
+									(conn || has_bonded) ? ble_addr_str : "(none)",
+									(device_name && device_name[0] != '\0') ? device_name : "(none)");
 
+								usb_cdc_send_proto_message_async(response);
+							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_clear_bonds_write_tag) {
+								/* Handle ClearBondsWrite request */
+								LOG_INF("=== CLEAR BONDS REQUEST (via protobuf) ===");
+
+								/* Clear BLE bonds using existing logic */
+								clear_ble_pairings();
+
+								/* Send success response */
+								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
+								response.which_message_body = mouthware_message_RelayToAppMessage_clear_bonds_response_tag;
+								response.message_body.clear_bonds_response.success = true;
+
+								LOG_INF("Bonds cleared successfully, sending response");
 								usb_cdc_send_proto_message_async(response);
 							}
 							break;
