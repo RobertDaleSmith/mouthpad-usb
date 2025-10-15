@@ -41,8 +41,15 @@ static void buzzer_stop_work_handler(struct k_work *work)
 
 int buzzer_init(void)
 {
+#if !defined(CONFIG_BOARD_XIAO_BLE)
+    /* Buzzer only available on XIAO boards with expansion board */
+    LOG_DBG("Buzzer not available on this board (XIAO only)");
+    buzzer_available = false;
+    buzzer_ready = false;
+    return 0;
+#else
     LOG_INF("Checking for passive buzzer...");
-    
+
     /* Get PWM device for buzzer */
     pwm_dev = DEVICE_DT_GET(DT_ALIAS(buzzer_pwm));
     if (!device_is_ready(pwm_dev)) {
@@ -51,19 +58,20 @@ int buzzer_init(void)
         buzzer_ready = false;
         return 0;  /* Return success to continue boot process */
     }
-    
+
     buzzer_available = true;
     LOG_INF("Buzzer PWM device detected, initializing...");
-    
+
     /* Initialize work queue for delayed stop */
     k_work_init_delayable(&buzzer_stop_work, buzzer_stop_work_handler);
-    
+
     /* Test buzzer with a short beep */
     buzzer_ready = true;
     buzzer_beep(1000, 100);  /* 1kHz for 100ms test */
-    
+
     LOG_INF("Passive buzzer initialized successfully");
     return 0;
+#endif
 }
 
 void buzzer_click(void)

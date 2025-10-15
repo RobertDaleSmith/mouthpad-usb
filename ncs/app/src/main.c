@@ -259,25 +259,21 @@ int main(void)
 	}
 
 	/* Initialize OLED Display */
-	LOG_INF("Initializing OLED Display...");
 	err = oled_display_init();
 	if (err != 0) {
 		LOG_WRN("oled_display_init failed (err %d) - continuing without display", err);
 		/* Continue without display - it's not critical for core functionality */
 	} else {
-		LOG_INF("OLED Display initialized successfully");
-		
 		/* Show splash screen with Augmental logo */
 		oled_display_splash_screen(2000);  /* Show logo for 2 seconds */
 	}
 
 	/* Initialize Passive Buzzer */
-	LOG_INF("Initializing Passive Buzzer...");
 	err = buzzer_init();
 	if (err != 0) {
 		LOG_WRN("buzzer_init failed (err %d) - continuing without buzzer", err);
 		/* Continue without buzzer - it's not critical for core functionality */
-	} else {
+	} else if (buzzer_is_available()) {
 		LOG_INF("Passive Buzzer initialized successfully");
 	}
 
