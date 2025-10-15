@@ -190,9 +190,9 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 				data_received_callback(data, size);
 			}
 
-			/* Also directly trigger transport layer data activity */
-			extern void ble_transport_mark_data_activity(void);
-			ble_transport_mark_data_activity();
+			/* Mark HID-specific data activity for LED indication */
+			extern void ble_transport_mark_hid_data_activity(void);
+			ble_transport_mark_hid_data_activity();
 		}
 	}
 	
@@ -249,6 +249,10 @@ static uint8_t hogp_boot_mouse_report(struct bt_hogp *hogp,
 		LOG_ERR("HID write error, %d", ret);
 	} else {
 		LOG_DBG("Boot mouse report sent directly to USB");
+
+		/* Mark HID-specific data activity for LED indication */
+		extern void ble_transport_mark_hid_data_activity(void);
+		ble_transport_mark_hid_data_activity();
 	}
 
 	return BT_GATT_ITER_CONTINUE;

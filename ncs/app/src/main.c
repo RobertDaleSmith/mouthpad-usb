@@ -333,7 +333,6 @@ int main(void)
 		button_register_callback(button_event_callback);
 	}
 	
-	static bool data_activity = false;
 	static int display_update_counter = 0;
 
 	/* Reset display state after splash screen to ensure status updates work */
@@ -362,9 +361,9 @@ int main(void)
 	for (;;) {
 		/* USB CDC ↔ BLE NUS Bridge */
 
-		/* Check BLE connection status and data activity */
+		/* Check BLE connection status and HID data activity */
 		bool is_connected = ble_transport_is_connected();
-		bool ble_data_activity = ble_transport_has_data_activity();
+		bool ble_hid_activity = ble_transport_has_hid_data_activity();
 		uint8_t battery_level = ble_bas_get_battery_level();
 		int8_t rssi_dbm = is_connected ? ble_transport_get_rssi() : 0;
 
@@ -373,8 +372,6 @@ int main(void)
 		int bytes_read = usb_cdc_receive_data(&c, 1);
 
 		if (bytes_read > 0) {
-			data_activity = true;
-
 			switch (frame_state) {
 				case FRAME_STATE_SEARCH_MAGIC1:
 					if (c == 0xAA) {
@@ -587,16 +584,16 @@ int main(void)
 			}
 		}
 		
-		/* Update LED state based on connection and activity */
+		/* Update LED state based on connection and HID activity only */
 		if (leds_is_available()) {
-			if (is_connected && (data_activity || ble_data_activity)) {
+			if (is_connected && ble_hid_activity) {
 				leds_set_state(LED_STATE_DATA_ACTIVITY);
 			} else if (is_connected) {
 				leds_set_state(LED_STATE_CONNECTED);
 			} else {
 				leds_set_state(LED_STATE_SCANNING);
 			}
-			
+
 			/* Update LED animations */
 			leds_update();
 		}
@@ -605,15 +602,7 @@ int main(void)
 		if (button_is_available()) {
 			button_update();
 		}
-		
-		/* Reset data activity flag periodically */
-		static int activity_counter = 0;
-		activity_counter++;
-		if (activity_counter >= 100) {
-			data_activity = false;
-			activity_counter = 0;
-		}
-		
+
 		// Update OLED display every 500ms for responsive connection status updates (if available)
 		// Reduced frequency to avoid overwhelming RSSI reads
 		if (oled_display_is_available()) {

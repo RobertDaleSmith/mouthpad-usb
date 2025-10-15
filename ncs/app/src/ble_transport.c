@@ -47,6 +47,10 @@ static bool fully_connected = false;
 static bool data_activity = false;
 static int64_t last_data_time = 0;
 
+/* HID-only data activity tracking for LED indication */
+static bool hid_data_activity = false;
+static int64_t last_hid_data_time = 0;
+
 /* RSSI tracking - stored from advertising during scan */
 static int8_t last_known_rssi = 0;
 
@@ -545,6 +549,30 @@ void ble_transport_mark_data_activity(void)
 	data_activity = true;
 	last_data_time = k_uptime_get();
 	LOG_DBG("=== DATA ACTIVITY MARKED (DIRECT) ===");
+}
+
+void ble_transport_mark_hid_data_activity(void)
+{
+	hid_data_activity = true;
+	last_hid_data_time = k_uptime_get();
+	LOG_DBG("=== HID DATA ACTIVITY MARKED ===");
+}
+
+bool ble_transport_has_hid_data_activity(void)
+{
+	// Check if we've had HID data activity within the last 100ms
+	int64_t current_time = k_uptime_get();
+	if (hid_data_activity && (current_time - last_hid_data_time) < 100) {
+		LOG_DBG("HID data activity detected (time diff: %lld ms)", current_time - last_hid_data_time);
+		return true;
+	}
+
+	// Reset if it's been too long
+	if ((current_time - last_hid_data_time) >= 100) {
+		hid_data_activity = false;
+	}
+
+	return false;
 }
 
 int8_t ble_transport_get_rssi(void)
