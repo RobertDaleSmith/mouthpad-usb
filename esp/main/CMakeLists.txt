@@ -1,3 +1,10 @@
 idf_component_register(SRCS "usb_dfu.c" "ble_hid.c" "transport_hid.c" "transport_uart.c" "ble_central.c" "ble_dis.c" "ble_nus.c" "button.c" "ble_bas.c" "ble_bonds.c" "leds.c" "main.c" "usb_hid.c" "usb_cdc.c"
+                            "packet_framing.c"
+                            "mouthpad-proto/src/C/MouthpadRelay.pb.c"
+                            "mouthpad-proto/nanopb/pb_common.c"
+                            "mouthpad-proto/nanopb/pb_decode.c"
+                            "mouthpad-proto/nanopb/pb_encode.c"
                        INCLUDE_DIRS "."
+                                    "mouthpad-proto/nanopb"
+                                    "mouthpad-proto/src/C"
                        REQUIRES bt esp_hid nvs_flash esp_driver_uart usb)
