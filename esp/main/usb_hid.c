@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "usb_cdc.h"
+#include "relay_protocol.h"
 
 static const char *TAG = "USB_HID";
 
@@ -181,6 +182,9 @@ void usb_hid_init(void) {
       .data_sent_cb = NULL,
   };
   ESP_ERROR_CHECK(usb_cdc_init(&cdc_config));
+
+  // Initialize relay protocol for protobuf message handling
+  ESP_ERROR_CHECK(relay_protocol_init());
 }
 
 bool usb_hid_ready(void) { return s_usb_ready && tud_hid_ready(); }

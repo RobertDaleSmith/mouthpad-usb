@@ -24,6 +24,7 @@
 #include "leds.h"
 #include "transport_hid.h"
 #include "esp_gap_ble_api.h"
+#include "relay_protocol.h"
 
 static const char *TAG = "USB_CDC";
 
@@ -129,11 +130,10 @@ uint16_t usb_cdc_calculate_crc16(const uint8_t *data, uint16_t len) {
 }
 
 static void process_packet_data(const uint8_t *data, uint16_t len) {
-  // Fast path: just forward the data without verbose logging
-  if (s_cdc_config.data_received_cb) {
-    s_cdc_config.data_received_cb(data, len);
-  } else {
-    ESP_LOGW(TAG, "No data received callback set!");
+  // Forward framed packet data to relay protocol for processing
+  esp_err_t ret = relay_protocol_handle_usb_data(data, len);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to process USB data: %s", esp_err_to_name(ret));
   }
 }
 

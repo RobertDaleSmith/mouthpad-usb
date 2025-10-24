@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "string.h"
+#include "relay_protocol.h"
 
 static const char *TAG = "BLE_NUS";
 
@@ -366,11 +367,12 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
 
         if (param->notify.conn_id == nus_conn_id &&
             param->notify.handle == nus_char_tx_handle) {
-            // NUS TX characteristic notification
-            ESP_LOGD(TAG, "NUS data received: %.*s", param->notify.value_len, param->notify.value);
+            // NUS TX characteristic notification - forward to relay protocol
+            ESP_LOGD(TAG, "NUS data received: %d bytes", param->notify.value_len);
 
-            if (nus_config.data_received_cb) {
-                nus_config.data_received_cb(param->notify.value, param->notify.value_len);
+            esp_err_t ret = relay_protocol_handle_ble_data(param->notify.value, param->notify.value_len);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to process BLE data: %s", esp_err_to_name(ret));
             }
         } else {
             ESP_LOGD(TAG, "Notification from handle %d (not NUS TX %d)",

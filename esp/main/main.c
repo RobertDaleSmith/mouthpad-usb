@@ -30,6 +30,7 @@
 #include "transport_hid.h"
 #include "ble_hid.h"
 #include "ble_bonds.h"
+#include "relay_protocol.h"
 
 static const char *TAG = "MP_MAIN";
 
@@ -318,6 +319,9 @@ static void hid_connected_cb(esp_hidh_dev_t *dev, const uint8_t *bda)
     }
     ble_bas_reset();
     leds_set_state(LED_STATE_CONNECTED);
+
+    // Notify relay protocol of BLE connection
+    relay_protocol_update_ble_connection(true);
 }
 
 static void hid_disconnected_cb(esp_hidh_dev_t *dev)
@@ -337,6 +341,10 @@ static void hid_disconnected_cb(esp_hidh_dev_t *dev)
 
     ble_bas_reset();
     leds_set_state(LED_STATE_SCANNING);
+
+    // Notify relay protocol of BLE disconnection
+    relay_protocol_update_ble_connection(false);
+
     start_scan_task();
 }
 
