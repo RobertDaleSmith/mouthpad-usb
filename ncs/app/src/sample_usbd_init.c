@@ -323,8 +323,8 @@ struct usbd_context *sample_usbd_setup_device(usbd_msg_cb_t msg_cb) {
   sample_fix_code_triple(&sample_usbd, USBD_SPEED_FS);
   usbd_self_powered(&sample_usbd, attributes & USB_SCD_SELF_POWERED);
 
-  /* Align bcdDevice with ESP32 firmware so hosts report version 0x0001 */
-  err = usbd_device_set_bcd_device(&sample_usbd, 0x0001);
+  /* Align bcdDevice with ESP32 firmware (version 1.0.0) */
+  err = usbd_device_set_bcd_device(&sample_usbd, 0x0100);
   if (err) {
     LOG_WRN("Failed to set bcdDevice (%d)", err);
   }
