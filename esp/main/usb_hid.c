@@ -5,6 +5,8 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "tinyusb.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -126,6 +128,17 @@ _Static_assert(sizeof(mouthpad_configuration_descriptor) == CONFIG_TOTAL_LEN,
 
 static bool s_usb_ready;
 
+static void usb_event_cb(tinyusb_event_t *event, void *arg) {
+  (void)arg;
+  if (event->id == TINYUSB_EVENT_ATTACHED) {
+    s_usb_ready = true;
+    ESP_LOGI(TAG, "USB mounted");
+  } else if (event->id == TINYUSB_EVENT_DETACHED) {
+    s_usb_ready = false;
+    ESP_LOGI(TAG, "USB unmounted");
+  }
+}
+
 void usb_hid_init(void) {
   uint8_t mac[6] = {0};
   ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
@@ -133,17 +146,27 @@ void usb_hid_init(void) {
            mac[1], mac[2], mac[3], mac[4], mac[5]);
 
   const tinyusb_config_t tusb_cfg = {
-      .device_descriptor = &mouthpad_device_descriptor,
-      .external_phy = false,
-#if (TUD_OPT_HIGH_SPEED)
-      .fs_configuration_descriptor = mouthpad_configuration_descriptor,
-      .hs_configuration_descriptor = mouthpad_configuration_descriptor,
-      .qualifier_descriptor = NULL,
-#else
-      .configuration_descriptor = mouthpad_configuration_descriptor,
-#endif
-      .string_descriptor = string_desc,
-      .string_descriptor_count = sizeof(string_desc) / sizeof(string_desc[0]),
+      .port = TINYUSB_PORT_FULL_SPEED_0,
+      .phy = {
+          .skip_setup = false,
+          .self_powered = false,
+          .vbus_monitor_io = -1,
+      },
+      .task = {
+          .size = 4096,
+          .priority = 5,
+          .xCoreID = 0,
+      },
+      .descriptor = {
+          .device = &mouthpad_device_descriptor,
+          .qualifier = NULL,
+          .string = string_desc,
+          .string_count = sizeof(string_desc) / sizeof(string_desc[0]),
+          .full_speed_config = mouthpad_configuration_descriptor,
+          .high_speed_config = NULL,
+      },
+      .event_cb = usb_event_cb,
+      .event_arg = NULL,
   };
 
   esp_err_t err = tinyusb_driver_install(&tusb_cfg);
@@ -220,20 +243,3 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
   (void)buffer;
   (void)bufsize;
 }
-
-void tud_mount_cb(void) {
-  s_usb_ready = true;
-  ESP_LOGI(TAG, "USB mounted");
-}
-
-void tud_umount_cb(void) {
-  s_usb_ready = false;
-  ESP_LOGI(TAG, "USB unmounted");
-}
-
-void tud_suspend_cb(bool remote_wakeup_en) {
-  (void)remote_wakeup_en;
-  s_usb_ready = false;
-}
-
-void tud_resume_cb(void) { s_usb_ready = true; }

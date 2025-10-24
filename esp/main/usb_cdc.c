@@ -567,21 +567,47 @@ esp_err_t usb_cdc_init(const usb_cdc_config_t *config) {
 #endif
   memset(s_cdc_connected, 0, sizeof(s_cdc_connected));
 
-  for (int port = 0; port < USB_CDC_PORT_COUNT; ++port) {
-    const tinyusb_config_cdcacm_t acm_cfg = {
-        .usb_dev = TINYUSB_USBDEV_0,
-        .cdc_port = port,
-        .rx_unread_buf_sz = 64,
-        .callback_rx = handle_cdc_rx,
-        .callback_rx_wanted_char = NULL,
-        .callback_line_state_changed = handle_cdc_line_state_changed,
-        .callback_line_coding_changed = NULL,
-    };
+  ESP_LOGI(TAG, "Initializing %d CDC ports...", USB_CDC_PORT_COUNT);
 
-    ESP_RETURN_ON_ERROR(tusb_cdc_acm_init(&acm_cfg), TAG,
-                        "CDC ACM init failed");
-    ESP_LOGI(TAG, "CDC%d ACM ready", port);
+  // Initialize CDC0
+  ESP_LOGI(TAG, "CDC0: Registering callbacks (rx_cb=%p, line_cb=%p)",
+           handle_cdc_rx, handle_cdc_line_state_changed);
+
+  tinyusb_config_cdcacm_t acm_cfg0 = {
+      .cdc_port = TINYUSB_CDC_ACM_0,
+      .callback_rx = handle_cdc_rx,
+      .callback_rx_wanted_char = NULL,
+      .callback_line_state_changed = handle_cdc_line_state_changed,
+      .callback_line_coding_changed = NULL,
+  };
+
+  esp_err_t err = tinyusb_cdcacm_init(&acm_cfg0);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "CDC0 ACM init failed: %s (0x%x)", esp_err_to_name(err), err);
+    return err;
   }
+  ESP_LOGI(TAG, "CDC0 ACM initialized successfully");
+
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+  // Initialize CDC1
+  ESP_LOGI(TAG, "CDC1: Registering callbacks (rx_cb=%p, line_cb=%p)",
+           handle_cdc_rx, handle_cdc_line_state_changed);
+
+  tinyusb_config_cdcacm_t acm_cfg1 = {
+      .cdc_port = TINYUSB_CDC_ACM_1,
+      .callback_rx = handle_cdc_rx,
+      .callback_rx_wanted_char = NULL,
+      .callback_line_state_changed = handle_cdc_line_state_changed,
+      .callback_line_coding_changed = NULL,
+  };
+
+  err = tinyusb_cdcacm_init(&acm_cfg1);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "CDC1 ACM init failed: %s (0x%x)", esp_err_to_name(err), err);
+    return err;
+  }
+  ESP_LOGI(TAG, "CDC1 ACM initialized successfully");
+#endif
 
 #if CONFIG_TINYUSB_CDC_COUNT > 1
   if (s_log_mutex == NULL) {
