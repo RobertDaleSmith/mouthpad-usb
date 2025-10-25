@@ -15,6 +15,9 @@ PB_BIND(mouthware_message_DeviceInfoRead, mouthware_message_DeviceInfoRead, AUTO
 PB_BIND(mouthware_message_ClearBondsWrite, mouthware_message_ClearBondsWrite, AUTO)
 
 
+PB_BIND(mouthware_message_DfuWrite, mouthware_message_DfuWrite, AUTO)
+
+
 PB_BIND(mouthware_message_PassThroughToMouthpad, mouthware_message_PassThroughToMouthpad, AUTO)
 
 
@@ -28,6 +31,9 @@ PB_BIND(mouthware_message_DeviceInfoResponse, mouthware_message_DeviceInfoRespon
 
 
 PB_BIND(mouthware_message_ClearBondsResponse, mouthware_message_ClearBondsResponse, AUTO)
+
+
+PB_BIND(mouthware_message_DfuResponse, mouthware_message_DfuResponse, AUTO)
 
 
 PB_BIND(mouthware_message_PassThroughToMouthpadResponse, mouthware_message_PassThroughToMouthpadResponse, AUTO)
