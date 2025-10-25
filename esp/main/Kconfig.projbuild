@@ -22,8 +22,8 @@ menu "MouthPad Configuration"
 
     config MOUTHPAD_BOARD_NAME
         string
-        default "XIAO ESP32-S3" if MOUTHPAD_BOARD_XIAO_ESP32S3
-        default "LilyGo T-Display-S3" if MOUTHPAD_BOARD_LILYGO_T_DISPLAY_S3
+        default "xiao_esp32s3" if MOUTHPAD_BOARD_XIAO_ESP32S3
+        default "lilygo_tdisplays3" if MOUTHPAD_BOARD_LILYGO_T_DISPLAY_S3
 
     config MOUTHPAD_LED_GPIO
         int

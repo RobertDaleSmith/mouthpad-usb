@@ -6,6 +6,7 @@
 
 #include "esp_log.h"
 #include "usb_cdc.h"
+#include "usb_dfu.h"
 #include "ble_nus.h"
 #include "ble_hid.h"
 #include "ble_bas.h"
@@ -28,6 +29,7 @@ static int32_t s_last_rssi = 0;
 static esp_err_t handle_ble_connection_status_read(void);
 static esp_err_t handle_device_info_read(void);
 static esp_err_t handle_clear_bonds_write(void);
+static esp_err_t handle_dfu_write(void);
 static esp_err_t handle_pass_through_to_mouthpad(const uint8_t *data, size_t len);
 
 // Nanopb callbacks for string encoding
@@ -83,6 +85,11 @@ esp_err_t relay_protocol_handle_usb_data(const uint8_t *data, uint16_t len) {
         case mouthware_message_AppToRelayMessage_clear_bonds_write_tag:
             ESP_LOGD(TAG, "Handling ClearBondsWrite");
             ret = handle_clear_bonds_write();
+            break;
+
+        case mouthware_message_AppToRelayMessage_dfu_write_tag:
+            ESP_LOGD(TAG, "Handling DfuWrite");
+            ret = handle_dfu_write();
             break;
 
         case mouthware_message_AppToRelayMessage_pass_through_to_mouthpad_tag:
@@ -249,10 +256,17 @@ static esp_err_t handle_device_info_read(void) {
         relay_msg.message_body.device_info_response.pid = device_info->pnp_id.product_id;
     }
 
-    ESP_LOGI(TAG, "Sending device info: name=%s, vid=0x%04X, pid=0x%04X",
+    // Device family and board (always available)
+    relay_msg.message_body.device_info_response.family.funcs.encode = encode_string_callback;
+    relay_msg.message_body.device_info_response.family.arg = (void *)"esp";
+    relay_msg.message_body.device_info_response.board.funcs.encode = encode_string_callback;
+    relay_msg.message_body.device_info_response.board.arg = (void *)CONFIG_MOUTHPAD_BOARD_NAME;
+
+    ESP_LOGI(TAG, "Sending device info: name=%s, vid=0x%04X, pid=0x%04X, family=esp, board=%s",
              device_info->device_name,
              relay_msg.message_body.device_info_response.vid,
-             relay_msg.message_body.device_info_response.pid);
+             relay_msg.message_body.device_info_response.pid,
+             CONFIG_MOUTHPAD_BOARD_NAME);
 
     return relay_protocol_send_response(&relay_msg);
 }
@@ -268,6 +282,25 @@ static esp_err_t handle_clear_bonds_write(void) {
     relay_msg.message_body.clear_bonds_response.success = (ret == ESP_OK);
 
     return relay_protocol_send_response(&relay_msg);
+}
+
+static esp_err_t handle_dfu_write(void) {
+    ESP_LOGI(TAG, "=== DFU REQUEST (via protobuf) - entering bootloader ===");
+
+    mouthware_message_RelayToAppMessage relay_msg = mouthware_message_RelayToAppMessage_init_zero;
+    relay_msg.which_message_body = mouthware_message_RelayToAppMessage_dfu_response_tag;
+    relay_msg.message_body.dfu_response.success = true;
+
+    // Send success response before reset
+    esp_err_t ret = relay_protocol_send_response(&relay_msg);
+
+    // Give time for response to be sent
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Enter DFU/bootloader mode (will reset device)
+    usb_dfu_enter_dfu();
+
+    return ret;
 }
 
 static esp_err_t handle_pass_through_to_mouthpad(const uint8_t *data, size_t len) {

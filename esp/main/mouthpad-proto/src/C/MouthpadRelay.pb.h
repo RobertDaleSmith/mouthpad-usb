@@ -46,6 +46,10 @@ typedef struct _mouthware_message_ClearBondsWrite {
     char dummy_field;
 } mouthware_message_ClearBondsWrite;
 
+typedef struct _mouthware_message_DfuWrite { /* Triggers device to enter bootloader/DFU mode */
+    char dummy_field;
+} mouthware_message_DfuWrite;
+
 typedef PB_BYTES_ARRAY_T(240) mouthware_message_PassThroughToMouthpad_data_t;
 typedef struct _mouthware_message_PassThroughToMouthpad {
     mouthware_message_PassThroughToMouthpad_data_t data;
@@ -65,6 +69,8 @@ typedef struct _mouthware_message_AppToRelayMessage {
         mouthware_message_DeviceInfoRead device_info_read;
         /* / Request to clear all bonded devices on the relay */
         mouthware_message_ClearBondsWrite clear_bonds_write;
+        /* / Request to enter DFU/bootloader mode */
+        mouthware_message_DfuWrite dfu_write;
     } message_body;
 } mouthware_message_AppToRelayMessage;
 
@@ -80,11 +86,17 @@ typedef struct _mouthware_message_DeviceInfoResponse {
     pb_callback_t address; /* BLE MAC address */
     uint32_t vid; /* USB Vendor ID from PnP ID characteristic */
     uint32_t pid; /* USB Product ID from PnP ID characteristic */
+    pb_callback_t family; /* Device family: "esp" or "nrf" */
+    pb_callback_t board; /* Target board: e.g., "xiao_ble", "nrf52840dongle_nrf52840" */
 } mouthware_message_DeviceInfoResponse;
 
 typedef struct _mouthware_message_ClearBondsResponse {
     bool success;
 } mouthware_message_ClearBondsResponse;
+
+typedef struct _mouthware_message_DfuResponse {
+    bool success;
+} mouthware_message_DfuResponse;
 
 typedef struct _mouthware_message_PassThroughToMouthpadResponse {
     mouthware_message_PassThroughToMouthpadErrorCode error_code;
@@ -109,6 +121,8 @@ typedef struct _mouthware_message_RelayToAppMessage {
         mouthware_message_DeviceInfoResponse device_info_response;
         /* / Response to a ClearBondsWrite */
         mouthware_message_ClearBondsResponse clear_bonds_response;
+        /* / Response to a DfuWrite */
+        mouthware_message_DfuResponse dfu_response;
     } message_body;
 } mouthware_message_RelayToAppMessage;
 
@@ -134,9 +148,11 @@ extern "C" {
 
 
 
+
 #define mouthware_message_AppToRelayMessage_destination_ENUMTYPE mouthware_message_AppToRelayMessageDestination
 
 #define mouthware_message_BleConnectionStatusResponse_connection_status_ENUMTYPE mouthware_message_RelayBleConnectionStatus
+
 
 
 
@@ -149,22 +165,26 @@ extern "C" {
 #define mouthware_message_BleConnectionStatusRead_init_default {0}
 #define mouthware_message_DeviceInfoRead_init_default {0}
 #define mouthware_message_ClearBondsWrite_init_default {0}
+#define mouthware_message_DfuWrite_init_default  {0}
 #define mouthware_message_PassThroughToMouthpad_init_default {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_default {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_default}}
 #define mouthware_message_BleConnectionStatusResponse_init_default {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
-#define mouthware_message_DeviceInfoResponse_init_default {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0}
+#define mouthware_message_DeviceInfoResponse_init_default {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0, {{NULL}, NULL}, {{NULL}, NULL}}
 #define mouthware_message_ClearBondsResponse_init_default {0}
+#define mouthware_message_DfuResponse_init_default {0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_default {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
 #define mouthware_message_PassThroughToApp_init_default {{0, {0}}}
 #define mouthware_message_RelayToAppMessage_init_default {0, {mouthware_message_BleConnectionStatusResponse_init_default}}
 #define mouthware_message_BleConnectionStatusRead_init_zero {0}
 #define mouthware_message_DeviceInfoRead_init_zero {0}
 #define mouthware_message_ClearBondsWrite_init_zero {0}
+#define mouthware_message_DfuWrite_init_zero     {0}
 #define mouthware_message_PassThroughToMouthpad_init_zero {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_zero {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_zero}}
 #define mouthware_message_BleConnectionStatusResponse_init_zero {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
-#define mouthware_message_DeviceInfoResponse_init_zero {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0}
+#define mouthware_message_DeviceInfoResponse_init_zero {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0, {{NULL}, NULL}, {{NULL}, NULL}}
 #define mouthware_message_ClearBondsResponse_init_zero {0}
+#define mouthware_message_DfuResponse_init_zero  {0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_zero {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
 #define mouthware_message_PassThroughToApp_init_zero {{0, {0}}}
 #define mouthware_message_RelayToAppMessage_init_zero {0, {mouthware_message_BleConnectionStatusResponse_init_zero}}
@@ -176,6 +196,7 @@ extern "C" {
 #define mouthware_message_AppToRelayMessage_pass_through_to_mouthpad_tag 3
 #define mouthware_message_AppToRelayMessage_device_info_read_tag 4
 #define mouthware_message_AppToRelayMessage_clear_bonds_write_tag 5
+#define mouthware_message_AppToRelayMessage_dfu_write_tag 6
 #define mouthware_message_BleConnectionStatusResponse_connection_status_tag 1
 #define mouthware_message_BleConnectionStatusResponse_rssi_tag 2
 #define mouthware_message_BleConnectionStatusResponse_battery_level_tag 3
@@ -184,7 +205,10 @@ extern "C" {
 #define mouthware_message_DeviceInfoResponse_address_tag 3
 #define mouthware_message_DeviceInfoResponse_vid_tag 4
 #define mouthware_message_DeviceInfoResponse_pid_tag 5
+#define mouthware_message_DeviceInfoResponse_family_tag 6
+#define mouthware_message_DeviceInfoResponse_board_tag 7
 #define mouthware_message_ClearBondsResponse_success_tag 1
+#define mouthware_message_DfuResponse_success_tag 1
 #define mouthware_message_PassThroughToMouthpadResponse_error_code_tag 1
 #define mouthware_message_PassThroughToApp_data_tag 1
 #define mouthware_message_RelayToAppMessage_ble_connection_status_response_tag 1
@@ -192,6 +216,7 @@ extern "C" {
 #define mouthware_message_RelayToAppMessage_pass_through_to_app_tag 3
 #define mouthware_message_RelayToAppMessage_device_info_response_tag 4
 #define mouthware_message_RelayToAppMessage_clear_bonds_response_tag 5
+#define mouthware_message_RelayToAppMessage_dfu_response_tag 6
 
 /* Struct field encoding specification for nanopb */
 #define mouthware_message_BleConnectionStatusRead_FIELDLIST(X, a) \
@@ -209,6 +234,11 @@ extern "C" {
 #define mouthware_message_ClearBondsWrite_CALLBACK NULL
 #define mouthware_message_ClearBondsWrite_DEFAULT NULL
 
+#define mouthware_message_DfuWrite_FIELDLIST(X, a) \
+
+#define mouthware_message_DfuWrite_CALLBACK NULL
+#define mouthware_message_DfuWrite_DEFAULT NULL
+
 #define mouthware_message_PassThroughToMouthpad_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BYTES,    data,              1)
 #define mouthware_message_PassThroughToMouthpad_CALLBACK NULL
@@ -219,13 +249,15 @@ X(a, STATIC,   SINGULAR, UENUM,    destination,       1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,ble_connection_status_read,message_body.ble_connection_status_read),   2) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_mouthpad,message_body.pass_through_to_mouthpad),   3) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,device_info_read,message_body.device_info_read),   4) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,clear_bonds_write,message_body.clear_bonds_write),   5)
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,clear_bonds_write,message_body.clear_bonds_write),   5) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,dfu_write,message_body.dfu_write),   6)
 #define mouthware_message_AppToRelayMessage_CALLBACK NULL
 #define mouthware_message_AppToRelayMessage_DEFAULT NULL
 #define mouthware_message_AppToRelayMessage_message_body_ble_connection_status_read_MSGTYPE mouthware_message_BleConnectionStatusRead
 #define mouthware_message_AppToRelayMessage_message_body_pass_through_to_mouthpad_MSGTYPE mouthware_message_PassThroughToMouthpad
 #define mouthware_message_AppToRelayMessage_message_body_device_info_read_MSGTYPE mouthware_message_DeviceInfoRead
 #define mouthware_message_AppToRelayMessage_message_body_clear_bonds_write_MSGTYPE mouthware_message_ClearBondsWrite
+#define mouthware_message_AppToRelayMessage_message_body_dfu_write_MSGTYPE mouthware_message_DfuWrite
 
 #define mouthware_message_BleConnectionStatusResponse_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    connection_status,   1) \
@@ -239,7 +271,9 @@ X(a, CALLBACK, SINGULAR, STRING,   name,              1) \
 X(a, CALLBACK, SINGULAR, STRING,   firmware,          2) \
 X(a, CALLBACK, SINGULAR, STRING,   address,           3) \
 X(a, STATIC,   SINGULAR, UINT32,   vid,               4) \
-X(a, STATIC,   SINGULAR, UINT32,   pid,               5)
+X(a, STATIC,   SINGULAR, UINT32,   pid,               5) \
+X(a, CALLBACK, SINGULAR, STRING,   family,            6) \
+X(a, CALLBACK, SINGULAR, STRING,   board,             7)
 #define mouthware_message_DeviceInfoResponse_CALLBACK pb_default_field_callback
 #define mouthware_message_DeviceInfoResponse_DEFAULT NULL
 
@@ -247,6 +281,11 @@ X(a, STATIC,   SINGULAR, UINT32,   pid,               5)
 X(a, STATIC,   SINGULAR, BOOL,     success,           1)
 #define mouthware_message_ClearBondsResponse_CALLBACK NULL
 #define mouthware_message_ClearBondsResponse_DEFAULT NULL
+
+#define mouthware_message_DfuResponse_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     success,           1)
+#define mouthware_message_DfuResponse_CALLBACK NULL
+#define mouthware_message_DfuResponse_DEFAULT NULL
 
 #define mouthware_message_PassThroughToMouthpadResponse_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    error_code,        1)
@@ -263,7 +302,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,ble_connection_status_response,
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_mouthpad_response,message_body.pass_through_to_mouthpad_response),   2) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,pass_through_to_app,message_body.pass_through_to_app),   3) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,device_info_response,message_body.device_info_response),   4) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,clear_bonds_response,message_body.clear_bonds_response),   5)
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,clear_bonds_response,message_body.clear_bonds_response),   5) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,dfu_response,message_body.dfu_response),   6)
 #define mouthware_message_RelayToAppMessage_CALLBACK NULL
 #define mouthware_message_RelayToAppMessage_DEFAULT NULL
 #define mouthware_message_RelayToAppMessage_message_body_ble_connection_status_response_MSGTYPE mouthware_message_BleConnectionStatusResponse
@@ -271,15 +311,18 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (message_body,clear_bonds_response,message_bo
 #define mouthware_message_RelayToAppMessage_message_body_pass_through_to_app_MSGTYPE mouthware_message_PassThroughToApp
 #define mouthware_message_RelayToAppMessage_message_body_device_info_response_MSGTYPE mouthware_message_DeviceInfoResponse
 #define mouthware_message_RelayToAppMessage_message_body_clear_bonds_response_MSGTYPE mouthware_message_ClearBondsResponse
+#define mouthware_message_RelayToAppMessage_message_body_dfu_response_MSGTYPE mouthware_message_DfuResponse
 
 extern const pb_msgdesc_t mouthware_message_BleConnectionStatusRead_msg;
 extern const pb_msgdesc_t mouthware_message_DeviceInfoRead_msg;
 extern const pb_msgdesc_t mouthware_message_ClearBondsWrite_msg;
+extern const pb_msgdesc_t mouthware_message_DfuWrite_msg;
 extern const pb_msgdesc_t mouthware_message_PassThroughToMouthpad_msg;
 extern const pb_msgdesc_t mouthware_message_AppToRelayMessage_msg;
 extern const pb_msgdesc_t mouthware_message_BleConnectionStatusResponse_msg;
 extern const pb_msgdesc_t mouthware_message_DeviceInfoResponse_msg;
 extern const pb_msgdesc_t mouthware_message_ClearBondsResponse_msg;
+extern const pb_msgdesc_t mouthware_message_DfuResponse_msg;
 extern const pb_msgdesc_t mouthware_message_PassThroughToMouthpadResponse_msg;
 extern const pb_msgdesc_t mouthware_message_PassThroughToApp_msg;
 extern const pb_msgdesc_t mouthware_message_RelayToAppMessage_msg;
@@ -288,11 +331,13 @@ extern const pb_msgdesc_t mouthware_message_RelayToAppMessage_msg;
 #define mouthware_message_BleConnectionStatusRead_fields &mouthware_message_BleConnectionStatusRead_msg
 #define mouthware_message_DeviceInfoRead_fields &mouthware_message_DeviceInfoRead_msg
 #define mouthware_message_ClearBondsWrite_fields &mouthware_message_ClearBondsWrite_msg
+#define mouthware_message_DfuWrite_fields &mouthware_message_DfuWrite_msg
 #define mouthware_message_PassThroughToMouthpad_fields &mouthware_message_PassThroughToMouthpad_msg
 #define mouthware_message_AppToRelayMessage_fields &mouthware_message_AppToRelayMessage_msg
 #define mouthware_message_BleConnectionStatusResponse_fields &mouthware_message_BleConnectionStatusResponse_msg
 #define mouthware_message_DeviceInfoResponse_fields &mouthware_message_DeviceInfoResponse_msg
 #define mouthware_message_ClearBondsResponse_fields &mouthware_message_ClearBondsResponse_msg
+#define mouthware_message_DfuResponse_fields &mouthware_message_DfuResponse_msg
 #define mouthware_message_PassThroughToMouthpadResponse_fields &mouthware_message_PassThroughToMouthpadResponse_msg
 #define mouthware_message_PassThroughToApp_fields &mouthware_message_PassThroughToApp_msg
 #define mouthware_message_RelayToAppMessage_fields &mouthware_message_RelayToAppMessage_msg
@@ -307,6 +352,8 @@ extern const pb_msgdesc_t mouthware_message_RelayToAppMessage_msg;
 #define mouthware_message_ClearBondsResponse_size 2
 #define mouthware_message_ClearBondsWrite_size   0
 #define mouthware_message_DeviceInfoRead_size    0
+#define mouthware_message_DfuResponse_size       2
+#define mouthware_message_DfuWrite_size          0
 #define mouthware_message_PassThroughToApp_size  258
 #define mouthware_message_PassThroughToMouthpadResponse_size 2
 #define mouthware_message_PassThroughToMouthpad_size 243
