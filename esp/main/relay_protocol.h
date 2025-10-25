@@ -59,6 +59,15 @@ esp_err_t relay_protocol_send_response(const void *message);
  */
 void relay_protocol_update_ble_connection(bool connected);
 
+/**
+ * @brief Notify relay protocol of BLE scanning state change
+ *
+ * Updates internal scanning state for status queries.
+ *
+ * @param scanning true if scanning, false if not scanning
+ */
+void relay_protocol_update_ble_scanning(bool scanning);
+
 #ifdef __cplusplus
 }
 #endif

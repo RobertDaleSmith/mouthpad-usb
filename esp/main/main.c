@@ -259,6 +259,9 @@ static void hid_connected_cb(esp_hidh_dev_t *dev, const uint8_t *bda)
     if (bda) {
         ESP_LOGI(TAG, "HID device connected: " ESP_BD_ADDR_STR, ESP_BD_ADDR_HEX(bda));
 
+        // Notify relay protocol that scanning has stopped
+        relay_protocol_update_ble_scanning(false);
+
         memcpy(s_active_addr, bda, sizeof(s_active_addr));
         s_has_active_addr = true;
         schedule_rssi_poll();
@@ -514,6 +517,10 @@ static void scan_task(void *args)
 static void start_scan_task(void)
 {
     leds_set_state(LED_STATE_SCANNING);
+
+    // Notify relay protocol that scanning has started
+    relay_protocol_update_ble_scanning(true);
+
     xTaskCreate(scan_task, "hid_scan", 4096, NULL, 2, NULL);
 }
 

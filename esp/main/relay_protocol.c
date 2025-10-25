@@ -20,6 +20,7 @@ static const char *TAG = "RELAY_PROTO";
 
 // Internal state
 static bool s_ble_connected = false;
+static bool s_ble_scanning = false;
 static int32_t s_last_rssi = 0;  // TODO: Need to track RSSI from BLE stack
 
 // Forward declarations
@@ -159,6 +160,11 @@ void relay_protocol_update_ble_connection(bool connected) {
     ESP_LOGD(TAG, "BLE connection state updated: %s", connected ? "connected" : "disconnected");
 }
 
+void relay_protocol_update_ble_scanning(bool scanning) {
+    s_ble_scanning = scanning;
+    ESP_LOGD(TAG, "BLE scanning state updated: %s", scanning ? "scanning" : "not scanning");
+}
+
 // Command handlers
 
 static esp_err_t handle_ble_connection_status_read(void) {
@@ -167,11 +173,17 @@ static esp_err_t handle_ble_connection_status_read(void) {
 
     // Determine connection status
     mouthware_message_RelayBleConnectionStatus status;
+    const char *status_str;
+
     if (s_ble_connected && ble_hid_client_is_connected()) {
         status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTED;
+        status_str = "connected";
+    } else if (s_ble_scanning) {
+        status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_SEARCHING;
+        status_str = "searching";
     } else {
-        // TODO: Distinguish between searching, connecting, and disconnected
         status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_DISCONNECTED;
+        status_str = "disconnected";
     }
 
     relay_msg.message_body.ble_connection_status_response.connection_status = status;
@@ -185,8 +197,7 @@ static esp_err_t handle_ble_connection_status_read(void) {
     }
 
     ESP_LOGI(TAG, "BLE status: %s, RSSI: %d, Battery: %d%%",
-             status == mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTED ? "connected" : "disconnected",
-             s_last_rssi,
+             status_str, s_last_rssi,
              relay_msg.message_body.ble_connection_status_response.battery_level);
 
     return relay_protocol_send_response(&relay_msg);
