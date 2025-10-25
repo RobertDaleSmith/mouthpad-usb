@@ -17,6 +17,7 @@
 #include <zephyr/usb/usbd.h>
 #include <zephyr/usb/class/usbd_hid.h>
 #include <zephyr/logging/log.h>
+#include <nrf.h>
 #include "sample_usbd.h"
 
 LOG_MODULE_REGISTER(usb_mouse, LOG_LEVEL_INF);
@@ -36,6 +37,13 @@ struct k_sem ep_write_sem;
 
 /* USB device context for new stack */
 static struct usbd_context *usbd_ctx;
+
+/* USB enumeration watchdog */
+static struct k_work_delayable usb_enum_check_work;
+static bool usb_enumerated = false;
+
+#define USB_ENUM_TIMEOUT_MS 5000  /* 5 seconds */
+#define USB_ENUM_RETRY_MAGIC 0xE1  /* Magic value to track retry */
 
 /* ============================================================================
  * HID DESCRIPTOR
@@ -91,6 +99,41 @@ enum mouse_report2_idx {
  * ============================================================================ */
 
 /**
+ * @brief USB enumeration check handler
+ *
+ * Called after timeout to check if USB enumerated. If not, restart device.
+ */
+static void usb_enum_check_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (usb_enumerated) {
+		LOG_INF("USB enumeration successful - watchdog satisfied");
+		return;
+	}
+
+	/* Check retry counter to prevent infinite reboot loop */
+	uint8_t retry_count = NRF_POWER->GPREGRET2;
+
+	if (retry_count >= 3) {
+		LOG_ERR("USB enumeration failed after 3 retries - giving up");
+		NRF_POWER->GPREGRET2 = 0;  /* Clear for next power cycle */
+		return;
+	}
+
+	LOG_WRN("USB enumeration failed - restarting device (attempt %d/3)", retry_count + 1);
+
+	/* Increment retry counter */
+	NRF_POWER->GPREGRET2 = retry_count + 1;
+
+	/* Force disconnect and reset */
+	NRF_USBD->USBPULLUP = 0;
+	k_msleep(50);
+
+	NVIC_SystemReset();
+}
+
+/**
  * @brief USB device message callback
  *
  * Handles USB device state changes (VBUS, configuration, etc.)
@@ -102,6 +145,13 @@ static void usb_msg_cb(struct usbd_context *const ctx,
 
 	if (msg->type == USBD_MSG_CONFIGURATION) {
 		LOG_INF("USB Configuration value %d", msg->status);
+		if (msg->status > 0) {
+			/* USB successfully enumerated - cancel watchdog */
+			usb_enumerated = true;
+			k_work_cancel_delayable(&usb_enum_check_work);
+			/* Clear retry counter on successful enumeration */
+			NRF_POWER->GPREGRET2 = 0;
+		}
 	}
 
 	if (usbd_can_detect_vbus(ctx)) {
@@ -212,9 +262,13 @@ static struct hid_device_ops hid_ops = {
 int usb_init(void)
 {
 	int ret;
-	
+
 	/* Initialize USB endpoint semaphore */
 	k_sem_init(&ep_write_sem, 0, 1);
+
+	/* Initialize USB enumeration watchdog */
+	k_work_init_delayable(&usb_enum_check_work, usb_enum_check_handler);
+	usb_enumerated = false;
 
 	/* Configure status blue LED - only if available */
 #if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
@@ -268,8 +322,12 @@ int usb_init(void)
 	}
 	LOG_INF("USB device stack enabled successfully");
 
+	/* Start USB enumeration watchdog - auto-restart if enumeration fails */
+	k_work_schedule(&usb_enum_check_work, K_MSEC(USB_ENUM_TIMEOUT_MS));
+	LOG_INF("USB enumeration watchdog started (%d ms timeout)", USB_ENUM_TIMEOUT_MS);
+
 	LOG_INF("USB HID device initialized successfully");
-	
+
 	return 0;
 }
 
