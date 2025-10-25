@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(mouthpad_usb)
 
-target_include_directories(app PRIVATE 
+target_include_directories(app PRIVATE
   src/mouthpad-proto/nanopb
   src/mouthpad-proto/src/C
 )

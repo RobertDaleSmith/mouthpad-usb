@@ -1,18 +1,27 @@
-#
-# Copyright (c) 2024 Nordic Semiconductor
-#
-# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
-#
+# Application configuration
 
-rsource "Kconfig.sample_usbd"
+config DONGLE_VARIANT_STRING
+	string "Dongle hardware variant identifier"
+	default ""
+	help
+	  Hardware variant string (e.g., "nordic", "april") to distinguish
+	  between different hardware revisions with the same base board.
+
+# USB device descriptor configuration
+config SAMPLE_USBD_PID
+	hex "USB Product ID"
+	default 0xEEEE
+
+config SAMPLE_USBD_MANUFACTURER
+	string "USB Manufacturer String"
+	default "Augmental Tech"
+
+config SAMPLE_USBD_PRODUCT
+	string "USB Product String"
+	default "MouthPad^USB"
+
+config SAMPLE_USBD_MAX_POWER
+	int "USB Max Power (mA / 2)"
+	default 50
 
 source "Kconfig.zephyr"
-
-config SETTINGS
-	default y
-
-config ZMS
-	default y if (SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
-
-config NVS
-	default y if !(SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
