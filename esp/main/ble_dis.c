@@ -7,9 +7,15 @@
 #include "esp_gatt_common_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "string.h"
 
 static const char *TAG = "BLE_DIS";
+
+// NVS namespace and key for persisting device info
+#define NVS_NAMESPACE "ble_dis"
+#define NVS_KEY_DEVICE_INFO "device_info"
 
 // Device info client state
 static esp_gatt_if_t dis_gattc_if = ESP_GATT_IF_NONE;
@@ -62,6 +68,10 @@ static const char* char_names[] = {
     "PnP ID"
 };
 
+// Forward declarations
+static esp_err_t save_device_info_to_nvs(void);
+static esp_err_t load_device_info_from_nvs(void);
+
 esp_err_t ble_device_info_init(const ble_device_info_config_t *config)
 {
     if (config == NULL) {
@@ -71,6 +81,9 @@ esp_err_t ble_device_info_init(const ble_device_info_config_t *config)
 
     // Store configuration
     memcpy(&dis_config, config, sizeof(ble_device_info_config_t));
+
+    // Load saved device info from NVS if available
+    load_device_info_from_nvs();
 
     ESP_LOGI(TAG, "Device info client initialized");
     return ESP_OK;
@@ -125,6 +138,87 @@ const ble_device_info_t* ble_device_info_get_current(void)
     return current_device_info.info_complete ? &current_device_info : NULL;
 }
 
+// Save device info to NVS for persistence across reboots
+static esp_err_t save_device_info_to_nvs(void)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS for writing device info: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_set_blob(nvs_handle, NVS_KEY_DEVICE_INFO, &current_device_info, sizeof(ble_device_info_t));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to save device info to NVS: %s", esp_err_to_name(ret));
+        nvs_close(nvs_handle);
+        return ret;
+    }
+
+    ret = nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Device info saved to NVS");
+    }
+
+    return ret;
+}
+
+// Load device info from NVS
+static esp_err_t load_device_info_from_nvs(void)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+    if (ret != ESP_OK) {
+        if (ret != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to open NVS for reading device info: %s", esp_err_to_name(ret));
+        }
+        return ret;
+    }
+
+    size_t required_size = sizeof(ble_device_info_t);
+    ret = nvs_get_blob(nvs_handle, NVS_KEY_DEVICE_INFO, &current_device_info, &required_size);
+    nvs_close(nvs_handle);
+
+    if (ret == ESP_OK && required_size == sizeof(ble_device_info_t)) {
+        ESP_LOGI(TAG, "Loaded device info from NVS: %s", current_device_info.device_name);
+        return ESP_OK;
+    } else if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No saved device info found in NVS");
+    } else {
+        ESP_LOGW(TAG, "Failed to load device info from NVS: %s", esp_err_to_name(ret));
+    }
+
+    return ret;
+}
+
+// Clear saved device info from NVS (called when bonds are cleared)
+esp_err_t ble_device_info_clear_saved(void)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS for clearing device info: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_erase_key(nvs_handle, NVS_KEY_DEVICE_INFO);
+    if (ret == ESP_OK || ret == ESP_ERR_NVS_NOT_FOUND) {
+        nvs_commit(nvs_handle);
+        ESP_LOGI(TAG, "Cleared saved device info from NVS");
+
+        // Also clear current device info
+        memset(&current_device_info, 0, sizeof(ble_device_info_t));
+        ret = ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "Failed to clear device info from NVS: %s", esp_err_to_name(ret));
+    }
+
+    nvs_close(nvs_handle);
+    return ret;
+}
+
 void ble_device_info_print(const ble_device_info_t *device_info)
 {
     if (!device_info) {
@@ -176,6 +270,9 @@ static void check_info_complete(void)
     if (chars_read_count >= chars_found_count && chars_found_count > 0) {
         current_device_info.info_complete = true;
         ESP_LOGI(TAG, "Device info discovery complete (%d characteristics read)", chars_read_count);
+
+        // Save device info to NVS for persistence
+        save_device_info_to_nvs();
 
         // Call completion callback (which will print the device info)
         if (dis_config.info_complete_cb) {

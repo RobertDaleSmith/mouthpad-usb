@@ -97,6 +97,13 @@ const ble_device_info_t* ble_device_info_get_current(void);
  */
 void ble_device_info_print(const ble_device_info_t *device_info);
 
+/**
+ * @brief Clear saved device info from NVS (call when bonds are cleared)
+ *
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t ble_device_info_clear_saved(void);
+
 #ifdef __cplusplus
 }
 #endif

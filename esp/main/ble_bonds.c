@@ -1,4 +1,5 @@
 #include "ble_bonds.h"
+#include "ble_dis.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -157,6 +158,9 @@ esp_err_t ble_bonds_clear_all(void)
     // with active connections. Instead, the bond clearing is handled through
     // runtime state clearing and NVS erasure above.
     ESP_LOGI(TAG, "BLE stack bonds will be cleared on next restart");
+
+    // Clear saved device info as well
+    ble_device_info_clear_saved();
 
     ESP_LOGI(TAG, "All bonds cleared successfully");
     return ESP_OK;
