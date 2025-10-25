@@ -524,6 +524,44 @@ static void start_scan_task(void)
     xTaskCreate(scan_task, "hid_scan", 4096, NULL, 2, NULL);
 }
 
+// Shared bond reset implementation
+esp_err_t perform_bond_reset(void)
+{
+    ESP_LOGI(TAG, "Performing bond reset - clearing all bonds and disconnecting device");
+
+    // Get bond info for logging
+    char bond_info[32];
+    ble_bonds_get_info_string(bond_info, sizeof(bond_info));
+    ESP_LOGI(TAG, "Clearing bond with: %s", bond_info);
+
+    // Disconnect the currently active device first using BLE GAP disconnect
+    if (s_has_active_addr) {
+        ESP_LOGI(TAG, "Disconnecting active device before clearing bonds");
+        esp_err_t disconnect_ret = esp_ble_gap_disconnect(s_active_addr);
+        if (disconnect_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to disconnect device: %s", esp_err_to_name(disconnect_ret));
+            // Fallback to HID close if GAP disconnect fails
+            esp_hidh_dev_t *active_dev = ble_hid_client_get_active_device();
+            if (active_dev != NULL) {
+                esp_hidh_dev_close(active_dev);
+            }
+        }
+        // Give disconnect time to complete
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    // Clear all bonds (also clears device info)
+    esp_err_t ret = ble_bonds_clear_all();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "All bonds cleared successfully");
+        leds_set_state(LED_STATE_SCANNING);  // Visual feedback that bonds were cleared
+    } else {
+        ESP_LOGW(TAG, "Failed to clear bonds: %s", esp_err_to_name(ret));
+    }
+
+    return ret;
+}
+
 // Button event handler
 static void button_event_handler(button_event_t event)
 {
@@ -538,32 +576,7 @@ static void button_event_handler(button_event_t event)
 
         case BUTTON_EVENT_LONG_PRESS:
             ESP_LOGI(TAG, "Button long press detected - clearing all bonds");
-
-            char bond_info[32];
-            ble_bonds_get_info_string(bond_info, sizeof(bond_info));
-            ESP_LOGI(TAG, "Clearing bond with: %s", bond_info);
-
-            // Disconnect the currently active device first using BLE GAP disconnect
-            if (s_has_active_addr) {
-                ESP_LOGI(TAG, "Disconnecting active device before clearing bonds");
-                esp_err_t disconnect_ret = esp_ble_gap_disconnect(s_active_addr);
-                if (disconnect_ret != ESP_OK) {
-                    ESP_LOGW(TAG, "Failed to disconnect device: %s", esp_err_to_name(disconnect_ret));
-                    // Fallback to HID close if GAP disconnect fails
-                    esp_hidh_dev_t *active_dev = ble_hid_client_get_active_device();
-                    if (active_dev != NULL) {
-                        esp_hidh_dev_close(active_dev);
-                    }
-                }
-            }
-
-            esp_err_t ret = ble_bonds_clear_all();
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "All bonds cleared successfully");
-                leds_set_state(LED_STATE_SCANNING);  // Visual feedback that bonds were cleared
-            } else {
-                ESP_LOGW(TAG, "Failed to clear bonds: %s", esp_err_to_name(ret));
-            }
+            perform_bond_reset();
             break;
 
         default:

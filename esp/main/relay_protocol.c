@@ -13,6 +13,7 @@
 #include "ble_bonds.h"
 #include "transport_hid.h"
 #include "leds.h"
+#include "main.h"
 
 #include <string.h>
 
@@ -252,21 +253,14 @@ static esp_err_t handle_device_info_read(void) {
 }
 
 static esp_err_t handle_clear_bonds_write(void) {
-    ESP_LOGI(TAG, "Clearing all BLE bonds");
+    ESP_LOGI(TAG, "ClearBondsWrite command - performing bond reset");
 
     mouthware_message_RelayToAppMessage relay_msg = mouthware_message_RelayToAppMessage_init_zero;
     relay_msg.which_message_body = mouthware_message_RelayToAppMessage_clear_bonds_response_tag;
 
-    // Clear all bonds
-    esp_err_t ret = ble_bonds_clear_all();
+    // Perform bond reset (disconnect device + clear all bonds)
+    esp_err_t ret = perform_bond_reset();
     relay_msg.message_body.clear_bonds_response.success = (ret == ESP_OK);
-
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "All bonds cleared successfully");
-        leds_set_state(LED_STATE_SCANNING);  // Visual feedback
-    } else {
-        ESP_LOGW(TAG, "Failed to clear bonds: %s", esp_err_to_name(ret));
-    }
 
     return relay_protocol_send_response(&relay_msg);
 }
