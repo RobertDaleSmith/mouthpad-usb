@@ -532,6 +532,12 @@ int main(void)
 									}
 								}
 
+								/* Device family and board (always available) */
+								response.message_body.device_info_response.family.funcs.encode = encode_string_callback;
+								response.message_body.device_info_response.family.arg = (void *)"nrf";
+								response.message_body.device_info_response.board.funcs.encode = encode_string_callback;
+								response.message_body.device_info_response.board.arg = (void *)CONFIG_BOARD;
+
 								LOG_INF("Sending device info: bonded=%d, connected=%d, Addr=%s, Name=%s",
 									has_bonded, conn != NULL,
 									(conn || has_bonded) ? ble_addr_str : "(none)",
@@ -552,6 +558,29 @@ int main(void)
 
 								LOG_INF("Bonds cleared successfully, sending response");
 								usb_cdc_send_proto_message_async(response);
+							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_dfu_write_tag) {
+								/* Handle DfuWrite request - enter bootloader mode */
+								LOG_INF("=== DFU REQUEST (via protobuf) - entering bootloader ===");
+
+								/* Send success response before reset */
+								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
+								response.which_message_body = mouthware_message_RelayToAppMessage_dfu_response_tag;
+								response.message_body.dfu_response.success = true;
+
+								usb_cdc_send_proto_message_async(response);
+
+								/* Give time for response to be sent */
+								k_sleep(K_MSEC(100));
+
+								/* Disable USB pullup to trigger disconnect before reset */
+								NRF_USBD->USBPULLUP = 0;
+								k_msleep(50);
+
+								/* Set GPREGRET magic value for UF2 bootloader */
+								NRF_POWER->GPREGRET = 0x57;
+
+								/* Perform system reset */
+								NVIC_SystemReset();
 							}
 							break;
 
