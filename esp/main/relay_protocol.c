@@ -22,7 +22,7 @@ static const char *TAG = "RELAY_PROTO";
 // Internal state
 static bool s_ble_connected = false;
 static bool s_ble_scanning = false;
-static int32_t s_last_rssi = 0;  // TODO: Need to track RSSI from BLE stack
+static int32_t s_last_rssi = 0;
 
 // Forward declarations
 static esp_err_t handle_ble_connection_status_read(void);
@@ -164,6 +164,11 @@ void relay_protocol_update_ble_connection(bool connected) {
 void relay_protocol_update_ble_scanning(bool scanning) {
     s_ble_scanning = scanning;
     ESP_LOGD(TAG, "BLE scanning state updated: %s", scanning ? "scanning" : "not scanning");
+}
+
+void relay_protocol_update_rssi(int32_t rssi) {
+    s_last_rssi = rssi;
+    ESP_LOGD(TAG, "RSSI updated: %d dBm", rssi);
 }
 
 // Command handlers

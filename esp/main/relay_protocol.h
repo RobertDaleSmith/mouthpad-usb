@@ -68,6 +68,15 @@ void relay_protocol_update_ble_connection(bool connected);
  */
 void relay_protocol_update_ble_scanning(bool scanning);
 
+/**
+ * @brief Update RSSI value for connected device
+ *
+ * Updates internal RSSI value for status queries.
+ *
+ * @param rssi RSSI value in dBm
+ */
+void relay_protocol_update_rssi(int32_t rssi);
+
 #ifdef __cplusplus
 }
 #endif

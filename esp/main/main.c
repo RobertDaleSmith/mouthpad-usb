@@ -139,6 +139,9 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
                      param->read_rssi_cmpl.remote_addr[2], param->read_rssi_cmpl.remote_addr[3],
                      param->read_rssi_cmpl.remote_addr[4], param->read_rssi_cmpl.remote_addr[5],
                      param->read_rssi_cmpl.rssi);
+
+            // Update relay protocol with RSSI value
+            relay_protocol_update_rssi(param->read_rssi_cmpl.rssi);
         } else {
             ESP_LOGW(TAG, "RSSI read failed: 0x%x", param->read_rssi_cmpl.status);
         }
@@ -347,6 +350,7 @@ static void hid_disconnected_cb(esp_hidh_dev_t *dev)
 
     // Notify relay protocol of BLE disconnection
     relay_protocol_update_ble_connection(false);
+    relay_protocol_update_rssi(0);  // Reset RSSI on disconnect
 
     start_scan_task();
 }
