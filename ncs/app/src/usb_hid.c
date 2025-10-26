@@ -42,7 +42,7 @@ static struct usbd_context *usbd_ctx;
 static struct k_work_delayable usb_enum_check_work;
 static bool usb_enumerated = false;
 
-#define USB_ENUM_TIMEOUT_MS 5000  /* 5 seconds */
+#define USB_ENUM_TIMEOUT_MS 2000  /* 2 seconds */
 #define USB_ENUM_RETRY_MAGIC 0xE1  /* Magic value to track retry */
 
 /* ============================================================================
