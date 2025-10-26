@@ -42,10 +42,12 @@ jobs:
             description: "Nordic nRF52840 Dongle (PCA10059 - stock pins)"
             board_target: nrf52840dongle
             overlay: nrf52840dongle_nrf52840.nordic.overlay
+            conf: nrf52840dongle_nrf52840.nordic.conf
           - board: nrf52840dongle_april
             description: "April Brothers nRF52840 Dongle (non-standard LED wiring)"
             board_target: nrf52840dongle
             overlay: nrf52840dongle_nrf52840.april.overlay
+            conf: nrf52840dongle_nrf52840.april.conf
 
     steps:
       - uses: actions/checkout@v4
@@ -87,13 +89,17 @@ jobs:
           rm -rf /zephyr_workspace/app
           cp -r ncs/app /zephyr_workspace/app
 
-      - name: 🔧 Apply Board Variant Overlay
+      - name: 🔧 Apply Board Variant Files
         if: matrix.overlay
         run: |
           cd /zephyr_workspace/app/boards
-          echo "Applying overlay: ${{ matrix.overlay }}"
+          echo "Applying variant files for ${{ matrix.description }}"
           cp ${{ matrix.overlay }} nrf52840dongle_nrf52840.overlay
-          echo "Overlay applied for ${{ matrix.description }}"
+          echo "✓ Overlay applied: ${{ matrix.overlay }}"
+          if [ -n "${{ matrix.conf }}" ]; then
+            cp ${{ matrix.conf }} nrf52840dongle_nrf52840.conf
+            echo "✓ Config applied: ${{ matrix.conf }}"
+          fi
 
       - name: 💾 Cache ccache
         uses: actions/cache@v4
