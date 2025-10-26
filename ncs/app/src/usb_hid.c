@@ -42,7 +42,7 @@ static struct usbd_context *usbd_ctx;
 static struct k_work_delayable usb_enum_check_work;
 static bool usb_enumerated = false;
 
-#define USB_ENUM_TIMEOUT_MS 2000  /* 2 seconds */
+#define USB_ENUM_TIMEOUT_MS 3000  /* 3 seconds - balanced: fast recovery with safety margin */
 #define USB_ENUM_RETRY_MAGIC 0xE1  /* Magic value to track retry */
 
 /* ============================================================================
@@ -99,6 +99,36 @@ enum mouse_report2_idx {
  * ============================================================================ */
 
 /**
+ * @brief Trigger USB enumeration retry via system reset
+ *
+ * Increments retry counter and performs system reset if under retry limit.
+ * Used for both timeout-based and error-based recovery.
+ */
+static void trigger_usb_recovery_reset(const char *reason)
+{
+	/* Check retry counter to prevent infinite reboot loop */
+	uint8_t retry_count = NRF_POWER->GPREGRET2;
+
+	if (retry_count >= 3) {
+		LOG_ERR("USB enumeration failed after 3 retries - giving up (%s)", reason);
+		NRF_POWER->GPREGRET2 = 0;  /* Clear for next power cycle */
+		return;
+	}
+
+	LOG_WRN("USB enumeration failed (%s) - restarting device (attempt %d/3)",
+		reason, retry_count + 1);
+
+	/* Increment retry counter */
+	NRF_POWER->GPREGRET2 = retry_count + 1;
+
+	/* Force disconnect and reset */
+	NRF_USBD->USBPULLUP = 0;
+	k_msleep(50);
+
+	NVIC_SystemReset();
+}
+
+/**
  * @brief USB enumeration check handler
  *
  * Called after timeout to check if USB enumerated. If not, restart device.
@@ -112,38 +142,30 @@ static void usb_enum_check_handler(struct k_work *work)
 		return;
 	}
 
-	/* Check retry counter to prevent infinite reboot loop */
-	uint8_t retry_count = NRF_POWER->GPREGRET2;
-
-	if (retry_count >= 3) {
-		LOG_ERR("USB enumeration failed after 3 retries - giving up");
-		NRF_POWER->GPREGRET2 = 0;  /* Clear for next power cycle */
-		return;
-	}
-
-	LOG_WRN("USB enumeration failed - restarting device (attempt %d/3)", retry_count + 1);
-
-	/* Increment retry counter */
-	NRF_POWER->GPREGRET2 = retry_count + 1;
-
-	/* Force disconnect and reset */
-	NRF_USBD->USBPULLUP = 0;
-	k_msleep(50);
-
-	NVIC_SystemReset();
+	trigger_usb_recovery_reset("timeout");
 }
 
 /**
  * @brief USB device message callback
  *
- * Handles USB device state changes (VBUS, configuration, etc.)
+ * Handles USB device state changes (VBUS, configuration, errors, etc.)
  */
 static void usb_msg_cb(struct usbd_context *const ctx,
 		       const struct usbd_msg *const msg)
 {
 	LOG_DBG("USBD message: %s", usbd_msg_type_string(msg->type));
 
-	if (msg->type == USBD_MSG_CONFIGURATION) {
+	switch (msg->type) {
+	case USBD_MSG_RESET:
+		/* Bus reset detected - enumeration is starting */
+		if (!usb_enumerated) {
+			LOG_DBG("USB reset detected - starting enumeration watchdog");
+			/* (Re)start watchdog on each reset attempt */
+			k_work_reschedule(&usb_enum_check_work, K_MSEC(USB_ENUM_TIMEOUT_MS));
+		}
+		break;
+
+	case USBD_MSG_CONFIGURATION:
 		LOG_INF("USB Configuration value %d", msg->status);
 		if (msg->status > 0) {
 			/* USB successfully enumerated - cancel watchdog */
@@ -151,21 +173,43 @@ static void usb_msg_cb(struct usbd_context *const ctx,
 			k_work_cancel_delayable(&usb_enum_check_work);
 			/* Clear retry counter on successful enumeration */
 			NRF_POWER->GPREGRET2 = 0;
+			LOG_INF("USB enumeration successful");
 		}
-	}
+		break;
 
-	if (usbd_can_detect_vbus(ctx)) {
-		if (msg->type == USBD_MSG_VBUS_READY) {
+	case USBD_MSG_UDC_ERROR:
+		/* Hardware controller error - restart immediately */
+		LOG_ERR("USB controller error detected");
+		trigger_usb_recovery_reset("UDC error");
+		break;
+
+	case USBD_MSG_STACK_ERROR:
+		/* Unrecoverable stack error - restart immediately */
+		LOG_ERR("USB stack error detected");
+		trigger_usb_recovery_reset("stack error");
+		break;
+
+	case USBD_MSG_VBUS_READY:
+		if (usbd_can_detect_vbus(ctx)) {
 			if (usbd_enable(ctx)) {
 				LOG_ERR("Failed to enable device support");
 			}
 		}
+		break;
 
-		if (msg->type == USBD_MSG_VBUS_REMOVED) {
+	case USBD_MSG_VBUS_REMOVED:
+		if (usbd_can_detect_vbus(ctx)) {
 			if (usbd_disable(ctx)) {
 				LOG_ERR("Failed to disable device support");
 			}
 		}
+		/* Cable unplugged - cancel watchdog */
+		k_work_cancel_delayable(&usb_enum_check_work);
+		break;
+
+	default:
+		/* Other events (SUSPEND, RESUME, etc.) - no action needed */
+		break;
 	}
 }
 
@@ -322,9 +366,9 @@ int usb_init(void)
 	}
 	LOG_INF("USB device stack enabled successfully");
 
-	/* Start USB enumeration watchdog - auto-restart if enumeration fails */
+	/* Start USB enumeration watchdog as fallback (main watchdog starts on RESET) */
 	k_work_schedule(&usb_enum_check_work, K_MSEC(USB_ENUM_TIMEOUT_MS));
-	LOG_INF("USB enumeration watchdog started (%d ms timeout)", USB_ENUM_TIMEOUT_MS);
+	LOG_INF("USB enumeration watchdog armed (%d ms timeout, starts on RESET)", USB_ENUM_TIMEOUT_MS);
 
 	LOG_INF("USB HID device initialized successfully");
 
