@@ -125,6 +125,9 @@ jobs:
           cd /zephyr_workspace
           COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
 
+          # Clean up any old UF2 files from cached workspace
+          rm -f mp_usb_*.uf2
+
           # Copy and rename UF2 files with commit hash
           cp build/app/zephyr/zephyr.uf2 mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2
           echo "✅ ${{ matrix.board }} UF2: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2"
@@ -137,7 +140,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mp_usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}
-          path: /zephyr_workspace/mp_usb_${{ matrix.board }}_*.uf2
+          path: /zephyr_workspace/mp_usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}.uf2
           retention-days: 30
 
       - name: 🔍 Verify Build Artifacts
