@@ -45,19 +45,15 @@ jobs:
             export SDKCONFIG_DEFAULTS="${{ matrix.board.sdkconfig }}"
             idf.py build
 
-      - name: Create merged binary
-        run: |
-          cd esp
-          . ~/esp-idf/export.sh
-          # Create single merged binary with all components
-          esptool.py --chip esp32s3 merge_bin \
-            -o build/mouthpad_usb_merged.bin \
-            --flash_mode dio \
-            --flash_freq 80m \
-            --flash_size 8MB \
-            0x0 build/bootloader/bootloader.bin \
-            0x8000 build/partition_table/partition-table.bin \
-            0x10000 build/mouthpad_usb.bin
+            # Create single merged binary with all components
+            esptool.py --chip esp32s3 merge_bin \
+              -o build/mouthpad_usb_merged.bin \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 8MB \
+              0x0 build/bootloader/bootloader.bin \
+              0x8000 build/partition_table/partition-table.bin \
+              0x10000 build/mouthpad_usb.bin
 
       - name: Prepare artifacts
         run: |
