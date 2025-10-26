@@ -20,10 +20,10 @@ jobs:
     strategy:
       matrix:
         board:
-          - name: xiao
+          - name: xiao_esp32s3
             display_name: "XIAO ESP32-S3"
             sdkconfig: "sdkconfig.defaults;sdkconfig.board.xiao"
-          - name: lilygo
+          - name: lilygo_tdisplays3
             display_name: "LilyGo T-Display-S3"
             sdkconfig: "sdkconfig.defaults;sdkconfig.board.lilygo"
 
@@ -45,47 +45,41 @@ jobs:
             export SDKCONFIG_DEFAULTS="${{ matrix.board.sdkconfig }}"
             idf.py build
 
+      - name: Create merged binary
+        run: |
+          cd esp
+          . ~/esp-idf/export.sh
+          # Create single merged binary with all components
+          esptool.py --chip esp32s3 merge_bin \
+            -o build/mouthpad_usb_merged.bin \
+            --flash_mode dio \
+            --flash_freq 80m \
+            --flash_size 8MB \
+            0x0 build/bootloader/bootloader.bin \
+            0x8000 build/partition_table/partition-table.bin \
+            0x10000 build/mouthpad_usb.bin
+
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
-          cd esp/build
-          # Get build timestamp
-          BUILD_DATE=$(date +%Y%m%d_%H%M%S)
+          COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
 
-          # Copy main firmware binaries with descriptive names
-          cp bootloader/bootloader.bin ../../artifacts/mouthpad_usb_${{ matrix.board.name }}_bootloader_${BUILD_DATE}.bin || true
-          cp partition_table/partition-table.bin ../../artifacts/mouthpad_usb_${{ matrix.board.name }}_partitions_${BUILD_DATE}.bin || true
-          cp mouthpad_usb.bin ../../artifacts/mouthpad_usb_${{ matrix.board.name }}_${BUILD_DATE}.bin || true
+          # Copy merged binary with commit hash
+          cp esp/build/mouthpad_usb_merged.bin artifacts/mp_usb_${{ matrix.board.name }}_${COMMIT_SHA}.bin
 
-          # Copy merged flashable binary (single file for easy flashing)
-          cp flash_project_args ../../artifacts/ || true
+          echo "✅ ${{ matrix.board.display_name }} merged binary created"
+          ls -lh artifacts/
 
-          # Create a flash command reference
-          cat > ../../artifacts/FLASH_README_${{ matrix.board.name }}.txt << 'EOF'
-          === MouthPad^USB ESP32 Firmware - ${{ matrix.board.display_name }} ===
-
-          Flash using esptool.py:
-
-            esptool.py --chip esp32s3 write_flash \
-              0x0 mouthpad_usb_${{ matrix.board.name }}_bootloader_*.bin \
-              0x8000 mouthpad_usb_${{ matrix.board.name }}_partitions_*.bin \
-              0x10000 mouthpad_usb_${{ matrix.board.name }}_*.bin
-
-          Or use idf.py from the esp/ directory:
-
-            cd esp
-            idf.py -p /dev/ttyUSB0 flash
-
-          Build timestamp: $(date)
-          EOF
+          # Export COMMIT_SHA for use in next steps
+          echo "COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_ENV
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mouthpad-usb-esp32-${{ matrix.board.name }}-firmware
-          path: artifacts/
+          name: mp_usb_${{ matrix.board.name }}_${{ env.COMMIT_SHA }}
+          path: artifacts/mp_usb_${{ matrix.board.name }}_*.bin
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30
 
       - name: Build summary
         run: |
@@ -95,10 +89,12 @@ jobs:
           echo "**SDK Config:** \`${{ matrix.board.sdkconfig }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f esp/build/project_description.json ]; then
-            SIZE=$(stat -f%z esp/build/mouthpad_usb.bin 2>/dev/null || stat -c%s esp/build/mouthpad_usb.bin 2>/dev/null || echo "unknown")
-            echo "**Firmware size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          if [ -f esp/build/mouthpad_usb_merged.bin ]; then
+            SIZE=$(stat -c%s esp/build/mouthpad_usb_merged.bin 2>/dev/null || stat -f%z esp/build/mouthpad_usb_merged.bin 2>/dev/null || echo "unknown")
+            echo "**Merged binary size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Artifacts uploaded as: \`mouthpad-usb-esp32-${{ matrix.board.name }}-firmware\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact:** \`mp_usb_${{ matrix.board.name }}_${{ env.COMMIT_SHA }}.bin\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Flash with: \`esptool.py --chip esp32s3 write_flash 0x0 mp_usb_${{ matrix.board.name }}_${{ env.COMMIT_SHA }}.bin\`" >> $GITHUB_STEP_SUMMARY
