@@ -24,4 +24,12 @@ config SAMPLE_USBD_MAX_POWER
 	int "USB Max Power (mA / 2)"
 	default 50
 
+# Enable settings subsystem for persistent storage
+config SETTINGS
+	default y
+
+# Enable NVS backend for settings (nRF52840 uses regular flash)
+config NVS
+	default y if !(SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
+
 source "Kconfig.zephyr"
