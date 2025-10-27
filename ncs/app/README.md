@@ -17,12 +17,19 @@ for Nordic (stock pins) vs April Brothers (non-standard LED wiring).
 
 ## Features
 
-* Bridges BLE HID and Nordic UART Service (NUS) traffic to USB HID + dual CDC ACM.
-* Mirrors LED behaviour from the ESP32 build: slow blink while scanning, solid when connected, short
-  pulses on activity.
-* Maintains a maintenance console on the second CDC port with `dfu`, `reset`, `restart`, and `serial` commands.
-* Uses TinyUSB for USB descriptors, matching those exposed by the ESP32 firmware.
-* Supports UF2 updates (drag-and-drop or via the `dfu` command).
+**Core functionality (matches ESP32 firmware 1:1):**
+* Bridges BLE HID and Nordic UART Service (NUS) traffic to USB HID + dual CDC ACM
+* Automatic MouthPad^ discovery and reconnection
+* LED status indicators (slow blink scanning, solid connected, fast flicker on activity)
+* Maintenance console on CDC port 2 with shell commands (see below)
+* Persistent BLE bonding across power cycles
+* USB bcdDevice version automatically set from VERSION file
+
+**Platform-specific features:**
+* UF2 bootloader support (drag-and-drop firmware updates)
+* NeoPixel RGB LED support on Adafruit Feather (gradient battery colors)
+* Docker-based build environment (no local toolchain required)
+* RTT logging support for debugging
 
 ## Build & flash
 
@@ -80,11 +87,13 @@ Override the board with `BOARD=<board>` when calling `make build`.
 
 | Command | Description |
 |---------|-------------|
-| `dfu`   | Reboot into the UF2 bootloader. |
+| `dfu`   | Reboot into the UF2 bootloader (drag-and-drop firmware update mode). |
 | `reset` | Disconnect and clear all BLE bonds, then return to pairing mode. |
 | `restart` | Restart firmware (software reset). |
 | `serial` | Print the USB serial number used in the `usbmodem` node name. |
-| `version` | Display firmware build timestamp and Zephyr version. |
+| `version` | Display firmware build timestamp, Zephyr version, and VERSION file. |
+
+**Note:** The ESP32 firmware also includes a `device` command to display MouthPad^ device information (manufacturer, model, firmware version). This command is not yet implemented in the nRF firmware.
 
 ## LED behaviour
 
@@ -95,6 +104,15 @@ GPIO LEDs use discrete colours; NeoPixels (if present) use gradients. States:
 | `LED_STATE_SCANNING` | Slow blink while seeking the MouthPad^. |
 | `LED_STATE_CONNECTED` | Solid on. |
 | `LED_STATE_DATA_ACTIVITY` | Fast flicker when forwarding HID traffic. |
+
+## Version management
+
+The firmware version is controlled by the `VERSION` file at the repository root. When you build:
+- The VERSION file (e.g., `0.1.0`) is parsed by CMake
+- USB bcdDevice descriptor is set automatically (e.g., `0.1.0` → `0x0010`)
+- Version is logged at startup and visible in `version` command output
+
+To release a new version, update the VERSION file and push to main. GitHub Actions will automatically build and create a release with firmware files named `mp_usb_{version}_{board}.uf2`.
 
 ## Directory notes
 

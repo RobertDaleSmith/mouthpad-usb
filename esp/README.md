@@ -1,8 +1,8 @@
 # MouthPad^ USB – ESP32 Firmware (ESP-IDF)
 
 ESP-IDF port of the MouthPad^ USB bridge for ESP32-S3 boards. Functionally mirrors the Zephyr/nRF
-firmware: it scans for the MouthPad^ over BLE, relays HID and NUS traffic to USB, exposes the same dual
-CDC interfaces, and offers the same maintenance commands.
+firmware with 1:1 feature parity: it scans for the MouthPad^ over BLE, relays HID and NUS traffic to USB,
+exposes the same dual CDC interfaces, and offers the same maintenance commands.
 
 ## Target hardware
 
@@ -12,6 +12,22 @@ CDC interfaces, and offers the same maintenance commands.
 
 Select the board via `make xiao` or `make lilygo` (defaults to XIAO). The Makefile injects board-specific
 `sdkconfig` fragments so switching targets does not leave stale settings behind.
+
+## Features
+
+**Core functionality (matches nRF firmware 1:1):**
+* Bridges BLE HID and Nordic UART Service (NUS) traffic to USB HID + dual CDC ACM
+* Automatic MouthPad^ discovery and reconnection
+* LED status indicators (slow blink scanning, solid connected, fast flicker on activity)
+* Maintenance console on CDC port 2 with shell commands (see below)
+* Persistent BLE bonding across power cycles
+* USB bcdDevice version automatically set from VERSION file
+
+**Platform-specific features:**
+* ESP-IDF toolchain and build system
+* esptool-based flashing (USB serial downloader ROM)
+* BLE device information query via `device` command
+* GPIO 21 LED control on XIAO ESP32-S3
 
 ## Prerequisites
 
@@ -51,18 +67,18 @@ before building to regenerate `sdkconfig` with the new defaults.
 
 ## CDC console commands
 
-The TinyUSB CDC maintenance port accepts the same commands as the nRF firmware:
+The TinyUSB CDC maintenance port (typically `/dev/cu.usbmodem<serial>3` on macOS) accepts these commands:
 
 | Command | Description |
 |---------|-------------|
-| `dfu`   | Disconnect serial, print confirmation, and reboot into the ROM serial downloader. Run `idf.py flash` while the port stays in download mode. |
-| `reset` | Disconnect, clear stored bonds (via `ble_bonds_clear_all()`), and return to scanning. |
-| `restart` | Restart firmware (software reset via `esp_restart()`). |
-| `serial` | Display USB serial number (MAC address). |
-| `version` | Display firmware build timestamp, ESP-IDF version, and chip information. |
-| `device` | Display connected MouthPad^ device information from BLE Device Information Service (manufacturer, model, serial, firmware version, etc.). |
+| `dfu`   | Disconnect serial, print confirmation, and reboot into ROM serial downloader (run `idf.py flash` to reflash). |
+| `reset` | Disconnect, clear all BLE bonds, and return to pairing mode. |
+| `restart` | Restart firmware (software reset). |
+| `serial` | Display USB serial number (derived from MAC address). |
+| `version` | Display firmware build timestamp, ESP-IDF version, chip info, and VERSION file. |
+| `device` | Display connected MouthPad^ device information (manufacturer, model, serial, firmware version, PnP ID). |
 
-Logs arrive on the same port (typically `/dev/cu.usbmodem<serial>3` on macOS).
+**Note:** The `device` command is ESP32-specific and not yet available in the nRF firmware.
 
 ## LED status
 
@@ -94,10 +110,20 @@ esp32/
 3. Flash with `idf.py flash` (or `make flash`) targeting the ROM port.
 4. The firmware restarts and reconnects to the MouthPad^.
 
+## Version management
+
+The firmware version is controlled by the `VERSION` file at the repository root. When you build:
+- The VERSION file (e.g., `0.1.0`) is parsed by CMake
+- USB bcdDevice descriptor is set automatically (e.g., `0.1.0` → `0x0010`)
+- Version is logged at startup and visible in `version` command output
+
+To release a new version, update the VERSION file and push to main. GitHub Actions will automatically build and create a release with firmware files named `mp_usb_{version}_{board}.bin`.
+
 ## Troubleshooting
 
 * **LED stays off on XIAO** – ensure you ran `make clean` after switching from the LilyGo build so the
   correct `sdkconfig` was regenerated.
 * **Device enumerates as plain serial** – you are in DFU mode. Reflash the application or power-cycle
 the board.
+* **Wrong version reported** – run `make clean` to regenerate build with current VERSION file.
 
