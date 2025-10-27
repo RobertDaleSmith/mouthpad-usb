@@ -70,16 +70,17 @@ static int init_neopixel(void);
 int leds_init(void)
 {
     int ret = 0;
-    
+
     LOG_INF("Initializing LED system...");
-    
+
+#if HAS_NEOPIXEL
     /* Enable NeoPixel power via P1.14 (required for Adafruit Feather nRF52840) */
     const struct gpio_dt_spec neopixel_power = {
         .port = DEVICE_DT_GET(DT_NODELABEL(gpio1)),
         .pin = 14,
         .dt_flags = GPIO_ACTIVE_HIGH
     };
-    
+
     if (gpio_is_ready_dt(&neopixel_power)) {
         ret = gpio_pin_configure_dt(&neopixel_power, GPIO_OUTPUT_ACTIVE);
         if (ret == 0) {
@@ -88,8 +89,7 @@ int leds_init(void)
             LOG_INF("NeoPixel power enabled on P1.14");
         }
     }
-    
-#if HAS_NEOPIXEL
+
     ret = init_neopixel();
     if (ret == 0) {
         leds_ready = true;
