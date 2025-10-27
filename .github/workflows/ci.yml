@@ -88,8 +88,12 @@ jobs:
           # Remove old app and build artifacts if exists (from cache)
           rm -rf /zephyr_workspace/app
           rm -rf /zephyr_workspace/build
-          cp -r ncs/app /zephyr_workspace/app
+          # Create app directory structure matching local layout
+          mkdir -p /zephyr_workspace/ncs
+          cp -r ncs/app /zephyr_workspace/ncs/app
           cp VERSION /zephyr_workspace/VERSION
+          # Symlink for compatibility with build commands
+          ln -s /zephyr_workspace/ncs/app /zephyr_workspace/app
 
       - name: 🔧 Apply Board Variant Files
         if: matrix.overlay
