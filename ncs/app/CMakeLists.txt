@@ -8,6 +8,34 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(mouthpad_usb)
 
+# Read VERSION file from repository root (two levels up from ncs/app)
+set(VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION")
+if(EXISTS "${VERSION_FILE}")
+  file(READ "${VERSION_FILE}" FIRMWARE_VERSION_STRING)
+  string(STRIP "${FIRMWARE_VERSION_STRING}" FIRMWARE_VERSION_STRING)
+
+  # Parse version string (e.g., "0.1.0" -> major=0, minor=1, patch=0)
+  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" VERSION_MATCH "${FIRMWARE_VERSION_STRING}")
+  if(VERSION_MATCH)
+    set(VERSION_MAJOR ${CMAKE_MATCH_1})
+    set(VERSION_MINOR ${CMAKE_MATCH_2})
+    set(VERSION_PATCH ${CMAKE_MATCH_3})
+
+    # Convert to BCD format for USB descriptor (e.g., 0.1.0 -> 0x0010)
+    math(EXPR USB_BCD_DEVICE "(${VERSION_MAJOR} << 8) | (${VERSION_MINOR} << 4) | ${VERSION_PATCH}")
+
+    message(STATUS "Firmware version: ${FIRMWARE_VERSION_STRING} (USB bcdDevice: 0x${USB_BCD_DEVICE})")
+
+    # Pass to compiler
+    add_definitions(-DFIRMWARE_VERSION_STRING="${FIRMWARE_VERSION_STRING}")
+    add_definitions(-DUSB_BCD_DEVICE=${USB_BCD_DEVICE})
+  else()
+    message(WARNING "Invalid VERSION format: ${FIRMWARE_VERSION_STRING}")
+  endif()
+else()
+  message(WARNING "VERSION file not found at ${VERSION_FILE}")
+endif()
+
 target_include_directories(app PRIVATE
   src/mouthpad-proto/nanopb
   src/mouthpad-proto/src/C

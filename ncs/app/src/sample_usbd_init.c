@@ -323,11 +323,18 @@ struct usbd_context *sample_usbd_setup_device(usbd_msg_cb_t msg_cb) {
   sample_fix_code_triple(&sample_usbd, USBD_SPEED_FS);
   usbd_self_powered(&sample_usbd, attributes & USB_SCD_SELF_POWERED);
 
-  /* Align bcdDevice with ESP32 firmware (version 0.1.0) */
-  err = usbd_device_set_bcd_device(&sample_usbd, 0x0010);
+  /* Set bcdDevice from VERSION file */
+#ifdef USB_BCD_DEVICE
+  err = usbd_device_set_bcd_device(&sample_usbd, USB_BCD_DEVICE);
   if (err) {
     LOG_WRN("Failed to set bcdDevice (%d)", err);
   }
+#ifdef FIRMWARE_VERSION_STRING
+  LOG_INF("Firmware version: %s (bcdDevice: 0x%04X)", FIRMWARE_VERSION_STRING, USB_BCD_DEVICE);
+#endif
+#else
+  LOG_WRN("USB_BCD_DEVICE not defined, using default");
+#endif
 
   if (msg_cb != NULL) {
     /* doc device init-and-msg start */

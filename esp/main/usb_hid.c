@@ -105,7 +105,11 @@ static const tusb_desc_device_t mouthpad_device_descriptor = {
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor = 0x1915,
     .idProduct = 0xEEEE,
-    .bcdDevice = 0x0010,  // Version 0.1.0
+#ifdef USB_BCD_DEVICE
+    .bcdDevice = USB_BCD_DEVICE,  // Set from VERSION file
+#else
+    .bcdDevice = 0x0010,  // Fallback: Version 0.1.0
+#endif
     .iManufacturer = 0x01,
     .iProduct = 0x02,
     .iSerialNumber = 0x03,
