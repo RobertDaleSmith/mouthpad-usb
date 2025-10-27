@@ -31,6 +31,7 @@ static bool buzzer_available = false;
 static struct k_work_delayable buzzer_stop_work;
 
 /* Function to stop buzzer after delay */
+static void buzzer_stop_work_handler(struct k_work *work) __maybe_unused;
 static void buzzer_stop_work_handler(struct k_work *work)
 {
     if (buzzer_ready && pwm_dev) {

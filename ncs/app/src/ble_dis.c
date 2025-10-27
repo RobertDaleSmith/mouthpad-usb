@@ -20,21 +20,14 @@
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 /* Device Information Service UUIDs (Bluetooth SIG assigned numbers) */
-#define BT_UUID_DIS_VAL           0x180A  /* Device Information Service */
+/* Note: BT_UUID_DIS, BT_UUID_DIS_PNP_ID, and BT_UUID_GAP_DEVICE_NAME are already defined in zephyr/bluetooth/uuid.h */
 #define BT_UUID_DIS_FW_REV_VAL    0x2A26  /* Firmware Revision String */
 #define BT_UUID_DIS_HW_REV_VAL    0x2A27  /* Hardware Revision String */
 #define BT_UUID_DIS_MFR_NAME_VAL  0x2A29  /* Manufacturer Name String */
-#define BT_UUID_DIS_PNP_ID_VAL    0x2A50  /* PnP ID */
 
-#define BT_UUID_DIS         BT_UUID_DECLARE_16(BT_UUID_DIS_VAL)
 #define BT_UUID_DIS_FW_REV  BT_UUID_DECLARE_16(BT_UUID_DIS_FW_REV_VAL)
 #define BT_UUID_DIS_HW_REV  BT_UUID_DECLARE_16(BT_UUID_DIS_HW_REV_VAL)
 #define BT_UUID_DIS_MFR_NAME BT_UUID_DECLARE_16(BT_UUID_DIS_MFR_NAME_VAL)
-#define BT_UUID_DIS_PNP_ID  BT_UUID_DECLARE_16(BT_UUID_DIS_PNP_ID_VAL)
-
-/* GAP Device Name UUID */
-#define BT_UUID_GAP_DEVICE_NAME_VAL 0x2A00
-#define BT_UUID_GAP_DEVICE_NAME BT_UUID_DECLARE_16(BT_UUID_GAP_DEVICE_NAME_VAL)
 
 /* Device Information client state */
 static ble_dis_info_t device_info;
@@ -52,9 +45,9 @@ static uint16_t pnp_id_handle = 0;
 static void dis_discovery_completed_cb(struct bt_gatt_dm *dm, void *context);
 static void dis_discovery_service_not_found_cb(struct bt_conn *conn, void *context);
 static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *context);
-static void read_device_name_cb(struct bt_conn *conn, uint8_t err,
-				struct bt_gatt_read_params *params,
-				const void *data, uint16_t length);
+static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
+				   struct bt_gatt_read_params *params,
+				   const void *data, uint16_t length);
 static uint8_t read_pnp_id_cb(struct bt_conn *conn, uint8_t err,
 			      struct bt_gatt_read_params *params,
 			      const void *data, uint16_t length);
@@ -231,21 +224,21 @@ read_device_name:
 	return BT_GATT_ITER_STOP;
 }
 
-static void read_device_name_cb(struct bt_conn *conn, uint8_t err,
-				struct bt_gatt_read_params *params,
-				const void *data, uint16_t length)
+static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
+				   struct bt_gatt_read_params *params,
+				   const void *data, uint16_t length)
 {
 	if (err) {
 		LOG_ERR("Device Name read failed: %d", err);
 		dis_ready = true;  /* Mark ready even without device name */
-		return;
+		return BT_GATT_ITER_STOP;
 	}
 
 	if (!data) {
 		LOG_DBG("Device Name read complete");
 		dis_ready = true;
 		LOG_INF("Device Information Service ready");
-		return;
+		return BT_GATT_ITER_STOP;
 	}
 
 	/* Copy device name string */
@@ -255,6 +248,7 @@ static void read_device_name_cb(struct bt_conn *conn, uint8_t err,
 	device_info.has_device_name = true;
 
 	LOG_INF("Device Name: %s", device_info.device_name);
+	return BT_GATT_ITER_CONTINUE;
 }
 
 /* DIS Discovery callbacks */
