@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Read VERSION file from repository root
+# Read VERSION file from repository root (before project setup)
 set(VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
 if(EXISTS "${VERSION_FILE}")
   file(READ "${VERSION_FILE}" FIRMWARE_VERSION_STRING)
@@ -15,15 +15,9 @@ if(EXISTS "${VERSION_FILE}")
 
     # Convert to BCD format for USB descriptor (e.g., 0.1.0 -> 0x0010)
     math(EXPR USB_BCD_DEVICE "(${VERSION_MAJOR} << 8) | (${VERSION_MINOR} << 4) | ${VERSION_PATCH}")
-
-    # Convert to hex string for C define
-    set(USB_BCD_DEVICE_HEX "0x${USB_BCD_DEVICE}")
+    math(EXPR USB_BCD_DEVICE_HEX "${USB_BCD_DEVICE}" OUTPUT_FORMAT HEXADECIMAL)
 
     message(STATUS "Firmware version: ${FIRMWARE_VERSION_STRING} (USB bcdDevice: ${USB_BCD_DEVICE_HEX})")
-
-    # Pass to compiler via component config
-    idf_build_set_property(COMPILE_DEFINITIONS "-DFIRMWARE_VERSION_STRING=\"${FIRMWARE_VERSION_STRING}\"" APPEND)
-    idf_build_set_property(COMPILE_DEFINITIONS "-DUSB_BCD_DEVICE=${USB_BCD_DEVICE_HEX}" APPEND)
   else()
     message(WARNING "Invalid VERSION format: ${FIRMWARE_VERSION_STRING}")
   endif()
@@ -33,3 +27,9 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(mouthpad_usb)
+
+# Pass version defines to compiler (after project setup when IDF functions are available)
+if(DEFINED USB_BCD_DEVICE_HEX)
+  idf_build_set_property(COMPILE_DEFINITIONS "-DFIRMWARE_VERSION_STRING=\"${FIRMWARE_VERSION_STRING}\"" APPEND)
+  idf_build_set_property(COMPILE_DEFINITIONS "-DUSB_BCD_DEVICE=${USB_BCD_DEVICE_HEX}" APPEND)
+endif()
