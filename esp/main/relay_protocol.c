@@ -220,14 +220,23 @@ static esp_err_t handle_device_info_read(void) {
     mouthware_message_RelayToAppMessage relay_msg = mouthware_message_RelayToAppMessage_init_zero;
     relay_msg.which_message_body = mouthware_message_RelayToAppMessage_device_info_response_tag;
 
+    // Device family and board (always available - dongle hardware info)
+    // These describe the dongle hardware itself, not the bonded MouthPad
+    relay_msg.message_body.device_info_response.family.funcs.encode = encode_string_callback;
+    relay_msg.message_body.device_info_response.family.arg = (void *)"esp";
+    relay_msg.message_body.device_info_response.board.funcs.encode = encode_string_callback;
+    relay_msg.message_body.device_info_response.board.arg = (void *)CONFIG_MOUTHPAD_BOARD_NAME;
+
     const ble_device_info_t *device_info = ble_device_info_get_current();
 
     if (!device_info || !device_info->info_complete) {
-        ESP_LOGW(TAG, "Device info not available");
-        // Send empty response
+        ESP_LOGW(TAG, "Device info not available - sending dongle hardware info only (family=esp, board=%s)",
+                 CONFIG_MOUTHPAD_BOARD_NAME);
+        // Send response with family/board only (no bonded MouthPad info)
         return relay_protocol_send_response(&relay_msg);
     }
 
+    // Bonded MouthPad device info available - add it to the response
     // Set up callbacks for string fields
     if (strlen(device_info->device_name) > 0) {
         relay_msg.message_body.device_info_response.name.funcs.encode = encode_string_callback;
@@ -255,12 +264,6 @@ static esp_err_t handle_device_info_read(void) {
         relay_msg.message_body.device_info_response.vid = device_info->pnp_id.vendor_id;
         relay_msg.message_body.device_info_response.pid = device_info->pnp_id.product_id;
     }
-
-    // Device family and board (always available)
-    relay_msg.message_body.device_info_response.family.funcs.encode = encode_string_callback;
-    relay_msg.message_body.device_info_response.family.arg = (void *)"esp";
-    relay_msg.message_body.device_info_response.board.funcs.encode = encode_string_callback;
-    relay_msg.message_body.device_info_response.board.arg = (void *)CONFIG_MOUTHPAD_BOARD_NAME;
 
     ESP_LOGI(TAG, "Sending device info: name=%s, vid=0x%04X, pid=0x%04X, family=esp, board=%s",
              device_info->device_name,
