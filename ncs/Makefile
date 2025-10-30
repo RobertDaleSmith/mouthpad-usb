@@ -37,6 +37,9 @@ build-april-dongle:
 	@cp app/boards/nrf52840dongle_nrf52840.april.overlay app/boards/nrf52840dongle_nrf52840.overlay
 	@cp app/boards/nrf52840dongle_nrf52840.april.conf app/boards/nrf52840dongle_nrf52840.conf
 	west build -b nrf52840dongle app --pristine=always
+	@echo "Restoring Nordic default files..."
+	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
+	@cp app/boards/nrf52840dongle_nrf52840.nordic.conf app/boards/nrf52840dongle_nrf52840.conf
 
 # Flash the built firmware
 flash:
