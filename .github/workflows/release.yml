@@ -185,25 +185,15 @@ jobs:
             export SDKCONFIG_DEFAULTS="${{ matrix.board.sdkconfig }}"
             idf.py build
 
-            # Create single merged binary with all components
-            esptool.py --chip esp32s3 merge_bin \
-              -o build/mouthpad_usb_merged.bin \
-              --flash_mode dio \
-              --flash_freq 80m \
-              --flash_size 8MB \
-              0x0 build/bootloader/bootloader.bin \
-              0x8000 build/partition_table/partition-table.bin \
-              0x10000 build/mouthpad_usb.bin
-
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
           VERSION="${{ needs.check-version.outputs.version }}"
 
-          # Copy merged binary with version number
-          cp esp/build/mouthpad_usb_merged.bin artifacts/mp_usb_${VERSION}_${{ matrix.board.name }}.bin
+          # Copy app binary only (preserves NVS/BLE bonds when flashed at 0x10000)
+          cp esp/build/mouthpad_usb.bin artifacts/mp_usb_${VERSION}_${{ matrix.board.name }}.bin
 
-          echo "✅ ${{ matrix.board.display_name }} merged binary created"
+          echo "✅ ${{ matrix.board.display_name }} app binary created"
           ls -lh artifacts/
 
       - name: Upload firmware artifacts
@@ -280,8 +270,10 @@ jobs:
 
             **ESP32-S3 (BIN):**
             ```bash
-            esptool.py --chip esp32s3 write_flash 0x0 mp_usb_<version>_<board>.bin
+            esptool.py --chip esp32s3 write_flash 0x10000 mp_usb_<version>_<board>.bin
             ```
+
+            **Note:** Flashing at 0x10000 (app partition) preserves NVS storage including BLE bonds.
 
             ### 🔐 Checksums
             See `checksums.txt` for SHA256 verification.

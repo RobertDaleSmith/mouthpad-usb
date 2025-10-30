@@ -45,25 +45,15 @@ jobs:
             export SDKCONFIG_DEFAULTS="${{ matrix.board.sdkconfig }}"
             idf.py build
 
-            # Create single merged binary with all components
-            esptool.py --chip esp32s3 merge_bin \
-              -o build/mouthpad_usb_merged.bin \
-              --flash_mode dio \
-              --flash_freq 80m \
-              --flash_size 8MB \
-              0x0 build/bootloader/bootloader.bin \
-              0x8000 build/partition_table/partition-table.bin \
-              0x10000 build/mouthpad_usb.bin
-
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
           COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
 
-          # Copy merged binary with commit hash
-          cp esp/build/mouthpad_usb_merged.bin artifacts/mp_usb_${{ matrix.board.name }}_${COMMIT_SHA}.bin
+          # Copy app binary only (preserves NVS/BLE bonds when flashed at 0x10000)
+          cp esp/build/mouthpad_usb.bin artifacts/mp_usb_${{ matrix.board.name }}_${COMMIT_SHA}.bin
 
-          echo "✅ ${{ matrix.board.display_name }} merged binary created"
+          echo "✅ ${{ matrix.board.display_name }} app binary created"
           ls -lh artifacts/
 
           # Export COMMIT_SHA for use in next steps
@@ -85,12 +75,14 @@ jobs:
           echo "**SDK Config:** \`${{ matrix.board.sdkconfig }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f esp/build/mouthpad_usb_merged.bin ]; then
-            SIZE=$(stat -c%s esp/build/mouthpad_usb_merged.bin 2>/dev/null || stat -f%z esp/build/mouthpad_usb_merged.bin 2>/dev/null || echo "unknown")
-            echo "**Merged binary size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          if [ -f esp/build/mouthpad_usb.bin ]; then
+            SIZE=$(stat -c%s esp/build/mouthpad_usb.bin 2>/dev/null || stat -f%z esp/build/mouthpad_usb.bin 2>/dev/null || echo "unknown")
+            echo "**App binary size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Artifact:** \`mp_usb_${{ matrix.board.name }}_${{ env.COMMIT_SHA }}.bin\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Flash with: \`esptool.py --chip esp32s3 write_flash 0x0 mp_usb_${{ matrix.board.name }}_${{ env.COMMIT_SHA }}.bin\`" >> $GITHUB_STEP_SUMMARY
+          echo "Flash with: \`esptool.py --chip esp32s3 write_flash 0x10000 mp_usb_${{ matrix.board.name }}_${{ env.COMMIT_SHA }}.bin\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Flashing at 0x10000 preserves NVS/BLE bonds" >> $GITHUB_STEP_SUMMARY
