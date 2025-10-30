@@ -1,3 +1,2 @@
 dependencies:
   espressif/esp_tinyusb: "~2.0.0"
-  espressif/usb: "*"
