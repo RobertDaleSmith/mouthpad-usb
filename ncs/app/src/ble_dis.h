@@ -78,6 +78,13 @@ void ble_dis_reset(void);
  */
 const ble_dis_info_t *ble_dis_get_info(void);
 
+/**
+ * @brief Clear saved device information from persistent storage
+ *
+ * This should be called when bonds are cleared to remove cached DIS info.
+ */
+void ble_dis_clear_saved(void);
+
 #ifdef __cplusplus
 }
 #endif

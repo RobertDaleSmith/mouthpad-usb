@@ -10,6 +10,7 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
+#include <zephyr/settings/settings.h>
 #include <bluetooth/gatt_dm.h>
 #include <string.h>
 
@@ -59,12 +60,72 @@ static struct bt_gatt_dm_cb dis_discovery_cb = {
 	.error_found = dis_discovery_error_found_cb,
 };
 
+/* Settings storage for persistent DIS info across power cycles */
+#define SETTINGS_DIS_INFO_KEY "ble_dis/info"
+
+static int save_dis_info_to_settings(void)
+{
+	if (!IS_ENABLED(CONFIG_SETTINGS)) {
+		return 0;
+	}
+
+	LOG_INF("Saving DIS info: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+		device_info.has_firmware_version, device_info.firmware_version,
+		device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
+
+	int err = settings_save_one(SETTINGS_DIS_INFO_KEY, &device_info, sizeof(ble_dis_info_t));
+	if (err) {
+		LOG_ERR("Failed to save DIS info to settings (err %d)", err);
+		return err;
+	}
+
+	LOG_INF("Saved DIS info to persistent storage successfully");
+	return 0;
+}
+
+static int settings_set_cb(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
+{
+	const char *next;
+
+	LOG_INF("DIS settings_set_cb called: name='%s', len=%d", name, len);
+
+	if (settings_name_steq(name, "info", &next) && !next) {
+		if (len != sizeof(ble_dis_info_t)) {
+			LOG_WRN("DIS info settings size mismatch: expected %d, got %d",
+				sizeof(ble_dis_info_t), len);
+			return -EINVAL;
+		}
+
+		ssize_t bytes_read = read_cb(cb_arg, &device_info, sizeof(ble_dis_info_t));
+		if (bytes_read != sizeof(ble_dis_info_t)) {
+			LOG_ERR("Failed to read DIS info from settings");
+			return -EIO;
+		}
+
+		LOG_INF("Loaded DIS info from persistent storage: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+			device_info.has_firmware_version, device_info.firmware_version,
+			device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
+		return 0;
+	}
+
+	return -ENOENT;
+}
+
+SETTINGS_STATIC_HANDLER_DEFINE(ble_dis, "ble_dis", NULL, settings_set_cb, NULL, NULL);
+
 /* Public API implementations */
 int ble_dis_init(void)
 {
 	LOG_INF("Initializing Device Information Service client...");
-	memset(&device_info, 0, sizeof(device_info));
+	/* Note: Don't clear device_info here - it may already be loaded from
+	 * persistent storage via settings_set_cb() when settings subsystem initialized
+	 */
 	dis_ready = false;
+
+	LOG_INF("DIS init - device_info state: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+		device_info.has_firmware_version, device_info.firmware_version,
+		device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
+
 	LOG_INF("Device Information Service client initialized successfully");
 	return 0;
 }
@@ -98,22 +159,52 @@ bool ble_dis_is_ready(void)
 
 void ble_dis_reset(void)
 {
+	/* Clear connection state and handles, but preserve cached device_info
+	 * so it can be reported even when disconnected (matches ESP firmware behavior)
+	 */
 	dis_ready = false;
 	current_conn = NULL;
 	fw_rev_handle = 0;
 	hw_rev_handle = 0;
 	mfr_name_handle = 0;
 	pnp_id_handle = 0;
-	memset(&device_info, 0, sizeof(device_info));
-	LOG_DBG("Device Information Service reset");
+	/* Note: device_info is NOT cleared - it persists across disconnections
+	 * This allows the host to query bonded device info even when disconnected
+	 */
+	LOG_DBG("Device Information Service reset (device_info preserved)");
 }
 
 const ble_dis_info_t *ble_dis_get_info(void)
 {
-	if (!dis_ready) {
-		return NULL;
+	/* Return cached device_info even when disconnected (dis_ready == false)
+	 * Check if any meaningful data is present before returning
+	 */
+	if (device_info.has_firmware_version || device_info.has_pnp_id) {
+		LOG_INF("ble_dis_get_info returning data: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+			device_info.has_firmware_version, device_info.firmware_version,
+			device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
+		return &device_info;
 	}
-	return &device_info;
+	LOG_WRN("ble_dis_get_info returning NULL (no data available)");
+	return NULL;
+}
+
+void ble_dis_clear_saved(void)
+{
+	LOG_INF("Clearing saved DIS info");
+
+	/* Clear in-memory cache */
+	memset(&device_info, 0, sizeof(device_info));
+
+	/* Clear from persistent storage */
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		int err = settings_delete(SETTINGS_DIS_INFO_KEY);
+		if (err && err != -ENOENT) {
+			LOG_ERR("Failed to delete DIS info from settings (err %d)", err);
+		} else {
+			LOG_INF("Cleared DIS info from persistent storage");
+		}
+	}
 }
 
 /* GATT read callbacks for each characteristic */
@@ -231,6 +322,11 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 	if (err) {
 		LOG_ERR("Device Name read failed: %d", err);
 		dis_ready = true;  /* Mark ready even without device name */
+		LOG_INF("Device Information Service ready (device name unavailable)");
+
+		/* Save DIS info even if device name failed - we have firmware/PnP ID */
+		save_dis_info_to_settings();
+
 		return BT_GATT_ITER_STOP;
 	}
 
@@ -238,6 +334,10 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 		LOG_DBG("Device Name read complete");
 		dis_ready = true;
 		LOG_INF("Device Information Service ready");
+
+		/* Save DIS info to persistent storage now that discovery is complete */
+		save_dis_info_to_settings();
+
 		return BT_GATT_ITER_STOP;
 	}
 
