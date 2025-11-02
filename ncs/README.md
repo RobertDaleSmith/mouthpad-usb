@@ -114,6 +114,8 @@ ncs/
    - **XIAO:** `/Volumes/XIAO-SENSE` (macOS) or `/media/XIAO-SENSE` (Linux)
    - **Feather:** `/Volumes/FTHR840BOOT` (macOS) or `/media/FTHR840BOOT` (Linux)
    - **Nordic Dongle:** `/Volumes/NRF52BOOT` (macOS) or `/media/NRF52BOOT` (Linux)
+   - **Raytac Dongle:** `/Volumes/MDBT50QBOOT` (macOS) or `/media/MDBT50QBOOT` (Linux)
+   - **MakerDiary Dongle:** `/Volumes/UF2BOOT` (macOS) or `/media/UF2BOOT` (Linux)
 
 3. **Automatic reboot:** Device resets automatically after copy completes
 
