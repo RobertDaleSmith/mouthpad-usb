@@ -51,7 +51,7 @@ jobs:
       CMAKE_PREFIX_PATH: /opt/toolchains
     strategy:
       matrix:
-        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_rx]
+        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_rx, makerdiary_nrf52840mdk]
         include:
           - board: seeed_xiao_nrf52840
             description: "Seeed XIAO nRF52840"
@@ -76,6 +76,11 @@ jobs:
             board_target: nrf52840dongle
             overlay: raytac_mdbt50q_rx.overlay
             conf: raytac_mdbt50q_rx.conf
+          - board: makerdiary_nrf52840mdk
+            description: "MakerDiary nRF52840 MDK USB Dongle"
+            board_target: nrf52840dongle
+            overlay: makerdiary_nrf52840mdk.overlay
+            conf: makerdiary_nrf52840mdk.conf
 
     steps:
       - uses: actions/checkout@v4
@@ -266,6 +271,7 @@ jobs:
             - `mp_usb_${{ needs.check-version.outputs.version }}_nordic_nrf52840dongle.uf2` - Nordic nRF52840 Dongle
             - `mp_usb_${{ needs.check-version.outputs.version }}_aprbrother_nrf52840.uf2` - Apr Brother nRF52840 Dongle
             - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
+            - `mp_usb_${{ needs.check-version.outputs.version }}_makerdiary_nrf52840mdk.uf2` - MakerDiary nRF52840 MDK USB Dongle
 
             **ESP32-S3 Boards (BIN format - flash with esptool):**
             - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3

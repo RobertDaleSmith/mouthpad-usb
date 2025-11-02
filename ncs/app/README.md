@@ -12,9 +12,10 @@ and turns a MouthPad^ wearable into a wired USB HID device without touching the 
 | Nordic nRF52840 Dongle (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins. |
 | Apr Brother nRF52840 Dongle (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring. |
 | Raytac MDBT50Q-RX Dongle (`raytac_mdbt50q_rx`) | ✅ Production | PCA10059 compatible with single LED. |
+| MakerDiary nRF52840 MDK USB Dongle (`makerdiary_nrf52840mdk`) | ✅ Production | Compact dongle with RGB LED. |
 
 The default overlays assume a single status LED and a user button. Dongle variants use different overlays
-for Nordic (stock pins), Apr Brother (non-standard LED wiring), and Raytac (single LED on P1.13).
+for Nordic (stock pins), Apr Brother (non-standard LED wiring), Raytac (single LED on P1.13), and MakerDiary (RGB LED on P0.22/P0.23/P0.24).
 
 ## Features
 

@@ -1,0 +1,164 @@
+/*
+ * MakerDiary nRF52840 MDK USB Dongle overlay for MouthPad^USB
+ * Hardware: MakerDiary nRF52840 MDK with Adafruit nRF52 Bootloader (no SoftDevice)
+ *
+ * Bootloader: Adafruit nRF52 UF2 bootloader at 0x0-0x1000
+ * USB Drive: Shows as "MDK-DONGLE" when in bootloader mode
+ *
+ * NOTE: Uses no-SoftDevice memory layout (code starts at 0x1000)
+ *       App runs Zephyr BLE controller (no actual SoftDevice binary)
+ *
+ * MakerDiary MDK Dongle pin assignments (all active LOW):
+ *   RGB LED Red: P0.23
+ *   RGB LED Green: P0.22
+ *   RGB LED Blue: P0.24
+ *   USER/RESET Button: P0.18
+ */
+
+&pinctrl {
+	pwm1_default: pwm1_default {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+		};
+	};
+
+	pwm1_sleep: pwm1_sleep {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+			low-power-enable;
+		};
+	};
+};
+
+&pwm1 {
+	status = "okay";
+	pinctrl-0 = <&pwm1_default>;
+	pinctrl-1 = <&pwm1_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+/ {
+	chosen {
+		nordic,nus-uart = &cdc_acm_uart0;
+		zephyr,console = &cdc_acm_uart1;
+		zephyr,shell-uart = &cdc_acm_uart1;
+	};
+
+	aliases {
+		buzzer-pwm = &pwm1;
+		/* Remap LED aliases to MakerDiary MDK pins */
+		led0 = &led1_red;         /* Use red as primary LED */
+		led1 = &led1_green;       /* Green */
+		led2 = &led1_blue;        /* Blue */
+	};
+
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "MouthPad^HID";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	buzzer {
+		compatible = "pwm-buzzer";
+		pwms = <&pwm1 0 1000000 PWM_POLARITY_NORMAL>;
+		label = "Passive Buzzer";
+	};
+};
+
+/* Override LED pins for MakerDiary MDK */
+&led1_red {
+	gpios = <&gpio0 23 GPIO_ACTIVE_LOW>;
+};
+
+&led1_green {
+	gpios = <&gpio0 22 GPIO_ACTIVE_LOW>;
+};
+
+&led1_blue {
+	gpios = <&gpio0 24 GPIO_ACTIVE_LOW>;
+};
+
+/* Disable button - UICR is pre-configured with P0.18 as RESET and cannot be changed via UF2
+ * Button press triggers hardware reset before software can read it
+ * Would require external programmer and full chip erase to fix UICR
+ * Use CDC console commands instead: dfu, reset, restart */
+&button0 {
+	status = "disabled";
+};
+
+/* Disable standalone green LED from Nordic board (not present on MakerDiary) */
+&led0_green {
+	status = "disabled";
+};
+
+/* Disable PWM LEDs from base board (we're using GPIO LEDs) */
+&pwm0 {
+	status = "disabled";
+};
+
+/* Disable UART0 - it conflicts with our LED pins (P0.22, P0.24) and we don't need it */
+&uart0 {
+	status = "disabled";
+};
+
+/* Disable board's default CDC node */
+&board_cdc_acm_uart {
+	status = "disabled";
+};
+
+/* Add dual CDC ACM nodes */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
+	};
+};
+
+/* Override default partitions for Adafruit bootloader (no SoftDevice) */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Adafruit bootloader resides at 0x0-0x1000 */
+		boot_partition: partition@0 {
+			label = "adafruit_boot";
+			reg = <0x00000000 0x00001000>;
+		};
+
+		/* Application code starts immediately after bootloader (no SoftDevice) */
+		code_partition: partition@1000 {
+			label = "code_partition";
+			reg = <0x00001000 0x000ed000>;
+		};
+
+		/*
+		 * MBR params page (0xfe000) must not be included in our partitions
+		 * Storage ends before MBR params
+		 */
+		storage_partition: partition@ee000 {
+			label = "storage";
+			reg = <0x000ee000 0x00010000>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &code_partition;
+		zephyr,settings-partition = &storage_partition;
+	};
+};

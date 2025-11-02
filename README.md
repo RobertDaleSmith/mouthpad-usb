@@ -116,6 +116,7 @@ Both firmwares expose a maintenance console on the second CDC port:
 | Adafruit Feather nRF52840 Express | ✅ Production | Requires custom bootloader config |
 | Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins |
 | April Brothers nRF52840 Dongle (PCA10059) | ✅ Production | Non-standard LED wiring |
+| MakerDiary nRF52840 MDK USB Dongle | ✅ Production | RGB LED support |
 
 ### ESP32-S3 Boards
 
@@ -134,6 +135,7 @@ GitHub Actions builds firmware for all board variants on every push to `main`:
 - `mouthpad^usb_nordic_nrf52840dongle_<commit>.uf2`
 - `mouthpad^usb_aprbrother_nrf52840_<commit>.uf2`
 - `mouthpad^usb_raytac_mdbt50q_rx_<commit>.uf2`
+- `mouthpad^usb_makerdiary_nrf52840mdk_<commit>.uf2`
 
 Artifacts are available in the Actions tab for 90 days.
 

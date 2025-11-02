@@ -46,6 +46,12 @@ build-raytac-dongle:
 		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_rx.overlay" \
 		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_rx.conf"
 
+build-makerdiary-dongle:
+	@echo "Building for MakerDiary nRF52840 MDK USB Dongle..."
+	west build -b nrf52840dongle app --pristine=always -- \
+		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/makerdiary_nrf52840mdk.overlay" \
+		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/makerdiary_nrf52840mdk.conf"
+
 # Flash the built firmware
 flash:
 	west flash --runner jlink
@@ -78,10 +84,14 @@ flash-uf2:
 		echo "Copying UF2 to /Volumes/MDBT50QBOOT..."; \
 		cp "$$UF2_FILE" /Volumes/MDBT50QBOOT/; \
 		echo "Flash complete! Device will reset automatically."; \
+	elif [ -d "/Volumes/UF2BOOT" ]; then \
+		echo "Copying UF2 to /Volumes/UF2BOOT..."; \
+		cp "$$UF2_FILE" /Volumes/UF2BOOT/; \
+		echo "Flash complete! Device will reset automatically."; \
 	else \
 		echo "Error: No UF2 bootloader drive found."; \
 		echo "Please enter bootloader mode and try again."; \
-		echo "Expected drives: /Volumes/NRF52BOOT, /Volumes/XIAO-SENSE, /Volumes/FTHR840BOOT, or /Volumes/MDBT50QBOOT"; \
+		echo "Expected drives: /Volumes/NRF52BOOT, /Volumes/XIAO-SENSE, /Volumes/FTHR840BOOT, /Volumes/MDBT50QBOOT, or /Volumes/UF2BOOT"; \
 		exit 1; \
 	fi
 
@@ -149,6 +159,7 @@ help:
 	@echo "  build-nordic-dongle - Build for Nordic PCA10059 nRF52840 Dongle (stock pins)"
 	@echo "  build-april-dongle - Build for April Brothers nRF52840 Dongle (non-standard LED wiring)"
 	@echo "  build-raytac-dongle - Build for Raytac MDBT50Q-RX Dongle"
+	@echo "  build-makerdiary-dongle - Build for MakerDiary nRF52840 MDK USB Dongle"
 	@echo "  flash        - Flash the built firmware to device using J-Link"
 	@echo "  flash-uf2    - Flash the built firmware to device using UF2 bootloader"
 	@echo "  monitor      - Monitor serial output via USB CDC (auto-detect port)"

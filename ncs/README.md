@@ -24,6 +24,7 @@ The nRF52840 firmware is the **primary production firmware** that ships on Seeed
 | **Nordic nRF52840 Dongle** (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins |
 | **Apr Brother nRF52840 Dongle** (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring |
 | **Raytac MDBT50Q-RX Dongle** (`raytac_mdbt50q_rx`) | ✅ Production | PCA10059 compatible with single LED |
+| **MakerDiary nRF52840 MDK USB Dongle** (`makerdiary_nrf52840mdk`) | ✅ Production | Compact dongle with RGB LED |
 
 ## Quick Start
 
@@ -56,11 +57,12 @@ make flash
 
 **Board-specific builds:**
 ```bash
-make build-xiao           # Seeed XIAO nRF52840
-make build-feather        # Adafruit Feather nRF52840
-make build-nordic-dongle  # Nordic PCA10059 (stock pins)
-make build-april-dongle   # Apr Brother (non-standard LED)
-make build-raytac-dongle  # Raytac MDBT50Q-RX (single LED)
+make build-xiao              # Seeed XIAO nRF52840
+make build-feather           # Adafruit Feather nRF52840
+make build-nordic-dongle     # Nordic PCA10059 (stock pins)
+make build-april-dongle      # Apr Brother (non-standard LED)
+make build-raytac-dongle     # Raytac MDBT50Q-RX (single LED)
+make build-makerdiary-dongle # MakerDiary nRF52840 MDK (RGB LED)
 ```
 
 See the [Makefile](Makefile) for all available targets.
@@ -182,6 +184,7 @@ GitHub Actions builds all board variants on every push:
 - Nordic nRF52840 Dongle
 - Apr Brother nRF52840 Dongle
 - Raytac MDBT50Q-RX Dongle
+- MakerDiary nRF52840 MDK USB Dongle
 
 Artifacts are uploaded as `mp_usb_<board>_<commit>.uf2` files.
 
