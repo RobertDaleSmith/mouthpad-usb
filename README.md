@@ -112,18 +112,18 @@ Both firmwares expose a maintenance console on the second CDC port:
 
 | Board | Status | Notes | Purchase |
 |-------|--------|-------|----------|
-| Seeed XIAO nRF52840 | ✅ Production | Primary shipping target | [Amazon](https://www.amazon.com/Seeed-Studio-XIAO-nRF52840-Microcontroller/dp/B09T9VVQG7/) |
+| Seeed XIAO nRF52840 | ✅ Production | Primary shipping target | [Seeed Studio](https://www.seeedstudio.com/Seeed-XIAO-BLE-nRF52840-p-5201.html) |
 | Adafruit Feather nRF52840 Express | ✅ Production | Requires custom bootloader config | [Adafruit](https://www.adafruit.com/product/4062) |
-| Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins | [Amazon](https://www.amazon.com/Nordic-Semiconductor-nRF52840-Dongle-NRF52840-DONGLE/dp/B07TXC7RQ3/) |
+| Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins | [Digi-Key](https://www.digikey.com/en/products/detail/nordic-semiconductor-asa/NRF52840-DONGLE/9491124) |
 | April Brothers nRF52840 Dongle (PCA10059) | ✅ Production | Non-standard LED wiring | [Apr Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
-| Raytac MDBT50Q-RX Dongle | ✅ Production | Single LED | [Adafruit](https://www.adafruit.com/product/5199) |
+| Raytac MDBT50Q-RX Dongle | ✅ Production | Single LED | [Raytac](https://www.raytac.com/product/ins.php?index_id=89) |
 | MakerDiary nRF52840 MDK USB Dongle | ✅ Production | RGB LED support | [MakerDiary](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/purchase/) |
 
 ### ESP32-S3 Boards
 
 | Board | Status | Notes | Purchase |
 |-------|--------|-------|----------|
-| Seeed XIAO ESP32-S3 | ✅ Supported | Mirrors nRF feature set | [Amazon](https://www.amazon.com/ESP32S3-2-4GHz-Dual-core-Supported-Efficiency-Interface/dp/B0BYSB66S5/) |
+| Seeed XIAO ESP32-S3 | ✅ Supported | Mirrors nRF feature set | [Seeed Studio](https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html) |
 | LilyGo T-Dongle-S3 | ✅ Supported | Alternative form factor | [Amazon](https://www.amazon.com/dp/B0BF542H39) |
 
 ## CI/CD

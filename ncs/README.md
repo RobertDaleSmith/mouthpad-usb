@@ -19,11 +19,11 @@ The nRF52840 firmware is the **primary production firmware** that ships on Seeed
 
 | Board | Status | Notes | Purchase |
 |-------|--------|-------|----------|
-| **Seeed XIAO nRF52840** (`seeed_xiao_nrf52840`) | ✅ Production | Primary shipping target | [Amazon](https://www.amazon.com/Seeed-Studio-XIAO-nRF52840-Microcontroller/dp/B09T9VVQG7/) |
+| **Seeed XIAO nRF52840** (`seeed_xiao_nrf52840`) | ✅ Production | Primary shipping target | [Seeed Studio](https://www.seeedstudio.com/Seeed-XIAO-BLE-nRF52840-p-5201.html) |
 | **Adafruit Feather nRF52840** (`adafruit_feather_nrf52840`) | ✅ Production | Requires custom bootloader config | [Adafruit](https://www.adafruit.com/product/4062) |
-| **Nordic nRF52840 Dongle** (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins | [Amazon](https://www.amazon.com/Nordic-Semiconductor-nRF52840-Dongle-NRF52840-DONGLE/dp/B07TXC7RQ3/) |
+| **Nordic nRF52840 Dongle** (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins | [Digi-Key](https://www.digikey.com/en/products/detail/nordic-semiconductor-asa/NRF52840-DONGLE/9491124) |
 | **Apr Brother nRF52840 Dongle** (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring | [Apr Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
-| **Raytac MDBT50Q-RX Dongle** (`raytac_mdbt50q_rx`) | ✅ Production | PCA10059 compatible with single LED | [Adafruit](https://www.adafruit.com/product/5199) |
+| **Raytac MDBT50Q-RX Dongle** (`raytac_mdbt50q_rx`) | ✅ Production | PCA10059 compatible with single LED | [Raytac](https://www.raytac.com/product/ins.php?index_id=89) |
 | **MakerDiary nRF52840 MDK USB Dongle** (`makerdiary_nrf52840mdk`) | ✅ Production | Compact dongle with RGB LED | [MakerDiary](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/purchase/) |
 
 ## Quick Start
