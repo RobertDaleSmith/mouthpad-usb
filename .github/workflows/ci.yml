@@ -203,24 +203,3 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: artifacts
-
-    - name: Create release package
-      run: |
-        mkdir -p release
-
-        # Copy all UF2 files from board-specific artifacts
-        for board in seeed_xiao_nrf52840 adafruit_feather_nrf52840 nordic_nrf52840dongle aprbrother_nrf52840 makerdiary_nrf52840mdk; do
-          if [ -d "artifacts/mp_usb_${board}_${COMMIT_SHA}" ]; then
-            cp artifacts/mp_usb_${board}_${COMMIT_SHA}/*.uf2 release/ 2>/dev/null || true
-          fi
-        done
-
-        echo "Release package created:"
-        find release -type f
-
-    - name: Upload release package
-      uses: actions/upload-artifact@v4
-      with:
-        name: mp_usb_all_boards_${{ env.COMMIT_SHA }}
-        path: release/
-        retention-days: 90
