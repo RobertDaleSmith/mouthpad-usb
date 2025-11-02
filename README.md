@@ -112,7 +112,7 @@ Both firmwares expose a maintenance console on the second CDC port:
 
 | Board | Status | Notes | Purchase |
 |-------|--------|-------|----------|
-| Seeed XIAO nRF52840 | ✅ Production | Primary shipping target ([expansion shield](https://www.seeedstudio.com/Seeeduino-XIAO-Expansion-board-p-4746.html) supported) | [Seeed Studio](https://www.seeedstudio.com/Seeed-XIAO-BLE-nRF52840-p-5201.html) |
+| Seeed XIAO nRF52840 | ✅ Production | Primary shipping target ([expansion board](https://www.seeedstudio.com/Seeeduino-XIAO-Expansion-board-p-4746.html) supported) | [Seeed Studio](https://www.seeedstudio.com/Seeed-XIAO-BLE-nRF52840-p-5201.html) |
 | Adafruit Feather nRF52840 Express | ✅ Production | Requires custom bootloader config | [Adafruit](https://www.adafruit.com/product/4062) |
 | Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins | [Digi-Key](https://www.digikey.com/en/products/detail/nordic-semiconductor-asa/NRF52840-DONGLE/9491124) |
 | April Brothers nRF52840 Dongle (PCA10059) | ✅ Production | Non-standard LED wiring | [Apr Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
