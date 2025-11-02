@@ -110,20 +110,21 @@ Both firmwares expose a maintenance console on the second CDC port:
 
 ### nRF52840 Boards
 
-| Board | Status | Notes |
-|-------|--------|-------|
-| Seeed XIAO nRF52840 | ✅ Production | Primary shipping target |
-| Adafruit Feather nRF52840 Express | ✅ Production | Requires custom bootloader config |
-| Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins |
-| April Brothers nRF52840 Dongle (PCA10059) | ✅ Production | Non-standard LED wiring |
-| MakerDiary nRF52840 MDK USB Dongle | ✅ Production | RGB LED support |
+| Board | Status | Notes | Purchase |
+|-------|--------|-------|----------|
+| Seeed XIAO nRF52840 | ✅ Production | Primary shipping target | [Amazon](https://www.amazon.com/Seeed-Studio-XIAO-nRF52840-Microcontroller/dp/B09T9VVQG7/) |
+| Adafruit Feather nRF52840 Express | ✅ Production | Requires custom bootloader config | [Adafruit](https://www.adafruit.com/product/4062) |
+| Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins | [Amazon](https://www.amazon.com/Nordic-Semiconductor-nRF52840-Dongle-NRF52840-DONGLE/dp/B07TXC7RQ3/) |
+| April Brothers nRF52840 Dongle (PCA10059) | ✅ Production | Non-standard LED wiring | [Apr Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
+| Raytac MDBT50Q-RX Dongle | ✅ Production | Single LED | [Adafruit](https://www.adafruit.com/product/5199) |
+| MakerDiary nRF52840 MDK USB Dongle | ✅ Production | RGB LED support | [MakerDiary](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/purchase/) |
 
 ### ESP32-S3 Boards
 
-| Board | Status | Notes |
-|-------|--------|-------|
-| Seeed XIAO ESP32-S3 | ✅ Supported | Mirrors nRF feature set |
-| LilyGo T-Dongle-S3 | ✅ Supported | Alternative form factor |
+| Board | Status | Notes | Purchase |
+|-------|--------|-------|----------|
+| Seeed XIAO ESP32-S3 | ✅ Supported | Mirrors nRF feature set | [Amazon](https://www.amazon.com/ESP32S3-2-4GHz-Dual-core-Supported-Efficiency-Interface/dp/B0BYSB66S5/) |
+| LilyGo T-Dongle-S3 | ✅ Supported | Alternative form factor | [Amazon](https://www.amazon.com/dp/B0BF542H39) |
 
 ## CI/CD
 
