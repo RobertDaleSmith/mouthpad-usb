@@ -172,7 +172,7 @@ jobs:
           - name: seeed_xiao_esp32s3
             display_name: "Seeed XIAO ESP32-S3"
             sdkconfig: "sdkconfig.defaults;sdkconfig.board.xiao"
-          - name: lilygo_tdisplays3
+          - name: lilygo_tdisplay_s3
             display_name: "LilyGo T-Display-S3"
             sdkconfig: "sdkconfig.defaults;sdkconfig.board.lilygo"
 
@@ -269,7 +269,7 @@ jobs:
 
             **ESP32-S3 Boards (BIN format - flash with esptool):**
             - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
-            - `mp_usb_${{ needs.check-version.outputs.version }}_lilygo_tdisplays3.bin` - LilyGo T-Display-S3
+            - `mp_usb_${{ needs.check-version.outputs.version }}_lilygo_tdisplay_s3.bin` - LilyGo T-Display-S3
 
             ### 🔧 Installation
 
