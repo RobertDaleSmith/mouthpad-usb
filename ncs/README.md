@@ -19,10 +19,11 @@ The nRF52840 firmware is the **primary production firmware** that ships on Seeed
 
 | Board | Status | Notes |
 |-------|--------|-------|
-| **Seeed XIAO nRF52840** (`xiao_ble`) | ✅ Production | Primary shipping target |
+| **Seeed XIAO nRF52840** (`seeed_xiao_nrf52840`) | ✅ Production | Primary shipping target |
 | **Adafruit Feather nRF52840** (`adafruit_feather_nrf52840`) | ✅ Production | Requires custom bootloader config |
-| **Nordic nRF52840 Dongle** (`nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins |
-| **April Brothers nRF52840 Dongle** (`nrf52840dongle`) | ✅ Production | PCA10059 with non-standard LED wiring |
+| **Nordic nRF52840 Dongle** (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins |
+| **Apr Brother nRF52840 Dongle** (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring |
+| **Raytac MDBT50Q-RX Dongle** (`raytac_mdbt50q_rx`) | ✅ Production | PCA10059 compatible with single LED |
 
 ## Quick Start
 
@@ -58,7 +59,8 @@ make flash
 make build-xiao           # Seeed XIAO nRF52840
 make build-feather        # Adafruit Feather nRF52840
 make build-nordic-dongle  # Nordic PCA10059 (stock pins)
-make build-april-dongle   # April Brothers (non-standard LED)
+make build-april-dongle   # Apr Brother (non-standard LED)
+make build-raytac-dongle  # Raytac MDBT50Q-RX (single LED)
 ```
 
 See the [Makefile](Makefile) for all available targets.
@@ -177,9 +179,11 @@ Requires J-Link probe connected.
 GitHub Actions builds all board variants on every push:
 - Seeed XIAO nRF52840
 - Adafruit Feather nRF52840
-- Nordic nRF52840 Dongle (nordic + april variants)
+- Nordic nRF52840 Dongle
+- Apr Brother nRF52840 Dongle
+- Raytac MDBT50Q-RX Dongle
 
-Artifacts are uploaded as `mouthpad^usb_<board>_<commit>.uf2` files.
+Artifacts are uploaded as `mp_usb_<board>_<commit>.uf2` files.
 
 See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) for the full workflow.
 

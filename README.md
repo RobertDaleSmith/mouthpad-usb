@@ -129,10 +129,11 @@ Both firmwares expose a maintenance console on the second CDC port:
 GitHub Actions builds firmware for all board variants on every push to `main`:
 
 **nRF52840 builds:**
-- `mouthpad^usb_xiao_ble_<commit>.uf2`
+- `mouthpad^usb_seeed_xiao_nrf52840_<commit>.uf2`
 - `mouthpad^usb_adafruit_feather_nrf52840_<commit>.uf2`
-- `mouthpad^usb_nrf52840dongle_nordic_<commit>.uf2`
-- `mouthpad^usb_nrf52840dongle_april_<commit>.uf2`
+- `mouthpad^usb_nordic_nrf52840dongle_<commit>.uf2`
+- `mouthpad^usb_aprbrother_nrf52840_<commit>.uf2`
+- `mouthpad^usb_raytac_mdbt50q_rx_<commit>.uf2`
 
 Artifacts are available in the Actions tab for 90 days.
 

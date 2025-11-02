@@ -51,24 +51,31 @@ jobs:
       CMAKE_PREFIX_PATH: /opt/toolchains
     strategy:
       matrix:
-        board: [xiao_ble, adafruit_feather_nrf52840, nrf52840dongle_nordic, nrf52840dongle_april]
+        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_rx]
         include:
-          - board: xiao_ble
+          - board: seeed_xiao_nrf52840
             description: "Seeed XIAO nRF52840"
             board_target: xiao_ble
+            overlay: seeed_xiao_nrf52840.overlay
+            conf: seeed_xiao_nrf52840.conf
           - board: adafruit_feather_nrf52840
             description: "Adafruit Feather nRF52840 Express"
             board_target: adafruit_feather_nrf52840
-          - board: nrf52840dongle_nordic
-            description: "Nordic nRF52840 Dongle (PCA10059 - stock pins)"
+          - board: nordic_nrf52840dongle
+            description: "Nordic nRF52840 Dongle (PCA10059)"
             board_target: nrf52840dongle
-            overlay: nrf52840dongle_nrf52840.nordic.overlay
-            conf: nrf52840dongle_nrf52840.nordic.conf
-          - board: nrf52840dongle_april
-            description: "April Brothers nRF52840 Dongle (non-standard LED wiring)"
+            overlay: nordic_nrf52840dongle.overlay
+            conf: nordic_nrf52840dongle.conf
+          - board: aprbrother_nrf52840
+            description: "Apr Brother nRF52840 Dongle"
             board_target: nrf52840dongle
-            overlay: nrf52840dongle_nrf52840.april.overlay
-            conf: nrf52840dongle_nrf52840.april.conf
+            overlay: aprbrother_nrf52840.overlay
+            conf: aprbrother_nrf52840.conf
+          - board: raytac_mdbt50q_rx
+            description: "Raytac MDBT50Q-RX Dongle"
+            board_target: nrf52840dongle
+            overlay: raytac_mdbt50q_rx.overlay
+            conf: raytac_mdbt50q_rx.conf
 
     steps:
       - uses: actions/checkout@v4
@@ -103,18 +110,6 @@ jobs:
           # Symlink for compatibility with build commands
           ln -s /zephyr_workspace/ncs/app /zephyr_workspace/app
 
-      - name: 🔧 Apply Board Variant Files
-        if: matrix.overlay
-        run: |
-          cd /zephyr_workspace/app/boards
-          echo "Applying variant files for ${{ matrix.description }}"
-          cp ${{ matrix.overlay }} nrf52840dongle_nrf52840.overlay
-          echo "✓ Overlay applied: ${{ matrix.overlay }}"
-          if [ -n "${{ matrix.conf }}" ]; then
-            cp ${{ matrix.conf }} nrf52840dongle_nrf52840.conf
-            echo "✓ Config applied: ${{ matrix.conf }}"
-          fi
-
       - name: 💾 Cache ccache
         uses: actions/cache@v4
         with:
@@ -128,9 +123,23 @@ jobs:
         run: |
           cd /zephyr_workspace
           ccache -z
-          west build \
-              --board ${{ matrix.board_target }} \
-              --pristine=always app
+
+          # Build with overlay/conf if specified, otherwise use board defaults
+          if [ -n "${{ matrix.overlay }}" ]; then
+            echo "Building ${{ matrix.description }} with custom overlay/conf"
+            west build \
+                --board ${{ matrix.board_target }} \
+                --pristine=always app \
+                -- \
+                -DDTC_OVERLAY_FILE="/zephyr_workspace/ncs/app/boards/${{ matrix.overlay }}" \
+                -DEXTRA_CONF_FILE="/zephyr_workspace/ncs/app/boards/${{ matrix.conf }}"
+          else
+            echo "Building ${{ matrix.description }} with board defaults"
+            west build \
+                --board ${{ matrix.board_target }} \
+                --pristine=always app
+          fi
+
           ccache -sv
 
       - name: 📦 Rename and Upload UF2 Artifacts
@@ -252,10 +261,11 @@ jobs:
             ### 📦 Firmware Files
 
             **nRF52840 Boards (UF2 format - drag & drop to bootloader):**
-            - `mp_usb_${{ needs.check-version.outputs.version }}_xiao_ble.uf2` - Seeed XIAO nRF52840
+            - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_nrf52840.uf2` - Seeed XIAO nRF52840
             - `mp_usb_${{ needs.check-version.outputs.version }}_adafruit_feather_nrf52840.uf2` - Adafruit Feather nRF52840 Express
-            - `mp_usb_${{ needs.check-version.outputs.version }}_nrf52840dongle_nordic.uf2` - Nordic nRF52840 Dongle (stock pins)
-            - `mp_usb_${{ needs.check-version.outputs.version }}_nrf52840dongle_april.uf2` - April Brothers nRF52840 Dongle
+            - `mp_usb_${{ needs.check-version.outputs.version }}_nordic_nrf52840dongle.uf2` - Nordic nRF52840 Dongle
+            - `mp_usb_${{ needs.check-version.outputs.version }}_aprbrother_nrf52840.uf2` - Apr Brother nRF52840 Dongle
+            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
 
             **ESP32-S3 Boards (BIN format - flash with esptool):**
             - `mp_usb_${{ needs.check-version.outputs.version }}_xiao_esp32s3.bin` - XIAO ESP32-S3

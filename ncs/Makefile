@@ -21,34 +21,30 @@ build:
 
 # Board-specific build targets
 build-xiao:
-	west build -b xiao_ble app --pristine=always
+	west build -b xiao_ble app --pristine=always -- \
+		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/seeed_xiao_nrf52840.overlay" \
+		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/seeed_xiao_nrf52840.conf"
 
 build-feather:
 	west build -b adafruit_feather_nrf52840 app --pristine=always
 
 build-nordic-dongle:
 	@echo "Building for Nordic PCA10059 Dongle (stock pins)..."
-	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
-	@cp app/boards/nrf52840dongle_nrf52840.nordic.conf app/boards/nrf52840dongle_nrf52840.conf
-	west build -b nrf52840dongle app --pristine=always
+	west build -b nrf52840dongle app --pristine=always -- \
+		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/nordic_nrf52840dongle.overlay" \
+		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/nordic_nrf52840dongle.conf"
 
 build-april-dongle:
 	@echo "Building for April Brothers Dongle (non-standard LED wiring)..."
-	@cp app/boards/nrf52840dongle_nrf52840.april.overlay app/boards/nrf52840dongle_nrf52840.overlay
-	@cp app/boards/nrf52840dongle_nrf52840.april.conf app/boards/nrf52840dongle_nrf52840.conf
-	west build -b nrf52840dongle app --pristine=always
-	@echo "Restoring Nordic default files..."
-	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
-	@cp app/boards/nrf52840dongle_nrf52840.nordic.conf app/boards/nrf52840dongle_nrf52840.conf
+	west build -b nrf52840dongle app --pristine=always -- \
+		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/aprbrother_nrf52840.overlay" \
+		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/aprbrother_nrf52840.conf"
 
 build-raytac-dongle:
 	@echo "Building for Raytac MDBT50Q-RX Dongle..."
-	@cp app/boards/nrf52840dongle_nrf52840.raytac.overlay app/boards/nrf52840dongle_nrf52840.overlay
-	@cp app/boards/nrf52840dongle_nrf52840.raytac.conf app/boards/nrf52840dongle_nrf52840.conf
-	west build -b nrf52840dongle app --pristine=always
-	@echo "Restoring Nordic default files..."
-	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
-	@cp app/boards/nrf52840dongle_nrf52840.nordic.conf app/boards/nrf52840dongle_nrf52840.conf
+	west build -b nrf52840dongle app --pristine=always -- \
+		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_rx.overlay" \
+		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_rx.conf"
 
 # Flash the built firmware
 flash:

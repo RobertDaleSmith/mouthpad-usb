@@ -7,13 +7,14 @@ and turns a MouthPad^ wearable into a wired USB HID device without touching the 
 
 | Board | Status | Notes |
 |-------|--------|-------|
-| Seeed XIAO nRF52840 (`xiao_ble`) | ✅ Production | Primary shipping target. Button + single-colour LED. |
+| Seeed XIAO nRF52840 (`seeed_xiao_nrf52840`) | ✅ Production | Primary shipping target. Button + single-colour LED. |
 | Adafruit Feather nRF52840 (`adafruit_feather_nrf52840`) | ✅ Production | Requires custom bootloader config. |
-| Nordic nRF52840 Dongle (`nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins. |
-| April Brothers nRF52840 Dongle (`nrf52840dongle`) | ✅ Production | PCA10059 with non-standard LED wiring. |
+| Nordic nRF52840 Dongle (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins. |
+| Apr Brother nRF52840 Dongle (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring. |
+| Raytac MDBT50Q-RX Dongle (`raytac_mdbt50q_rx`) | ✅ Production | PCA10059 compatible with single LED. |
 
 The default overlays assume a single status LED and a user button. Dongle variants use different overlays
-for Nordic (stock pins) vs April Brothers (non-standard LED wiring).
+for Nordic (stock pins), Apr Brother (non-standard LED wiring), and Raytac (single LED on P1.13).
 
 ## Features
 
@@ -47,7 +48,7 @@ docker-compose run --rm mouthpad-build
 docker-compose run --rm mouthpad-dev
 ```
 
-The automated build copies `zephyr.uf2` to `build/mouthpad_usb_xiao_ble_<date>.uf2` so you can drag it
+The automated build copies `zephyr.uf2` to `build/mouthpad_usb_seeed_xiao_nrf52840_<date>.uf2` so you can drag it
 directly to the bootloader volume.
 
 ### Option 2 – Local workspace (`west`/`make`)
@@ -63,7 +64,7 @@ Workflow:
 # First time only (initialises NCS workspace)
 make init
 
-# Build for the default board (xiao_ble)
+# Build for the default board (seeed_xiao_nrf52840)
 make build
 
 # Flash via J-Link

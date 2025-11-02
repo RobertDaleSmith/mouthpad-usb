@@ -549,15 +549,13 @@ int main(void)
 
 								const char *board_name;
 								#ifdef CONFIG_DONGLE_VARIANT_STRING
-									/* Append dongle variant to board name to distinguish hardware variants */
-									static char board_with_variant[64];
+									/* Use variant string as board name for custom hardware variants */
 									const char *variant_str = CONFIG_DONGLE_VARIANT_STRING;
 									/* Check if variant string is not empty at runtime */
 									if (variant_str && variant_str[0] != '\0') {
-										snprintf(board_with_variant, sizeof(board_with_variant), "%s_%s", CONFIG_BOARD, variant_str);
-										response.message_body.device_info_response.board.arg = (void *)board_with_variant;
-										board_name = board_with_variant;
-										LOG_INF("Device info: family=nrf, board=%s (variant: %s)", board_with_variant, variant_str);
+										response.message_body.device_info_response.board.arg = (void *)variant_str;
+										board_name = variant_str;
+										LOG_INF("Device info: family=nrf, board=%s", variant_str);
 									} else {
 										response.message_body.device_info_response.board.arg = (void *)CONFIG_BOARD;
 										board_name = CONFIG_BOARD;
