@@ -174,8 +174,8 @@ int leds_update(void)
         break;
         
     case LED_STATE_DATA_ACTIVITY:
-        /* Fast flicker every 20ms */
-        if (animation_counter % 20 == 0) {
+        /* Flicker every 50ms for better visibility */
+        if (animation_counter % 50 == 0) {
             if (animation_phase) {
                 ble_bas_rgb_color_t battery_color = ble_bas_get_battery_color(battery_color_mode);
                 set_rgb_color(battery_color);
@@ -243,21 +243,44 @@ __maybe_unused static void set_gpio_leds(ble_bas_rgb_color_t color)
 {
 #if !HAS_NEOPIXEL
     /* GPIO_ACTIVE_LOW in devicetree handles inversion automatically */
-#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
-    if (led_red_available) {
-        gpio_pin_set_dt(&led_red, color.red > 0 ? 1 : 0);
+
+    /* Detect if multiple LEDs share the same GPIO pin (single LED board) */
+    bool shared_led = false;
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_EXISTS(DT_ALIAS(led1)) && \
+    DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
+    /* Check if red and green LEDs point to same port and pin at runtime */
+    if (led_red_available && led_green_available &&
+        led_red.port == led_green.port && led_red.pin == led_green.pin) {
+        shared_led = true;
     }
+#endif
+
+    if (shared_led) {
+        /* Single LED board - turn on if ANY color is active (OR logic) */
+        bool led_on = (color.red > 0) || (color.green > 0) || (color.blue > 0);
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
+        if (led_red_available) {
+            gpio_pin_set_dt(&led_red, led_on ? 1 : 0);
+        }
+#endif
+    } else {
+        /* Multi-LED board - control each LED independently */
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
+        if (led_red_available) {
+            gpio_pin_set_dt(&led_red, color.red > 0 ? 1 : 0);
+        }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
-    if (led_green_available) {
-        gpio_pin_set_dt(&led_green, color.green > 0 ? 1 : 0);
-    }
+        if (led_green_available) {
+            gpio_pin_set_dt(&led_green, color.green > 0 ? 1 : 0);
+        }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
-    if (led_blue_available) {
-        gpio_pin_set_dt(&led_blue, color.blue > 0 ? 1 : 0);
-    }
+        if (led_blue_available) {
+            gpio_pin_set_dt(&led_blue, color.blue > 0 ? 1 : 0);
+        }
 #endif
+    }
 #endif
 }
 
@@ -289,9 +312,9 @@ __maybe_unused static int init_gpio_leds(void)
 #if !HAS_NEOPIXEL
     int ret = 0;
     bool any_led_available = false;
-    
+
     LOG_INF("Checking GPIO LED devices...");
-    
+
 #if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
     led_red_available = gpio_is_ready_dt(&led_red);
     if (led_red_available) {
@@ -302,10 +325,11 @@ __maybe_unused static int init_gpio_leds(void)
         } else {
             gpio_pin_set_dt(&led_red, 0);  /* Start with LED off */
             any_led_available = true;
+            LOG_INF("Red LED: port=%p, pin=%d", led_red.port, led_red.pin);
         }
     }
 #endif
-    
+
 #if DT_NODE_EXISTS(DT_ALIAS(led1)) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
     led_green_available = gpio_is_ready_dt(&led_green);
     if (led_green_available) {
@@ -316,10 +340,11 @@ __maybe_unused static int init_gpio_leds(void)
         } else {
             gpio_pin_set_dt(&led_green, 0);  /* Start with LED off */
             any_led_available = true;
+            LOG_INF("Green LED: port=%p, pin=%d", led_green.port, led_green.pin);
         }
     }
 #endif
-    
+
 #if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
     led_blue_available = gpio_is_ready_dt(&led_blue);
     if (led_blue_available) {
@@ -330,13 +355,25 @@ __maybe_unused static int init_gpio_leds(void)
         } else {
             gpio_pin_set_dt(&led_blue, 0);  /* Start with LED off */
             any_led_available = true;
+            LOG_INF("Blue LED: port=%p, pin=%d", led_blue.port, led_blue.pin);
         }
     }
 #endif
-    
-    LOG_INF("LED availability: red=%d, green=%d, blue=%d", 
+
+    LOG_INF("LED availability: red=%d, green=%d, blue=%d",
             led_red_available, led_green_available, led_blue_available);
-    
+
+    /* Check for shared LED configuration */
+#if DT_NODE_EXISTS(DT_ALIAS(led0)) && DT_NODE_EXISTS(DT_ALIAS(led1)) && \
+    DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
+    if (led_red_available && led_green_available &&
+        led_red.port == led_green.port && led_red.pin == led_green.pin) {
+        LOG_INF("Shared LED detected - using OR logic for single LED board");
+    } else {
+        LOG_INF("Multiple LEDs detected - using independent control");
+    }
+#endif
+
     if (any_led_available) {
         LOG_INF("GPIO LEDs configured successfully");
         return 0;

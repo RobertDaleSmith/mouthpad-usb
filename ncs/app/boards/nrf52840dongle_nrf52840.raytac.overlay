@@ -1,0 +1,153 @@
+/*
+ * Raytac MDBT50Q-RX overlay for MouthPad^USB
+ * Hardware: Raytac MDBT50Q-RX with Adafruit nRF52 Bootloader
+ *
+ * Bootloader: Adafruit nRF52 UF2 bootloader at 0x0-0x1000
+ * USB Drive: Shows as "MDBT50QBOOT" when in bootloader mode (reset button)
+ *
+ * NOTE: Uses no-SoftDevice memory layout (code starts at 0x1000)
+ *       App runs Zephyr BLE controller (no actual SoftDevice binary)
+ *
+ * Raytac MDBT50Q-RX pin assignments (from Adafruit bootloader):
+ *   LED: P1.13 (single LED, active low)
+ *   Button: P0.15 (active low with pullup)
+ */
+
+&pinctrl {
+	pwm1_default: pwm1_default {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+		};
+	};
+
+	pwm1_sleep: pwm1_sleep {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+			low-power-enable;
+		};
+	};
+};
+
+&pwm1 {
+	status = "okay";
+	pinctrl-0 = <&pwm1_default>;
+	pinctrl-1 = <&pwm1_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+/* Raytac single LED on P1.13 - remap all LED nodes */
+&led0_green {
+	gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+	label = "Raytac LED";
+};
+
+&led1_red {
+	gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+	label = "Raytac LED";
+};
+
+&led1_green {
+	gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+	label = "Raytac LED";
+};
+
+&led1_blue {
+	gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+	label = "Raytac LED";
+};
+
+/* Override button to match Raytac pinout (P0.15) */
+&button0 {
+	gpios = <&gpio0 15 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+	label = "Raytac Button";
+};
+
+/ {
+	chosen {
+		nordic,nus-uart = &cdc_acm_uart0;
+		zephyr,console = &cdc_acm_uart1;
+		zephyr,shell-uart = &cdc_acm_uart1;
+	};
+
+	aliases {
+		buzzer-pwm = &pwm1;
+		/* Raytac single LED - map all color channels to P1.13 */
+		led0 = &led0_green;  /* RED → P1.13 */
+		led1 = &led0_green;  /* GREEN → P1.13 */
+		led2 = &led0_green;  /* BLUE → P1.13 */
+	};
+
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "MouthPad^HID";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	buzzer {
+		compatible = "pwm-buzzer";
+		pwms = <&pwm1 0 1000000 PWM_POLARITY_NORMAL>;
+		label = "Passive Buzzer";
+	};
+};
+
+/* Disable board's default CDC node */
+&board_cdc_acm_uart {
+	status = "disabled";
+};
+
+/* Add dual CDC ACM nodes */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
+	};
+};
+
+/* Override default partitions for Adafruit bootloader (no SoftDevice) */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Adafruit bootloader resides at 0x0-0x1000 */
+		boot_partition: partition@0 {
+			label = "adafruit_boot";
+			reg = <0x00000000 0x00001000>;
+		};
+
+		/* Application code starts immediately after bootloader (no SoftDevice) */
+		code_partition: partition@1000 {
+			label = "code_partition";
+			reg = <0x00001000 0x000ed000>;
+		};
+
+		/*
+		 * MBR params page (0xfe000) must not be included in our partitions
+		 * Storage ends before MBR params
+		 */
+		storage_partition: partition@ee000 {
+			label = "storage";
+			reg = <0x000ee000 0x00010000>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &code_partition;
+		zephyr,settings-partition = &storage_partition;
+	};
+};

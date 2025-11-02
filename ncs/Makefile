@@ -1,7 +1,7 @@
 # Makefile for mouthpad_usb project
 # Provides convenient targets for building, cleaning, and workspace management
 
-.PHONY: init build build-xiao build-feather build-nordic-dongle build-april-dongle flash monitor monitor-rtt monitor-cdc clean fullclean help
+.PHONY: init build build-xiao build-feather build-nordic-dongle build-april-dongle build-raytac-dongle flash monitor monitor-rtt monitor-cdc clean fullclean help
 
 # Default target
 all: build
@@ -41,6 +41,15 @@ build-april-dongle:
 	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
 	@cp app/boards/nrf52840dongle_nrf52840.nordic.conf app/boards/nrf52840dongle_nrf52840.conf
 
+build-raytac-dongle:
+	@echo "Building for Raytac MDBT50Q-RX Dongle..."
+	@cp app/boards/nrf52840dongle_nrf52840.raytac.overlay app/boards/nrf52840dongle_nrf52840.overlay
+	@cp app/boards/nrf52840dongle_nrf52840.raytac.conf app/boards/nrf52840dongle_nrf52840.conf
+	west build -b nrf52840dongle app --pristine=always
+	@echo "Restoring Nordic default files..."
+	@cp app/boards/nrf52840dongle_nrf52840.nordic.overlay app/boards/nrf52840dongle_nrf52840.overlay
+	@cp app/boards/nrf52840dongle_nrf52840.nordic.conf app/boards/nrf52840dongle_nrf52840.conf
+
 # Flash the built firmware
 flash:
 	west flash --runner jlink
@@ -69,10 +78,14 @@ flash-uf2:
 		echo "Copying UF2 to /Volumes/FTHR840BOOT..."; \
 		cp "$$UF2_FILE" /Volumes/FTHR840BOOT/; \
 		echo "Flash complete! Device will reset automatically."; \
+	elif [ -d "/Volumes/MDBT50QBOOT" ]; then \
+		echo "Copying UF2 to /Volumes/MDBT50QBOOT..."; \
+		cp "$$UF2_FILE" /Volumes/MDBT50QBOOT/; \
+		echo "Flash complete! Device will reset automatically."; \
 	else \
 		echo "Error: No UF2 bootloader drive found."; \
 		echo "Please enter bootloader mode and try again."; \
-		echo "Expected drives: /Volumes/NRF52BOOT, /Volumes/XIAO-SENSE, or /Volumes/FTHR840BOOT"; \
+		echo "Expected drives: /Volumes/NRF52BOOT, /Volumes/XIAO-SENSE, /Volumes/FTHR840BOOT, or /Volumes/MDBT50QBOOT"; \
 		exit 1; \
 	fi
 
@@ -139,6 +152,7 @@ help:
 	@echo "  build-feather - Build specifically for Adafruit Feather nRF52840 Express"
 	@echo "  build-nordic-dongle - Build for Nordic PCA10059 nRF52840 Dongle (stock pins)"
 	@echo "  build-april-dongle - Build for April Brothers nRF52840 Dongle (non-standard LED wiring)"
+	@echo "  build-raytac-dongle - Build for Raytac MDBT50Q-RX Dongle"
 	@echo "  flash        - Flash the built firmware to device using J-Link"
 	@echo "  flash-uf2    - Flash the built firmware to device using UF2 bootloader"
 	@echo "  monitor      - Monitor serial output via USB CDC (auto-detect port)"
