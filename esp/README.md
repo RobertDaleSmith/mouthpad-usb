@@ -13,6 +13,16 @@ exposes the same dual CDC interfaces, and offers the same maintenance commands.
 Select the board via `make xiao` or `make lilygo` (defaults to XIAO). The Makefile injects board-specific
 `sdkconfig` fragments so switching targets does not leave stale settings behind.
 
+### External antenna setup (XIAO ESP32-S3)
+
+For improved BLE range, use the **XIAO ESP32-S3 Sense** variant with external antenna connector:
+
+**Required components:**
+- [8dBi WiFi RP-SMA antenna (2.4GHz/5.8GHz dual band)](https://www.amazon.com/dp/B07R21LN5P) with U.FL/IPEX to RP-SMA pigtail cable
+- [3D printable case for XIAO + SMA antenna](https://www.printables.com/model/1367918-xiao-esp32-sma-antenna-case)
+
+The external antenna provides significantly better range than the PCB antenna, especially useful for extended distance operation or through obstacles.
+
 ## Features
 
 **Core functionality (matches nRF firmware 1:1):**
