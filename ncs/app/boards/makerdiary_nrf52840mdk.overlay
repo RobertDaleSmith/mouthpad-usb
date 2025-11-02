@@ -80,12 +80,15 @@
 	gpios = <&gpio0 24 GPIO_ACTIVE_LOW>;
 };
 
-/* Disable button - UICR is pre-configured with P0.18 as RESET and cannot be changed via UF2
- * Button press triggers hardware reset before software can read it
- * Would require external programmer and full chip erase to fix UICR
- * Use CDC console commands instead: dfu, reset, restart */
+/* Enable button on P0.18 as GPIO (not reset) */
 &button0 {
-	status = "disabled";
+	gpios = <&gpio0 18 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+};
+
+/* Override UICR to NOT use gpio-as-nreset for MakerDiary MDK
+ * This prevents P0.18 from being configured as RESET pin */
+&uicr {
+	/delete-property/ gpio-as-nreset;
 };
 
 /* Disable standalone green LED from Nordic board (not present on MakerDiary) */

@@ -56,6 +56,7 @@ target_include_directories(app PRIVATE
     src/buzzer.c
     src/leds.c
     src/button.c
+    src/pselreset_erase.c
     src/main.c
     src/mouthpad-proto/src/C/MouthpadRelay.pb.c
     src/mouthpad-proto/nanopb/pb_common.c
