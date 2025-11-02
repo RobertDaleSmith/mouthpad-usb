@@ -169,8 +169,8 @@ jobs:
     strategy:
       matrix:
         board:
-          - name: xiao_esp32s3
-            display_name: "XIAO ESP32-S3"
+          - name: seeed_xiao_esp32s3
+            display_name: "Seeed XIAO ESP32-S3"
             sdkconfig: "sdkconfig.defaults;sdkconfig.board.xiao"
           - name: lilygo_tdisplays3
             display_name: "LilyGo T-Display-S3"
@@ -268,7 +268,7 @@ jobs:
             - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
 
             **ESP32-S3 Boards (BIN format - flash with esptool):**
-            - `mp_usb_${{ needs.check-version.outputs.version }}_xiao_esp32s3.bin` - XIAO ESP32-S3
+            - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
             - `mp_usb_${{ needs.check-version.outputs.version }}_lilygo_tdisplays3.bin` - LilyGo T-Display-S3
 
             ### 🔧 Installation
