@@ -29,7 +29,7 @@ docker-compose run --rm mouthpad-build
 
 **[👉 Full NCS documentation](ncs/README.md)**
 
-### ESP32-S3 (Experimental)
+### ESP32-S3
 
 Alternative implementation for **Seeed XIAO ESP32-S3** and LilyGo T-Dongle-S3.
 
