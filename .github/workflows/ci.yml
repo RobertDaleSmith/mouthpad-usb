@@ -37,7 +37,7 @@ jobs:
       CMAKE_PREFIX_PATH: /opt/toolchains
     strategy:
       matrix:
-        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_cx_40, makerdiary_nrf52840mdk]
+        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_rx, raytac_mdbt50q_cx_40, makerdiary_nrf52840mdk]
         include:
           - board: seeed_xiao_nrf52840
             description: "Seeed XIAO nRF52840"
@@ -57,6 +57,11 @@ jobs:
             board_target: nrf52840dongle
             overlay: aprbrother_nrf52840.overlay
             conf: aprbrother_nrf52840.conf
+          - board: raytac_mdbt50q_rx
+            description: "Raytac MDBT50Q-RX Dongle"
+            board_target: nrf52840dongle
+            overlay: raytac_mdbt50q_rx.overlay
+            conf: raytac_mdbt50q_rx.conf
           - board: raytac_mdbt50q_cx_40
             description: "Raytac MDBT50Q-CX-40 (Nordic DFU)"
             board_target: raytac_mdbt50q_cx_40/nrf52840
