@@ -1,0 +1,106 @@
+/*
+ * Raytac MDBT50Q-CX-40 overlay for MouthPad^USB
+ * Hardware: Raytac MDBT50Q-CX-40 with Nordic nRF5 DFU Bootloader
+ *
+ * Bootloader: Nordic Open DFU bootloader at 0xF4000-0xFE000
+ * Application: Loads at 0x1000 (after MBR at 0x0-0x1000)
+ *
+ * Raytac MDBT50Q-CX-40 pin assignments:
+ *   LED D1 (Green): P0.6 (active low)
+ *   LED D2 (Red): P0.8 (active low)
+ *   Button SW1: P1.6 (active low with pullup)
+ */
+
+/* Disable PWM/buzzer for initial testing */
+/*
+&pinctrl {
+	pwm1_default: pwm1_default {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+		};
+	};
+
+	pwm1_sleep: pwm1_sleep {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+			low-power-enable;
+		};
+	};
+};
+
+&pwm1 {
+	status = "okay";
+	pinctrl-0 = <&pwm1_default>;
+	pinctrl-1 = <&pwm1_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+*/
+
+/* Disable UICR GPIO-as-reset to prevent UICR writes with DFU bootloader */
+&uicr {
+	/delete-property/ gpio-as-nreset;
+};
+
+/* Partition layout managed by NCS Partition Manager (pm_static file) */
+/* Manual DTS partition definitions removed - PM handles Nordic DFU bootloader layout */
+
+/* Override LED mappings for MouthPad USB firmware
+ * Map all LED channels to the available LEDs
+ */
+&led0_d1 {
+	label = "Blue LED";
+};
+
+&led1_d2 {
+	label = "Red LED";
+};
+
+/ {
+	aliases {
+		/* Map LED aliases for firmware compatibility
+		 * Firmware expects: led0=red, led1=green, led2=blue
+		 * Board has: D1=blue (P0.6), D2=red (P0.8)
+		 * Map primary LED (D1/blue) to all channels since firmware uses led0 most
+		 */
+		led0 = &led0_d1;  /* Blue LED - primary indicator */
+		led1 = &led0_d1;  /* Blue LED - reuse */
+		led2 = &led0_d1;  /* Blue LED - reuse */
+		led0-green = &led0_d1;
+		led1-red = &led1_d2;
+		led1-blue = &led0_d1;
+	};
+
+	hid_dev_0: hid_dev_0 {
+		compatible = "zephyr,hid-device";
+		label = "MouthPad^HID";
+		protocol-code = "mouse";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	chosen {
+		/* Use dual CDC configuration for MouthPad firmware */
+		nordic,nus-uart = &cdc_acm_uart0;
+		zephyr,console = &cdc_acm_uart1;
+		zephyr,shell-uart = &cdc_acm_uart1;
+		/* Settings partition managed by Partition Manager */
+	};
+};
+
+/* Disable default single CDC ACM node - we use dual CDC instead */
+&board_cdc_acm_uart {
+	status = "disabled";
+};
+
+/* Enable dual CDC for MouthPad firmware */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_1";
+	};
+};

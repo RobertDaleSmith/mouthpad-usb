@@ -37,7 +37,7 @@ jobs:
       CMAKE_PREFIX_PATH: /opt/toolchains
     strategy:
       matrix:
-        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, makerdiary_nrf52840mdk]
+        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_cx_40, makerdiary_nrf52840mdk]
         include:
           - board: seeed_xiao_nrf52840
             description: "Seeed XIAO nRF52840"
@@ -57,6 +57,12 @@ jobs:
             board_target: nrf52840dongle
             overlay: aprbrother_nrf52840.overlay
             conf: aprbrother_nrf52840.conf
+          - board: raytac_mdbt50q_cx_40
+            description: "Raytac MDBT50Q-CX-40 (Nordic DFU)"
+            board_target: raytac_mdbt50q_cx_40/nrf52840
+            overlay: raytac_mdbt50q_cx_40.overlay
+            conf: raytac_mdbt50q_cx_40.conf
+            uses_dfu: true
           - board: makerdiary_nrf52840mdk
             description: "MakerDiary nRF52840 MDK USB Dongle"
             board_target: nrf52840dongle
@@ -97,7 +103,7 @@ jobs:
           fi
           du -sh /zephyr_workspace 2>/dev/null || echo "Workspace size: calculating..."
 
-      - name: 📁 Copy App to Workspace
+      - name: 📁 Copy App and Board Files to Workspace
         run: |
           # Remove old app and build artifacts if exists (from cache)
           rm -rf /zephyr_workspace/app
@@ -105,6 +111,8 @@ jobs:
           # Create app directory structure matching local layout
           mkdir -p /zephyr_workspace/ncs
           cp -r ncs/app /zephyr_workspace/ncs/app
+          # Copy board definition for custom boards (raytac_mdbt50q_cx_40)
+          cp -r ncs/zephyr/boards/raytac /zephyr_workspace/nrf/zephyr/boards/ 2>/dev/null || true
           cp VERSION /zephyr_workspace/VERSION
           # Symlink for compatibility with build commands
           ln -s /zephyr_workspace/ncs/app /zephyr_workspace/app
@@ -141,38 +149,59 @@ jobs:
 
           ccache -sv
 
-      - name: 📦 Rename and Upload UF2 Artifacts
+      - name: 📦 Prepare Firmware Artifacts
         run: |
           cd /zephyr_workspace
           COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
 
-          # Clean up any old UF2 files from cached workspace
-          rm -f mp_usb_*.uf2
+          # Clean up any old firmware files from cached workspace
+          rm -f mp_usb_*.uf2 mp_usb_*.zip
 
-          # Copy and rename UF2 files with commit hash
-          cp build/app/zephyr/zephyr.uf2 mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2
-          echo "✅ ${{ matrix.board }} UF2: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2"
-          ls -la *.uf2
+          # Check if this board uses DFU (Nordic bootloader)
+          if [ "${{ matrix.uses_dfu }}" == "true" ]; then
+            echo "📦 Creating DFU package for ${{ matrix.board }}..."
+            # Install nrfutil if not present
+            pip3 install --user nrfutil >/dev/null 2>&1 || true
+            # Create DFU package
+            ~/.local/bin/nrfutil pkg generate --hw-version 52 --sd-req 0x00 \
+              --application-version 1 \
+              --application build/app/zephyr/zephyr.hex \
+              mp_usb_${{ matrix.board }}_${COMMIT_SHA}.zip
+            echo "✅ ${{ matrix.board }} DFU: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.zip"
+          else
+            # Copy and rename UF2 files with commit hash
+            cp build/app/zephyr/zephyr.uf2 mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2
+            echo "✅ ${{ matrix.board }} UF2: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2"
+          fi
+
+          ls -la mp_usb_*
 
           # Export COMMIT_SHA for use in next step
           echo "COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_ENV
 
-      - name: 📦 Upload Individual UF2 File
+      - name: 📦 Upload Firmware Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mp_usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}
-          path: /zephyr_workspace/mp_usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}.uf2
+          path: /zephyr_workspace/mp_usb_${{ matrix.board }}_${{ env.COMMIT_SHA }}.*
           retention-days: 30
 
       - name: 🔍 Verify Build Artifacts
         run: |
           cd /zephyr_workspace
-          echo "Checking for UF2 file..."
-          [ -f build/app/zephyr/zephyr.uf2 ] && echo '✓ zephyr.uf2 found' || echo '✗ zephyr.uf2 missing'
-          echo 'UF2 file size:'
-          ls -lh build/app/zephyr/zephyr.uf2
-          echo 'Renamed UF2 files:'
-          ls -lh mp_usb_*.uf2
+          if [ "${{ matrix.uses_dfu }}" == "true" ]; then
+            echo "Checking for DFU package..."
+            [ -f mp_usb_*.zip ] && echo '✓ DFU package found' || echo '✗ DFU package missing'
+            echo 'DFU package:'
+            ls -lh mp_usb_*.zip
+          else
+            echo "Checking for UF2 file..."
+            [ -f build/app/zephyr/zephyr.uf2 ] && echo '✓ zephyr.uf2 found' || echo '✗ zephyr.uf2 missing'
+            echo 'UF2 file size:'
+            ls -lh build/app/zephyr/zephyr.uf2
+            echo 'Renamed UF2 files:'
+            ls -lh mp_usb_*.uf2
+          fi
 
   security-scan:
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 # Makefile for mouthpad_usb project
 # Provides convenient targets for building, cleaning, and workspace management
 
-.PHONY: init build build-xiao build-feather build-nordic-dongle build-april-dongle build-raytac-dongle flash monitor monitor-rtt monitor-cdc clean fullclean help
+.PHONY: init build build-xiao build-feather build-nordic-dongle build-april-dongle build-raytac-rx build-raytac-dongle build-raytac-cx40 flash flash-dfu flash-uf2 monitor monitor-rtt monitor-cdc clean fullclean help
 
 # Default target
 all: build
@@ -40,11 +40,14 @@ build-april-dongle:
 		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/aprbrother_nrf52840.overlay" \
 		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/aprbrother_nrf52840.conf"
 
-build-raytac-dongle:
-	@echo "Building for Raytac MDBT50Q-RX Dongle..."
+build-raytac-rx:
+	@echo "Building for Raytac MDBT50Q-RX..."
 	west build -b nrf52840dongle app --pristine=always -- \
 		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_rx.overlay" \
 		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_rx.conf"
+
+# Alias for backward compatibility
+build-raytac-dongle: build-raytac-rx
 
 build-makerdiary-dongle:
 	@echo "Building for MakerDiary nRF52840 MDK USB Dongle..."
@@ -52,9 +55,36 @@ build-makerdiary-dongle:
 		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/makerdiary_nrf52840mdk.overlay" \
 		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/makerdiary_nrf52840mdk.conf"
 
+build-raytac-cx40:
+	@echo "Building for Raytac MDBT50Q-CX-40..."
+	west build -b raytac_mdbt50q_cx_40/nrf52840 app --pristine=always -- \
+		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_cx_40.overlay" \
+		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_cx_40.conf"
+
 # Flash the built firmware
 flash:
 	west flash --runner jlink
+
+# Flash via Nordic DFU bootloader (for boards with Nordic DFU like Raytac CX-40)
+# Usage: make flash-dfu [VERSION=1]
+# Put device in bootloader mode before running
+flash-dfu:
+	@if [ ! -f "build/app/zephyr/zephyr.hex" ]; then \
+		echo "Error: No hex file found. Please build first."; \
+		exit 1; \
+	fi; \
+	VERSION=$${VERSION:-1}; \
+	echo "Creating DFU package (version $$VERSION)..."; \
+	nrfutil pkg generate --hw-version 52 --sd-req 0x00 \
+		--application-version $$VERSION \
+		--application build/app/zephyr/zephyr.hex \
+		/tmp/mouthpad_dfu.zip; \
+	echo ""; \
+	echo "Put device in bootloader mode and press Enter to continue..."; \
+	read -r; \
+	echo "Flashing via Nordic DFU..."; \
+	nrfutil dfu serial -pkg /tmp/mouthpad_dfu.zip -p $$(ls /dev/cu.usbmodem* 2>/dev/null | head -1); \
+	echo "Flash complete!"
 
 # Flash UF2 firmware to mounted bootloader drive
 # Usage: make flash-uf2 (will copy to /Volumes/NRF52BOOT or similar)
@@ -158,9 +188,11 @@ help:
 	@echo "  build-feather - Build specifically for Adafruit Feather nRF52840 Express"
 	@echo "  build-nordic-dongle - Build for Nordic PCA10059 nRF52840 Dongle (stock pins)"
 	@echo "  build-april-dongle - Build for April Brothers nRF52840 Dongle (non-standard LED wiring)"
-	@echo "  build-raytac-dongle - Build for Raytac MDBT50Q-RX Dongle"
+	@echo "  build-raytac-rx - Build for Raytac MDBT50Q-RX"
+	@echo "  build-raytac-cx40 - Build for Raytac MDBT50Q-CX-40 (Nordic DFU)"
 	@echo "  build-makerdiary-dongle - Build for MakerDiary nRF52840 MDK USB Dongle"
 	@echo "  flash        - Flash the built firmware to device using J-Link"
+	@echo "  flash-dfu    - Flash via Nordic DFU bootloader (for Raytac CX-40)"
 	@echo "  flash-uf2    - Flash the built firmware to device using UF2 bootloader"
 	@echo "  monitor      - Monitor serial output via USB CDC (auto-detect port)"
 	@echo "  monitor-cdc  - Monitor via USB CDC console (for UF2 boards)"

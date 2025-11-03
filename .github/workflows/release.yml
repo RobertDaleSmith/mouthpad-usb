@@ -51,7 +51,7 @@ jobs:
       CMAKE_PREFIX_PATH: /opt/toolchains
     strategy:
       matrix:
-        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_rx, makerdiary_nrf52840mdk]
+        board: [seeed_xiao_nrf52840, adafruit_feather_nrf52840, nordic_nrf52840dongle, aprbrother_nrf52840, raytac_mdbt50q_rx, raytac_mdbt50q_cx_40, makerdiary_nrf52840mdk]
         include:
           - board: seeed_xiao_nrf52840
             description: "Seeed XIAO nRF52840"
@@ -76,6 +76,12 @@ jobs:
             board_target: nrf52840dongle
             overlay: raytac_mdbt50q_rx.overlay
             conf: raytac_mdbt50q_rx.conf
+          - board: raytac_mdbt50q_cx_40
+            description: "Raytac MDBT50Q-CX-40 (Nordic DFU)"
+            board_target: raytac_mdbt50q_cx_40/nrf52840
+            overlay: raytac_mdbt50q_cx_40.overlay
+            conf: raytac_mdbt50q_cx_40.conf
+            uses_dfu: true
           - board: makerdiary_nrf52840mdk
             description: "MakerDiary nRF52840 MDK USB Dongle"
             board_target: nrf52840dongle
@@ -104,13 +110,15 @@ jobs:
           west init -m https://github.com/nrfconnect/sdk-nrf.git --mr v3.1.0
           west update --narrow -o=--depth=1
 
-      - name: 📁 Copy App to Workspace
+      - name: 📁 Copy App and Board Files to Workspace
         run: |
           rm -rf /zephyr_workspace/app
           rm -rf /zephyr_workspace/build
           # Create app directory structure matching local layout
           mkdir -p /zephyr_workspace/ncs
           cp -r ncs/app /zephyr_workspace/ncs/app
+          # Copy board definition for custom boards (raytac_mdbt50q_cx_40)
+          cp -r ncs/zephyr/boards/raytac /zephyr_workspace/nrf/zephyr/boards/ 2>/dev/null || true
           cp VERSION /zephyr_workspace/VERSION
           # Symlink for compatibility with build commands
           ln -s /zephyr_workspace/ncs/app /zephyr_workspace/app
@@ -147,24 +155,38 @@ jobs:
 
           ccache -sv
 
-      - name: 📦 Rename and Upload UF2 Artifacts
+      - name: 📦 Prepare Firmware Artifacts
         run: |
           cd /zephyr_workspace
           VERSION="${{ needs.check-version.outputs.version }}"
 
-          # Clean up any old UF2 files from cached workspace
-          rm -f mp_usb_*.uf2
+          # Clean up any old firmware files from cached workspace
+          rm -f mp_usb_*.uf2 mp_usb_*.zip
 
-          # Copy and rename UF2 files with version number
-          cp build/app/zephyr/zephyr.uf2 mp_usb_${VERSION}_${{ matrix.board }}.uf2
-          echo "✅ ${{ matrix.board }} UF2: mp_usb_${VERSION}_${{ matrix.board }}.uf2"
-          ls -la *.uf2
+          # Check if this board uses DFU (Nordic bootloader)
+          if [ "${{ matrix.uses_dfu }}" == "true" ]; then
+            echo "📦 Creating DFU package for ${{ matrix.board }}..."
+            # Install nrfutil if not present
+            pip3 install --user nrfutil >/dev/null 2>&1 || true
+            # Create DFU package
+            ~/.local/bin/nrfutil pkg generate --hw-version 52 --sd-req 0x00 \
+              --application-version ${{ needs.check-version.outputs.version }} \
+              --application build/app/zephyr/zephyr.hex \
+              mp_usb_${VERSION}_${{ matrix.board }}.zip
+            echo "✅ ${{ matrix.board }} DFU: mp_usb_${VERSION}_${{ matrix.board }}.zip"
+          else
+            # Copy and rename UF2 files with version number
+            cp build/app/zephyr/zephyr.uf2 mp_usb_${VERSION}_${{ matrix.board }}.uf2
+            echo "✅ ${{ matrix.board }} UF2: mp_usb_${VERSION}_${{ matrix.board }}.uf2"
+          fi
 
-      - name: 📦 Upload Individual UF2 File
+          ls -la mp_usb_*
+
+      - name: 📦 Upload Firmware Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mp_usb_${{ matrix.board }}
-          path: /zephyr_workspace/mp_usb_*.uf2
+          path: /zephyr_workspace/mp_usb_*
           retention-days: 90
 
   build-esp32:
@@ -242,7 +264,7 @@ jobs:
           echo "📦 Collecting firmware files for v${VERSION} release:"
 
           # Copy all firmware files from artifacts
-          find artifacts -type f \( -name "*.uf2" -o -name "*.bin" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.uf2" -o -name "*.bin" -o -name "*.zip" \) -exec cp {} release/ \;
 
           echo ""
           echo "✅ Release package contents:"
@@ -273,23 +295,34 @@ jobs:
             - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
             - `mp_usb_${{ needs.check-version.outputs.version }}_makerdiary_nrf52840mdk.uf2` - MakerDiary nRF52840 MDK USB Dongle
 
+            **nRF52840 Boards (ZIP format - Nordic DFU bootloader):**
+            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_cx_40.zip` - Raytac MDBT50Q-CX-40
+
             **ESP32-S3 Boards (BIN format - flash with esptool):**
             - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
             - `mp_usb_${{ needs.check-version.outputs.version }}_lilygo_tdisplay_s3.bin` - LilyGo T-Display-S3
 
             ### 🔧 Installation
 
-            **nRF52840 (UF2):**
+            **nRF52840 (UF2 - most boards):**
             1. Enter bootloader mode (double-tap reset button)
             2. Drag & drop the `.uf2` file to the mounted drive
             3. Device will automatically reboot with new firmware
+
+            **nRF52840 (ZIP - Nordic DFU for Raytac CX-40):**
+            1. Install nrfutil: `pip install nrfutil`
+            2. Put device in bootloader mode (hold RESET button while connecting USB)
+            3. Flash: `nrfutil dfu serial -pkg mp_usb_<version>_raytac_mdbt50q_cx_40.zip -p <PORT>`
+            4. Device will automatically reboot with new firmware
 
             **ESP32-S3 (BIN):**
             ```bash
             esptool.py --chip esp32s3 write_flash 0x10000 mp_usb_<version>_<board>.bin
             ```
 
-            **Note:** Flashing at 0x10000 (app partition) preserves NVS storage including BLE bonds.
+            **Note:**
+            - UF2 and DFU preserve Settings/NVS storage including BLE bonds
+            - ESP32-S3: Flashing at 0x10000 (app partition) preserves NVS storage
 
             ### 🔐 Checksums
             See `checksums.txt` for SHA256 verification.
