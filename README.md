@@ -67,7 +67,8 @@ make flash             # Flash firmware
 
 | Platform | Method |
 |----------|--------|
-| nRF52840 | UF2 bootloader (drag-and-drop) or type `dfu` command |
+| nRF52840 (UF2) | UF2 bootloader (drag-and-drop) or type `dfu` command |
+| nRF52840 (Nordic DFU) | Nordic DFU bootloader via nrfutil or nRF Connect Desktop |
 | ESP32-S3 | ROM serial downloader via `dfu` command or `idf.py flash` |
 
 ## Repository Structure
@@ -116,7 +117,8 @@ Both firmwares expose a maintenance console on the second CDC port:
 | Adafruit Feather nRF52840 Express | ✅ Production | Requires custom bootloader config | [Adafruit](https://www.adafruit.com/product/4062) |
 | Nordic nRF52840 Dongle (PCA10059) | ✅ Production | Stock Nordic LED pins | [Digi-Key](https://www.digikey.com/en/products/detail/nordic-semiconductor-asa/NRF52840-DONGLE/9491124) |
 | April Brothers nRF52840 Dongle (PCA10059) | ✅ Production | Non-standard LED wiring | [Apr Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
-| Raytac MDBT50Q-RX Dongle | ✅ Production | Single LED | [Raytac](https://www.raytac.com/product/ins.php?index_id=89) |
+| Raytac MDBT50Q-RX Dongle | ✅ Production | UF2 bootloader, single LED | [Raytac](https://www.raytac.com/product/ins.php?index_id=89) |
+| Raytac MDBT50Q-CX-40 Dongle | ✅ Production | Nordic DFU bootloader, blue+red LEDs | [Raytac](https://www.raytac.com/product/ins.php?index_id=100) |
 | MakerDiary nRF52840 MDK USB Dongle | ✅ Production | RGB LED support | [MakerDiary](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/purchase/) |
 
 ### ESP32-S3 Boards
@@ -136,6 +138,7 @@ GitHub Actions builds firmware for all board variants on every push to `main`:
 - `mouthpad^usb_nordic_nrf52840dongle_<commit>.uf2`
 - `mouthpad^usb_aprbrother_nrf52840_<commit>.uf2`
 - `mouthpad^usb_raytac_mdbt50q_rx_<commit>.uf2`
+- `mouthpad^usb_raytac_mdbt50q_cx_40_<commit>.zip` (Nordic DFU)
 - `mouthpad^usb_makerdiary_nrf52840mdk_<commit>.uf2`
 
 Artifacts are available in the Actions tab for 90 days.

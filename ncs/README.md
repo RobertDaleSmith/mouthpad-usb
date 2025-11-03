@@ -11,7 +11,7 @@ The nRF52840 firmware is the **primary production firmware** that ships on Seeed
 - USB HID device (mouse + consumer control)
 - Dual USB CDC ports (NUS tunnel + maintenance console)
 - Bond management and pairing support
-- UF2 bootloader support for easy firmware updates
+- UF2 bootloader support (most boards) or Nordic DFU bootloader (CX-40)
 - LED status feedback
 - Console commands: `dfu`, `clear`, `serial`
 
@@ -23,7 +23,8 @@ The nRF52840 firmware is the **primary production firmware** that ships on Seeed
 | **Adafruit Feather nRF52840** (`adafruit_feather_nrf52840`) | ✅ Production | Requires custom bootloader config | [Adafruit](https://www.adafruit.com/product/4062) |
 | **Nordic nRF52840 Dongle** (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins | [Digi-Key](https://www.digikey.com/en/products/detail/nordic-semiconductor-asa/NRF52840-DONGLE/9491124) |
 | **Apr Brother nRF52840 Dongle** (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring | [Apr Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
-| **Raytac MDBT50Q-RX Dongle** (`raytac_mdbt50q_rx`) | ✅ Production | PCA10059 compatible with single LED | [Raytac](https://www.raytac.com/product/ins.php?index_id=89) |
+| **Raytac MDBT50Q-RX Dongle** (`raytac_mdbt50q_rx`) | ✅ Production | UF2 bootloader, single LED | [Raytac](https://www.raytac.com/product/ins.php?index_id=89) |
+| **Raytac MDBT50Q-CX-40 Dongle** (`raytac_mdbt50q_cx_40`) | ✅ Production | Nordic DFU bootloader, blue+red LEDs | [Raytac](https://www.raytac.com/product/ins.php?index_id=100) |
 | **MakerDiary nRF52840 MDK USB Dongle** (`makerdiary_nrf52840mdk`) | ✅ Production | Compact dongle with RGB LED | [MakerDiary](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/purchase/) |
 
 ## Quick Start
@@ -61,7 +62,8 @@ make build-xiao              # Seeed XIAO nRF52840
 make build-feather           # Adafruit Feather nRF52840
 make build-nordic-dongle     # Nordic PCA10059 (stock pins)
 make build-april-dongle      # Apr Brother (non-standard LED)
-make build-raytac-dongle     # Raytac MDBT50Q-RX (single LED)
+make build-raytac-rx         # Raytac MDBT50Q-RX (UF2)
+make build-raytac-cx40       # Raytac MDBT50Q-CX-40 (Nordic DFU)
 make build-makerdiary-dongle # MakerDiary nRF52840 MDK (RGB LED)
 ```
 
@@ -127,6 +129,29 @@ make flash
 
 Requires J-Link probe connected and J-Link software installed.
 
+### Nordic DFU Method (CX-40 only)
+
+The Raytac CX-40 uses Nordic's DFU bootloader instead of UF2. You can flash it via command line or GUI:
+
+**Command Line (nrfutil):**
+```bash
+# Build firmware first
+make build-raytac-cx40
+
+# Flash via DFU (prompts for bootloader mode)
+make flash-dfu
+```
+
+**GUI (nRF Connect for Desktop - Recommended):**
+1. Download [nRF Connect for Desktop](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-Desktop)
+2. Install the "Programmer" app
+3. Put device in bootloader mode (hold RESET while connecting USB)
+4. Select device in nRF Connect Programmer
+5. Add the `.zip` file from `build/app/zephyr/` (after running `make flash-dfu` to generate it)
+6. Click "Write" to flash firmware
+
+The device will automatically reboot with the new firmware.
+
 ## CDC Maintenance Console
 
 The second CDC port (`/dev/cu.usbmodem<serial>3` on macOS, `/dev/ttyACM1` on Linux) provides a maintenance console with these commands:
@@ -186,9 +211,12 @@ GitHub Actions builds all board variants on every push:
 - Nordic nRF52840 Dongle
 - Apr Brother nRF52840 Dongle
 - Raytac MDBT50Q-RX Dongle
+- Raytac MDBT50Q-CX-40 Dongle
 - MakerDiary nRF52840 MDK USB Dongle
 
-Artifacts are uploaded as `mp_usb_<board>_<commit>.uf2` files.
+Artifacts are uploaded as:
+- `mp_usb_<board>_<commit>.uf2` for UF2 bootloader boards
+- `mp_usb_<board>_<commit>.zip` for Nordic DFU bootloader boards (CX-40)
 
 See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) for the full workflow.
 

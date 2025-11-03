@@ -310,6 +310,15 @@ jobs:
             3. Device will automatically reboot with new firmware
 
             **nRF52840 (ZIP - Nordic DFU for Raytac CX-40):**
+
+            *Option 1 - GUI (Recommended):*
+            1. Download [nRF Connect for Desktop](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-Desktop)
+            2. Install the "Programmer" app
+            3. Put device in bootloader mode (hold RESET button while connecting USB)
+            4. Select device in nRF Connect Programmer
+            5. Add the `.zip` file and click "Write"
+
+            *Option 2 - Command Line:*
             1. Install nrfutil: `pip install nrfutil`
             2. Put device in bootloader mode (hold RESET button while connecting USB)
             3. Flash: `nrfutil dfu serial -pkg mp_usb_<version>_raytac_mdbt50q_cx_40.zip -p <PORT>`
