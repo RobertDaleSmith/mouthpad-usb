@@ -118,7 +118,8 @@ jobs:
           mkdir -p /zephyr_workspace/ncs
           cp -r ncs/app /zephyr_workspace/ncs/app
           # Copy board definition for custom boards (raytac_mdbt50q_cx_40)
-          cp -r ncs/zephyr/boards/raytac /zephyr_workspace/nrf/zephyr/boards/ 2>/dev/null || true
+          mkdir -p /zephyr_workspace/zephyr/boards
+          cp -r ncs/zephyr/boards/raytac /zephyr_workspace/zephyr/boards/ 2>/dev/null || true
           cp VERSION /zephyr_workspace/VERSION
           # Symlink for compatibility with build commands
           ln -s /zephyr_workspace/ncs/app /zephyr_workspace/app
