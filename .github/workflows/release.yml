@@ -117,9 +117,6 @@ jobs:
           # Create app directory structure matching local layout
           mkdir -p /zephyr_workspace/ncs
           cp -r ncs/app /zephyr_workspace/ncs/app
-          # Copy custom board definitions (raytac_mdbt50q_cx_40) from repo to zephyr workspace
-          mkdir -p /zephyr_workspace/zephyr/boards
-          cp -r ncs/boards/raytac /zephyr_workspace/zephyr/boards/
           cp VERSION /zephyr_workspace/VERSION
           # Symlink for compatibility with build commands
           ln -s /zephyr_workspace/ncs/app /zephyr_workspace/app
