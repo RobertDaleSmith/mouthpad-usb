@@ -15,7 +15,7 @@ on:
 
 jobs:
   build-esp32:
-    name: Build ESP32-S3 Firmware
+    name: build
     runs-on: ubuntu-latest
     strategy:
       matrix:
