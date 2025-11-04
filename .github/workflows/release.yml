@@ -145,13 +145,16 @@ jobs:
                 --board ${{ matrix.board_target }} \
                 --pristine=always app \
                 -- \
+                -DBOARD_ROOT="/zephyr_workspace/ncs/app" \
                 -DDTC_OVERLAY_FILE="/zephyr_workspace/ncs/app/boards/${{ matrix.overlay }}" \
                 -DEXTRA_CONF_FILE="/zephyr_workspace/ncs/app/boards/${{ matrix.conf }}"
           else
             echo "Building ${{ matrix.description }} with board defaults"
             west build \
                 --board ${{ matrix.board_target }} \
-                --pristine=always app
+                --pristine=always app \
+                -- \
+                -DBOARD_ROOT="/zephyr_workspace/ncs/app"
           fi
 
           ccache -sv
