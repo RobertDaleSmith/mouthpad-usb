@@ -313,12 +313,8 @@ jobs:
         run: |
           cd /zephyr_workspace
 
-          # Use version if VERSION file changed, otherwise use commit SHA
-          if [ "${{ needs.check-changes.outputs.version_changed }}" = "true" ]; then
-            FILENAME_VERSION=$(cat VERSION | tr -d '[:space:]')
-          else
-            FILENAME_VERSION=$(echo "${{ github.sha }}" | cut -c1-7)
-          fi
+          # Always use version from check-version-tag
+          FILENAME_VERSION="${{ needs.check-version-tag.outputs.version }}"
 
           # Clean up any old firmware files from cached workspace
           rm -f mp_usb_*.uf2 mp_usb_*.zip mp_usb_*.hex
@@ -391,12 +387,8 @@ jobs:
         run: |
           mkdir -p artifacts
 
-          # Use version if VERSION file changed, otherwise use commit SHA
-          if [ "${{ needs.check-changes.outputs.version_changed }}" = "true" ]; then
-            FILENAME_VERSION=$(cat VERSION | tr -d '[:space:]')
-          else
-            FILENAME_VERSION=$(echo "${{ github.sha }}" | cut -c1-7)
-          fi
+          # Always use version from check-version-tag
+          FILENAME_VERSION="${{ needs.check-version-tag.outputs.version }}"
 
           # Copy app binary only (preserves NVS/BLE bonds when flashed at 0x10000)
           cp esp/build/mouthpad_usb.bin artifacts/mp_usb_${FILENAME_VERSION}_${{ matrix.board.name }}.bin
