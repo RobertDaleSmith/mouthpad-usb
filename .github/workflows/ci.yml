@@ -9,7 +9,7 @@ on:
 
 jobs:
   # Always run security scan
-  security-scan:
+  check-security:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,46 +22,13 @@ jobs:
         # Check for common security issues in C code
         find ncs/app/src -name '*.c' -o -name '*.h' | xargs grep -l 'strcpy\|sprintf\|gets' || echo 'No obvious security issues found'
 
-  # Always check version
-  check-version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      version_changed: ${{ steps.check.outputs.changed }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Fetch all history for tag comparison
-
-      - name: Read VERSION file
-        id: version
-        run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "📦 Current VERSION: ${VERSION}"
-
-      - name: Check if version tag exists
-        id: check
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Check if tag exists (locally or remotely)
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "⏭️  Version v${VERSION} already exists - skipping release"
-          else
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "✨ New version v${VERSION} detected - will create release"
-          fi
-
   # Check which directories changed
   check-changes:
     runs-on: ubuntu-latest
     outputs:
       ncs_changed: ${{ steps.changes.outputs.ncs }}
       esp_changed: ${{ steps.changes.outputs.esp }}
+      version_changed: ${{ steps.changes.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -84,6 +51,15 @@ jobs:
 
           echo "Comparing $BASE_SHA...$HEAD_SHA"
 
+          # Check if VERSION file changed
+          if git diff --name-only $BASE_SHA $HEAD_SHA | grep -q '^VERSION$'; then
+            echo "version=true" >> $GITHUB_OUTPUT
+            echo "✅ VERSION file changed - will build all firmware"
+          else
+            echo "version=false" >> $GITHUB_OUTPUT
+            echo "⏭️  VERSION file unchanged"
+          fi
+
           # Check if ncs directory changed
           if git diff --name-only $BASE_SHA $HEAD_SHA | grep -q '^ncs/'; then
             echo "ncs=true" >> $GITHUB_OUTPUT
@@ -104,9 +80,9 @@ jobs:
 
   # Build nRF52 firmware
   build-nrf52:
-    needs: [security-scan, check-version, check-changes]
-    # Build if version changed OR ncs directory changed
-    if: needs.check-version.outputs.version_changed == 'true' || needs.check-changes.outputs.ncs_changed == 'true'
+    needs: [check-security, check-changes]
+    # Build if VERSION file changed OR ncs directory changed
+    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.ncs_changed == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/zephyrproject-rtos/ci:v0.26.6
@@ -223,9 +199,9 @@ jobs:
         run: |
           cd /zephyr_workspace
 
-          # Use version if this is a release build, otherwise use commit SHA
-          if [ "${{ needs.check-version.outputs.version_changed }}" = "true" ]; then
-            FILENAME_VERSION="${{ needs.check-version.outputs.version }}"
+          # Use version if VERSION file changed, otherwise use commit SHA
+          if [ "${{ needs.check-changes.outputs.version_changed }}" = "true" ]; then
+            FILENAME_VERSION=$(cat VERSION | tr -d '[:space:]')
           else
             FILENAME_VERSION=$(echo "${{ github.sha }}" | cut -c1-7)
           fi
@@ -264,9 +240,9 @@ jobs:
 
   # Build ESP32 firmware
   build-esp32:
-    needs: [security-scan, check-version, check-changes]
-    # Build if version changed OR esp directory changed
-    if: needs.check-version.outputs.version_changed == 'true' || needs.check-changes.outputs.esp_changed == 'true'
+    needs: [check-security, check-changes]
+    # Build if VERSION file changed OR esp directory changed
+    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.esp_changed == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -300,9 +276,9 @@ jobs:
         run: |
           mkdir -p artifacts
 
-          # Use version if this is a release build, otherwise use commit SHA
-          if [ "${{ needs.check-version.outputs.version_changed }}" = "true" ]; then
-            FILENAME_VERSION="${{ needs.check-version.outputs.version }}"
+          # Use version if VERSION file changed, otherwise use commit SHA
+          if [ "${{ needs.check-changes.outputs.version_changed }}" = "true" ]; then
+            FILENAME_VERSION=$(cat VERSION | tr -d '[:space:]')
           else
             FILENAME_VERSION=$(echo "${{ github.sha }}" | cut -c1-7)
           fi
@@ -321,9 +297,46 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  # Check version tag (only runs after builds complete or are skipped)
+  check-version:
+    needs: [build-nrf52, build-esp32]
+    # Run if builds succeeded OR were skipped (always clause handles both)
+    if: always() && (needs.build-nrf52.result == 'success' || needs.build-nrf52.result == 'skipped') && (needs.build-esp32.result == 'success' || needs.build-esp32.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_changed: ${{ steps.check.outputs.changed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read VERSION file
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "📦 Current VERSION: ${VERSION}"
+
+      - name: Check if version tag exists
+        id: check
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Check if tag exists (locally or remotely)
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Version v${VERSION} already exists - skipping release"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "✨ New version v${VERSION} detected - will create release"
+          fi
+
   # Create release (only if version changed)
   create-release:
-    needs: [check-version, build-nrf52, build-esp32]
+    needs: [check-version]
     if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
