@@ -104,6 +104,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main  # Always fetch latest main to get version bump commit
 
       - name: Check for file changes
         id: changes
@@ -206,6 +207,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          ref: main  # Always fetch latest main to get version bump commit
 
       - name: 💾 Cache Zephyr Workspace
         id: cache-workspace
@@ -334,6 +336,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          ref: main  # Always fetch latest main to get version bump commit
 
       - name: Build ${{ matrix.board.display_name }}
         uses: espressif/esp-idf-ci-action@v1
