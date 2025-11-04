@@ -195,7 +195,7 @@ jobs:
   build-nrf52:
     needs: [check-security, check-changes, check-version-tag]
     # Build if: VERSION file changed OR ncs directory changed OR VERSION doesn't have a release
-    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.ncs_changed == 'true' || needs.check-version-tag.outputs.has_release == 'false'
+    if: always() && (needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.ncs_changed == 'true' || needs.check-version-tag.outputs.has_release == 'false')
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/zephyrproject-rtos/ci:v0.26.6
@@ -356,7 +356,7 @@ jobs:
   build-esp32:
     needs: [check-security, check-changes, check-version-tag]
     # Build if: VERSION file changed OR esp directory changed OR VERSION doesn't have a release
-    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.esp_changed == 'true' || needs.check-version-tag.outputs.has_release == 'false'
+    if: always() && (needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.esp_changed == 'true' || needs.check-version-tag.outputs.has_release == 'false')
     runs-on: ubuntu-latest
     strategy:
       matrix:
