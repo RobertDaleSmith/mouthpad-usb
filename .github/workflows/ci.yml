@@ -73,6 +73,43 @@ jobs:
           commit_user_email: ${{ github.actor }}@users.noreply.github.com
           commit_author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
 
+  # Check if VERSION has a release tag (determines if we should build/release)
+  check-version-tag:
+    needs: [bump-version]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      has_release: ${{ steps.check.outputs.has_release }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main  # Always fetch latest main to get version bump commit
+
+      - name: Read VERSION file
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "📦 Current VERSION: ${VERSION}"
+
+      - name: Check if version tag exists
+        id: check
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Check if tag exists (locally or remotely)
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "has_release=true" >> $GITHUB_OUTPUT
+            echo "⏭️  Version v${VERSION} already has a release"
+          else
+            echo "has_release=false" >> $GITHUB_OUTPUT
+            echo "✅ Version v${VERSION} does not have a release - will build & release"
+          fi
+
   # Always run security scan
   check-security:
     needs: [bump-version]
@@ -156,9 +193,9 @@ jobs:
 
   # Build nRF52 firmware
   build-nrf52:
-    needs: [check-security, check-changes]
-    # Build if VERSION file changed OR ncs directory changed
-    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.ncs_changed == 'true'
+    needs: [check-security, check-changes, check-version-tag]
+    # Build if: VERSION file changed OR ncs directory changed OR VERSION doesn't have a release
+    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.ncs_changed == 'true' || needs.check-version-tag.outputs.has_release == 'false'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/zephyrproject-rtos/ci:v0.26.6
@@ -317,9 +354,9 @@ jobs:
 
   # Build ESP32 firmware
   build-esp32:
-    needs: [check-security, check-changes]
-    # Build if VERSION file changed OR esp directory changed
-    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.esp_changed == 'true'
+    needs: [check-security, check-changes, check-version-tag]
+    # Build if: VERSION file changed OR esp directory changed OR VERSION doesn't have a release
+    if: needs.check-changes.outputs.version_changed == 'true' || needs.check-changes.outputs.esp_changed == 'true' || needs.check-version-tag.outputs.has_release == 'false'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -375,10 +412,10 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  # Create release (only if version changed in check-changes)
+  # Create release (only if version tag doesn't exist yet)
   create-release:
-    needs: [check-changes, build-nrf52, build-esp32]
-    if: needs.check-changes.outputs.version_changed == 'true'
+    needs: [build-nrf52, build-esp32, check-version-tag]
+    if: always() && needs.check-version-tag.outputs.has_release == 'false' && (needs.build-nrf52.result == 'success' || needs.build-nrf52.result == 'skipped') && (needs.build-esp32.result == 'success' || needs.build-esp32.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -386,28 +423,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Read VERSION file
-        id: version
-        run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "📦 Current VERSION: ${VERSION}"
-
-      - name: Check if version tag exists
-        id: check
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Check if tag exists (locally or remotely)
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "⏭️  Version v${VERSION} already exists - skipping release"
-            exit 1
-          else
-            echo "✨ New version v${VERSION} detected - will create release"
-          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -417,7 +432,7 @@ jobs:
       - name: Prepare release package
         run: |
           mkdir -p release
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.check-version-tag.outputs.version }}"
 
           echo "📦 Collecting firmware files for v${VERSION} release:"
 
@@ -438,28 +453,28 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: MouthPad USB v${{ steps.version.outputs.version }}
+          tag_name: v${{ needs.check-version-tag.outputs.version }}
+          name: MouthPad USB v${{ needs.check-version-tag.outputs.version }}
           body: |
-            ## MouthPad USB Firmware v${{ steps.version.outputs.version }}
+            ## MouthPad USB Firmware v${{ needs.check-version-tag.outputs.version }}
 
             ### 📦 Firmware Files
 
             **nRF52840 Boards (UF2 format - drag & drop to bootloader):**
-            - `mp_usb_${{ steps.version.outputs.version }}_seeed_xiao_nrf52840.uf2` - Seeed XIAO nRF52840
-            - `mp_usb_${{ steps.version.outputs.version }}_adafruit_feather_nrf52840.uf2` - Adafruit Feather nRF52840 Express
-            - `mp_usb_${{ steps.version.outputs.version }}_nordic_nrf52840dongle.uf2` - Nordic nRF52840 Dongle
-            - `mp_usb_${{ steps.version.outputs.version }}_aprbrother_nrf52840.uf2` - April Brother nRF52840 Dongle
-            - `mp_usb_${{ steps.version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
-            - `mp_usb_${{ steps.version.outputs.version }}_makerdiary_nrf52840mdk.uf2` - MakerDiary nRF52840 MDK USB Dongle
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_seeed_xiao_nrf52840.uf2` - Seeed XIAO nRF52840
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_adafruit_feather_nrf52840.uf2` - Adafruit Feather nRF52840 Express
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_nordic_nrf52840dongle.uf2` - Nordic nRF52840 Dongle
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_aprbrother_nrf52840.uf2` - April Brother nRF52840 Dongle
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_makerdiary_nrf52840mdk.uf2` - MakerDiary nRF52840 MDK USB Dongle
 
             **nRF52840 Boards (Nordic DFU bootloader - Raytac CX-40):**
-            - `mp_usb_${{ steps.version.outputs.version }}_raytac_mdbt50q_cx_40.hex` - HEX file (for nRF Connect Programmer GUI)
-            - `mp_usb_${{ steps.version.outputs.version }}_raytac_mdbt50q_cx_40.zip` - DFU package (for command-line nrfutil)
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_raytac_mdbt50q_cx_40.hex` - HEX file (for nRF Connect Programmer GUI)
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_raytac_mdbt50q_cx_40.zip` - DFU package (for command-line nrfutil)
 
             **ESP32-S3 Boards (BIN format - flash with esptool):**
-            - `mp_usb_${{ steps.version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
-            - `mp_usb_${{ steps.version.outputs.version }}_lilygo_tdisplay_s3.bin` - LilyGo T-Display-S3
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
+            - `mp_usb_${{ needs.check-version-tag.outputs.version }}_lilygo_tdisplay_s3.bin` - LilyGo T-Display-S3
 
             ### 🔧 Installation
 
@@ -503,7 +518,7 @@ jobs:
 
       - name: Release Summary
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.check-version-tag.outputs.version }}"
           echo "### ✅ Release v${VERSION} Created" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`v${VERSION}\`" >> $GITHUB_STEP_SUMMARY
