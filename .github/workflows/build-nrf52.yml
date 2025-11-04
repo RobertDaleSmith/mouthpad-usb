@@ -1,4 +1,4 @@
-name: Build nRF52
+name: Build (nRF52)
 
 on:
   pull_request:
