@@ -56,11 +56,19 @@ target_include_directories(app PRIVATE
     src/buzzer.c
     src/leds.c
     src/button.c
-    src/pselreset_erase.c
     src/main.c
     src/mouthpad-proto/src/C/MouthpadRelay.pb.c
     src/mouthpad-proto/nanopb/pb_common.c
     src/mouthpad-proto/nanopb/pb_decode.c
     src/mouthpad-proto/nanopb/pb_encode.c
   )
+
+# Add PSELRESET erase support only for MakerDiary nRF52840 MDK dongle
+# This board needs PSELRESET erased to use P0.18 as button GPIO instead of reset pin
+if(CONFIG_DONGLE_VARIANT_STRING STREQUAL "makerdiary_nrf52840mdk")
+  target_sources(app PRIVATE
+    src/pselreset_erase.c
+  )
+endif()
+
 # NORDIC SDK APP END
