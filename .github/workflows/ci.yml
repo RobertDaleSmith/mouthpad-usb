@@ -1,4 +1,4 @@
-name: CI
+name: Build & Release
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       bump_version:
-        description: 'Bump version before running workflow'
+        description: 'Make Release'
         required: false
         default: 'none'
         type: choice
