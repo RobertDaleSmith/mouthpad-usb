@@ -168,7 +168,7 @@ jobs:
           rm -f mp_usb_*.uf2 mp_usb_*.zip
 
           # Check if this board uses DFU (Nordic bootloader)
-          if [ "${{ matrix.uses_dfu }}" == "true" ]; then
+          if [ "${{ matrix.uses_dfu }}" = "true" ]; then
             echo "📦 Creating DFU package for ${{ matrix.board }}..."
             # Install nrfutil if not present
             pip3 install --user nrfutil >/dev/null 2>&1 || true
