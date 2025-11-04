@@ -279,7 +279,7 @@ jobs:
           echo "📦 Collecting firmware files for v${VERSION} release:"
 
           # Copy all firmware files from artifacts
-          find artifacts -type f \( -name "*.uf2" -o -name "*.bin" -o -name "*.zip" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.uf2" -o -name "*.bin" -o -name "*.zip" -o -name "*.hex" \) -exec cp {} release/ \;
 
           echo ""
           echo "✅ Release package contents:"
