@@ -22,7 +22,7 @@ The nRF52840 firmware is the **primary production firmware** that ships on Seeed
 | **Seeed XIAO nRF52840** (`seeed_xiao_nrf52840`) | ✅ Production | Primary shipping target ([expansion board](https://www.seeedstudio.com/Seeeduino-XIAO-Expansion-board-p-4746.html) supported) | [Seeed Studio](https://www.seeedstudio.com/Seeed-XIAO-BLE-nRF52840-p-5201.html) |
 | **Adafruit Feather nRF52840** (`adafruit_feather_nrf52840`) | ✅ Production | Requires custom bootloader config | [Adafruit](https://www.adafruit.com/product/4062) |
 | **Nordic nRF52840 Dongle** (`nordic_nrf52840dongle`) | ✅ Production | PCA10059 with stock Nordic LED pins | [Digi-Key](https://www.digikey.com/en/products/detail/nordic-semiconductor-asa/NRF52840-DONGLE/9491124) |
-| **Apr Brother nRF52840 Dongle** (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring | [Apr Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
+| **April Brother nRF52840 Dongle** (`aprbrother_nrf52840`) | ✅ Production | PCA10059 with non-standard LED wiring | [April Brother](https://store.aprbrother.com/product/usb-dongle-nrf52840) |
 | **Raytac MDBT50Q-RX Dongle** (`raytac_mdbt50q_rx`) | ✅ Production | UF2 bootloader, single LED | [Raytac](https://www.raytac.com/product/ins.php?index_id=89) |
 | **Raytac MDBT50Q-CX-40 Dongle** (`raytac_mdbt50q_cx_40`) | ✅ Production | Nordic DFU bootloader, blue+red LEDs | [Raytac](https://www.raytac.com/product/ins.php?index_id=100) |
 | **MakerDiary nRF52840 MDK USB Dongle** (`makerdiary_nrf52840mdk`) | ✅ Production | Compact dongle with RGB LED | [MakerDiary](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/purchase/) |
@@ -61,7 +61,7 @@ make flash
 make build-xiao              # Seeed XIAO nRF52840
 make build-feather           # Adafruit Feather nRF52840
 make build-nordic-dongle     # Nordic PCA10059 (stock pins)
-make build-april-dongle      # Apr Brother (non-standard LED)
+make build-april-dongle      # April Brother (non-standard LED)
 make build-raytac-rx         # Raytac MDBT50Q-RX (UF2)
 make build-raytac-cx40       # Raytac MDBT50Q-CX-40 (Nordic DFU)
 make build-makerdiary-dongle # MakerDiary nRF52840 MDK (RGB LED)
@@ -209,7 +209,7 @@ GitHub Actions builds all board variants on every push:
 - Seeed XIAO nRF52840
 - Adafruit Feather nRF52840
 - Nordic nRF52840 Dongle
-- Apr Brother nRF52840 Dongle
+- April Brother nRF52840 Dongle
 - Raytac MDBT50Q-RX Dongle
 - Raytac MDBT50Q-CX-40 Dongle
 - MakerDiary nRF52840 MDK USB Dongle
