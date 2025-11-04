@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       bump_version:
-        description: 'Make Release'
+        description: 'Create Release'
         required: false
         default: 'none'
         type: choice
