@@ -375,15 +375,13 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  # Check version tag (only runs after builds complete or are skipped)
-  check-version:
-    needs: [build-nrf52, build-esp32]
-    # Run if builds succeeded OR were skipped (always clause handles both)
-    if: always() && (needs.build-nrf52.result == 'success' || needs.build-nrf52.result == 'skipped') && (needs.build-esp32.result == 'success' || needs.build-esp32.result == 'skipped')
+  # Create release (only if version changed in check-changes)
+  create-release:
+    needs: [check-changes, build-nrf52, build-esp32]
+    if: needs.check-changes.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      version_changed: ${{ steps.check.outputs.changed }}
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -405,24 +403,11 @@ jobs:
 
           # Check if tag exists (locally or remotely)
           if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "changed=false" >> $GITHUB_OUTPUT
             echo "⏭️  Version v${VERSION} already exists - skipping release"
+            exit 1
           else
-            echo "changed=true" >> $GITHUB_OUTPUT
             echo "✨ New version v${VERSION} detected - will create release"
           fi
-
-  # Create release (only if version changed)
-  create-release:
-    needs: [check-version]
-    if: needs.check-version.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -432,7 +417,7 @@ jobs:
       - name: Prepare release package
         run: |
           mkdir -p release
-          VERSION="${{ needs.check-version.outputs.version }}"
+          VERSION="${{ steps.version.outputs.version }}"
 
           echo "📦 Collecting firmware files for v${VERSION} release:"
 
@@ -453,28 +438,28 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ needs.check-version.outputs.version }}
-          name: MouthPad USB v${{ needs.check-version.outputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: MouthPad USB v${{ steps.version.outputs.version }}
           body: |
-            ## MouthPad USB Firmware v${{ needs.check-version.outputs.version }}
+            ## MouthPad USB Firmware v${{ steps.version.outputs.version }}
 
             ### 📦 Firmware Files
 
             **nRF52840 Boards (UF2 format - drag & drop to bootloader):**
-            - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_nrf52840.uf2` - Seeed XIAO nRF52840
-            - `mp_usb_${{ needs.check-version.outputs.version }}_adafruit_feather_nrf52840.uf2` - Adafruit Feather nRF52840 Express
-            - `mp_usb_${{ needs.check-version.outputs.version }}_nordic_nrf52840dongle.uf2` - Nordic nRF52840 Dongle
-            - `mp_usb_${{ needs.check-version.outputs.version }}_aprbrother_nrf52840.uf2` - April Brother nRF52840 Dongle
-            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
-            - `mp_usb_${{ needs.check-version.outputs.version }}_makerdiary_nrf52840mdk.uf2` - MakerDiary nRF52840 MDK USB Dongle
+            - `mp_usb_${{ steps.version.outputs.version }}_seeed_xiao_nrf52840.uf2` - Seeed XIAO nRF52840
+            - `mp_usb_${{ steps.version.outputs.version }}_adafruit_feather_nrf52840.uf2` - Adafruit Feather nRF52840 Express
+            - `mp_usb_${{ steps.version.outputs.version }}_nordic_nrf52840dongle.uf2` - Nordic nRF52840 Dongle
+            - `mp_usb_${{ steps.version.outputs.version }}_aprbrother_nrf52840.uf2` - April Brother nRF52840 Dongle
+            - `mp_usb_${{ steps.version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
+            - `mp_usb_${{ steps.version.outputs.version }}_makerdiary_nrf52840mdk.uf2` - MakerDiary nRF52840 MDK USB Dongle
 
             **nRF52840 Boards (Nordic DFU bootloader - Raytac CX-40):**
-            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_cx_40.hex` - HEX file (for nRF Connect Programmer GUI)
-            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_cx_40.zip` - DFU package (for command-line nrfutil)
+            - `mp_usb_${{ steps.version.outputs.version }}_raytac_mdbt50q_cx_40.hex` - HEX file (for nRF Connect Programmer GUI)
+            - `mp_usb_${{ steps.version.outputs.version }}_raytac_mdbt50q_cx_40.zip` - DFU package (for command-line nrfutil)
 
             **ESP32-S3 Boards (BIN format - flash with esptool):**
-            - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
-            - `mp_usb_${{ needs.check-version.outputs.version }}_lilygo_tdisplay_s3.bin` - LilyGo T-Display-S3
+            - `mp_usb_${{ steps.version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
+            - `mp_usb_${{ steps.version.outputs.version }}_lilygo_tdisplay_s3.bin` - LilyGo T-Display-S3
 
             ### 🔧 Installation
 
@@ -518,7 +503,7 @@ jobs:
 
       - name: Release Summary
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
+          VERSION="${{ steps.version.outputs.version }}"
           echo "### ✅ Release v${VERSION} Created" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`v${VERSION}\`" >> $GITHUB_STEP_SUMMARY
