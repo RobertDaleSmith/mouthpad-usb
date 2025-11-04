@@ -58,6 +58,7 @@ build-makerdiary-dongle:
 build-raytac-cx40:
 	@echo "Building for Raytac MDBT50Q-CX-40..."
 	west build -b raytac_mdbt50q_cx_40/nrf52840 app --pristine=always -- \
+		-DBOARD_ROOT="$(shell pwd)/app" \
 		-DDTC_OVERLAY_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_cx_40.overlay" \
 		-DEXTRA_CONF_FILE="$(shell pwd)/app/boards/raytac_mdbt50q_cx_40.conf"
 
