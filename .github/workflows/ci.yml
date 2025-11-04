@@ -25,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version_bumped: ${{ steps.bump.outputs.bumped }}
 
     steps:
       - name: Checkout repository
@@ -60,6 +62,7 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "$NEW_VERSION" > VERSION
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bumped=true" >> $GITHUB_OUTPUT
 
       - name: Commit and push version bump
         uses: stefanzweifel/git-auto-commit-action@v5
@@ -102,25 +105,31 @@ jobs:
       - name: Check for file changes
         id: changes
         run: |
-          # For PRs, compare against base branch
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          else
-            # For pushes, compare with previous commit
-            BASE_SHA="${{ github.event.before }}"
-            HEAD_SHA="${{ github.sha }}"
-          fi
-
-          echo "Comparing $BASE_SHA...$HEAD_SHA"
-
-          # Check if VERSION file changed
-          if git diff --name-only $BASE_SHA $HEAD_SHA | grep -q '^VERSION$'; then
+          # If version was bumped by workflow, mark version as changed
+          if [ "${{ needs.bump-version.outputs.version_bumped }}" = "true" ]; then
             echo "version=true" >> $GITHUB_OUTPUT
-            echo "✅ VERSION file changed - will build all firmware"
+            echo "✅ VERSION bumped by workflow - will build all firmware"
           else
-            echo "version=false" >> $GITHUB_OUTPUT
-            echo "⏭️  VERSION file unchanged"
+            # For PRs, compare against base branch
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              BASE_SHA="${{ github.event.pull_request.base.sha }}"
+              HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            else
+              # For pushes, compare with previous commit
+              BASE_SHA="${{ github.event.before }}"
+              HEAD_SHA="${{ github.sha }}"
+            fi
+
+            echo "Comparing $BASE_SHA...$HEAD_SHA"
+
+            # Check if VERSION file changed
+            if git diff --name-only $BASE_SHA $HEAD_SHA | grep -q '^VERSION$'; then
+              echo "version=true" >> $GITHUB_OUTPUT
+              echo "✅ VERSION file changed - will build all firmware"
+            else
+              echo "version=false" >> $GITHUB_OUTPUT
+              echo "⏭️  VERSION file unchanged"
+            fi
           fi
 
           # Check if ncs directory changed
