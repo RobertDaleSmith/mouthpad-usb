@@ -69,6 +69,9 @@ jobs:
         with:
           commit_message: "Bump version to ${{ steps.bump.outputs.new_version }}"
           file_pattern: VERSION
+          commit_user_name: ${{ github.actor }}
+          commit_user_email: ${{ github.actor }}@users.noreply.github.com
+          commit_author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
 
   # Always run security scan
   check-security:
