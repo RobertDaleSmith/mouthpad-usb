@@ -50,7 +50,7 @@ jobs:
             overlay: nordic_nrf52840dongle.overlay
             conf: nordic_nrf52840dongle.conf
           - board: aprbrother_nrf52840
-            description: "Apr Brother nRF52840 Dongle"
+            description: "April Brother nRF52840 Dongle"
             board_target: nrf52840dongle
             overlay: aprbrother_nrf52840.overlay
             conf: aprbrother_nrf52840.conf
@@ -152,12 +152,15 @@ jobs:
             echo "📦 Creating DFU package for ${{ matrix.board }}..."
             # Install nrfutil if not present
             pip3 install --user nrfutil >/dev/null 2>&1 || true
-            # Create DFU package (application-version must be integer)
+            # Create DFU package for command-line flashing (application-version must be integer)
             ~/.local/bin/nrfutil pkg generate --hw-version 52 --sd-req 0x00 \
               --application-version 1 \
               --application build/app/zephyr/zephyr.hex \
               mp_usb_${{ matrix.board }}_${COMMIT_SHA}.zip
-            echo "✅ ${{ matrix.board }} DFU: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.zip"
+            # Also copy HEX file for nRF Connect for Desktop Programmer (GUI)
+            cp build/app/zephyr/zephyr.hex mp_usb_${{ matrix.board }}_${COMMIT_SHA}.hex
+            echo "✅ ${{ matrix.board }} DFU ZIP: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.zip"
+            echo "✅ ${{ matrix.board }} HEX: mp_usb_${{ matrix.board }}_${COMMIT_SHA}.hex"
           else
             # Copy and rename UF2 files with commit hash
             cp build/app/zephyr/zephyr.uf2 mp_usb_${{ matrix.board }}_${COMMIT_SHA}.uf2

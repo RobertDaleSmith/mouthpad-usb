@@ -78,7 +78,7 @@ jobs:
             overlay: nordic_nrf52840dongle.overlay
             conf: nordic_nrf52840dongle.conf
           - board: aprbrother_nrf52840
-            description: "Apr Brother nRF52840 Dongle"
+            description: "April Brother nRF52840 Dongle"
             board_target: nrf52840dongle
             overlay: aprbrother_nrf52840.overlay
             conf: aprbrother_nrf52840.conf
@@ -180,12 +180,15 @@ jobs:
             echo "📦 Creating DFU package for ${{ matrix.board }}..."
             # Install nrfutil if not present
             pip3 install --user nrfutil >/dev/null 2>&1 || true
-            # Create DFU package (application-version must be integer)
+            # Create DFU package for command-line flashing (application-version must be integer)
             ~/.local/bin/nrfutil pkg generate --hw-version 52 --sd-req 0x00 \
               --application-version 1 \
               --application build/app/zephyr/zephyr.hex \
               mp_usb_${VERSION}_${{ matrix.board }}.zip
-            echo "✅ ${{ matrix.board }} DFU: mp_usb_${VERSION}_${{ matrix.board }}.zip"
+            # Also copy HEX file for nRF Connect for Desktop Programmer (GUI)
+            cp build/app/zephyr/zephyr.hex mp_usb_${VERSION}_${{ matrix.board }}.hex
+            echo "✅ ${{ matrix.board }} DFU ZIP: mp_usb_${VERSION}_${{ matrix.board }}.zip"
+            echo "✅ ${{ matrix.board }} HEX: mp_usb_${VERSION}_${{ matrix.board }}.hex"
           else
             # Copy and rename UF2 files with version number
             cp build/app/zephyr/zephyr.uf2 mp_usb_${VERSION}_${{ matrix.board }}.uf2
@@ -303,12 +306,13 @@ jobs:
             - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_nrf52840.uf2` - Seeed XIAO nRF52840
             - `mp_usb_${{ needs.check-version.outputs.version }}_adafruit_feather_nrf52840.uf2` - Adafruit Feather nRF52840 Express
             - `mp_usb_${{ needs.check-version.outputs.version }}_nordic_nrf52840dongle.uf2` - Nordic nRF52840 Dongle
-            - `mp_usb_${{ needs.check-version.outputs.version }}_aprbrother_nrf52840.uf2` - Apr Brother nRF52840 Dongle
+            - `mp_usb_${{ needs.check-version.outputs.version }}_aprbrother_nrf52840.uf2` - April Brother nRF52840 Dongle
             - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_rx.uf2` - Raytac MDBT50Q-RX Dongle
             - `mp_usb_${{ needs.check-version.outputs.version }}_makerdiary_nrf52840mdk.uf2` - MakerDiary nRF52840 MDK USB Dongle
 
-            **nRF52840 Boards (ZIP format - Nordic DFU bootloader):**
-            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_cx_40.zip` - Raytac MDBT50Q-CX-40
+            **nRF52840 Boards (Nordic DFU bootloader - Raytac CX-40):**
+            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_cx_40.hex` - HEX file (for nRF Connect Programmer GUI)
+            - `mp_usb_${{ needs.check-version.outputs.version }}_raytac_mdbt50q_cx_40.zip` - DFU package (for command-line nrfutil)
 
             **ESP32-S3 Boards (BIN format - flash with esptool):**
             - `mp_usb_${{ needs.check-version.outputs.version }}_seeed_xiao_esp32s3.bin` - Seeed XIAO ESP32-S3
@@ -321,16 +325,16 @@ jobs:
             2. Drag & drop the `.uf2` file to the mounted drive
             3. Device will automatically reboot with new firmware
 
-            **nRF52840 (ZIP - Nordic DFU for Raytac CX-40):**
+            **nRF52840 (Nordic DFU for Raytac CX-40):**
 
-            *Option 1 - GUI (Recommended):*
+            *Option 1 - GUI with HEX file (Recommended):*
             1. Download [nRF Connect for Desktop](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-Desktop)
             2. Install the "Programmer" app
             3. Put device in bootloader mode (hold RESET button while connecting USB)
             4. Select device in nRF Connect Programmer
-            5. Add the `.zip` file and click "Write"
+            5. Add the `.hex` file and click "Write"
 
-            *Option 2 - Command Line:*
+            *Option 2 - Command Line with ZIP package:*
             1. Install nrfutil: `pip install nrfutil`
             2. Put device in bootloader mode (hold RESET button while connecting USB)
             3. Flash: `nrfutil dfu serial -pkg mp_usb_<version>_raytac_mdbt50q_cx_40.zip -p <PORT>`
