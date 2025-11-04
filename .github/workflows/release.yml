@@ -173,7 +173,7 @@ jobs:
           VERSION="${{ needs.check-version.outputs.version }}"
 
           # Clean up any old firmware files from cached workspace
-          rm -f mp_usb_*.uf2 mp_usb_*.zip
+          rm -f mp_usb_*.uf2 mp_usb_*.zip mp_usb_*.hex
 
           # Check if this board uses DFU (Nordic bootloader)
           if [ "${{ matrix.uses_dfu }}" = "true" ]; then
