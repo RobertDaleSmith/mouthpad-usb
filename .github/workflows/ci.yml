@@ -75,8 +75,6 @@ jobs:
 
   # Always run security scan
   check-security:
-    needs: [bump-version]
-    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
     runs-on: ubuntu-latest
 
     steps:
@@ -92,7 +90,7 @@ jobs:
   # Check which directories changed
   check-changes:
     needs: [bump-version]
-    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
+    if: always()
     runs-on: ubuntu-latest
     outputs:
       ncs_changed: ${{ steps.changes.outputs.ncs }}
