@@ -75,6 +75,8 @@ jobs:
 
   # Always run security scan
   check-security:
+    needs: [bump-version]
+    if: always()
     runs-on: ubuntu-latest
 
     steps:
