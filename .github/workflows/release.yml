@@ -1,4 +1,4 @@
-name: Release
+name: Check & Release
 
 on:
   push:
@@ -203,7 +203,6 @@ jobs:
           retention-days: 90
 
   build-esp32:
-    name: build (${{ matrix.board.name }})
     needs: check-version
     if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
