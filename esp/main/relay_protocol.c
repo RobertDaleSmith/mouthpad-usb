@@ -222,10 +222,20 @@ static esp_err_t handle_device_info_read(void) {
 
     // Device family and board (always available - dongle hardware info)
     // These describe the dongle hardware itself, not the bonded MouthPad
-    relay_msg.message_body.device_info_response.family.funcs.encode = encode_string_callback;
-    relay_msg.message_body.device_info_response.family.arg = (void *)"esp";
-    relay_msg.message_body.device_info_response.board.funcs.encode = encode_string_callback;
-    relay_msg.message_body.device_info_response.board.arg = (void *)CONFIG_MOUTHPAD_BOARD_NAME;
+    relay_msg.message_body.device_info_response.family = mouthware_message_DeviceFamily_DEVICE_FAMILY_ESP;
+
+    // Map board name to enum
+    const char *board_name = CONFIG_MOUTHPAD_BOARD_NAME;
+    if (strcmp(board_name, "seeed_xiao_esp32s3") == 0) {
+        relay_msg.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_SEEED_XIAO_ESP32S3;
+    } else if (strcmp(board_name, "lilygo_tdisplay_s3") == 0) {
+        relay_msg.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_LILYGO_TDISPLAY_S3;
+    } else {
+        relay_msg.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_UNSPECIFIED;
+        ESP_LOGW(TAG, "Unknown board name: %s", board_name);
+    }
+
+    ESP_LOGI(TAG, "Device info: family=esp, board=%s (enum=%d)", board_name, relay_msg.message_body.device_info_response.board);
 
     const ble_device_info_t *device_info = ble_device_info_get_current();
 

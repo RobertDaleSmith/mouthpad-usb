@@ -543,29 +543,42 @@ int main(void)
 								}
 
 								/* Device family and board (always available) */
-								response.message_body.device_info_response.family.funcs.encode = encode_string_callback;
-								response.message_body.device_info_response.family.arg = (void *)"nrf";
-								response.message_body.device_info_response.board.funcs.encode = encode_string_callback;
+								response.message_body.device_info_response.family = mouthware_message_DeviceFamily_DEVICE_FAMILY_NRF;
 
+								/* Map board name string to enum value */
 								const char *board_name;
 								#ifdef CONFIG_DONGLE_VARIANT_STRING
-									/* Use variant string as board name for custom hardware variants */
 									const char *variant_str = CONFIG_DONGLE_VARIANT_STRING;
-									/* Check if variant string is not empty at runtime */
 									if (variant_str && variant_str[0] != '\0') {
-										response.message_body.device_info_response.board.arg = (void *)variant_str;
 										board_name = variant_str;
-										LOG_INF("Device info: family=nrf, board=%s", variant_str);
 									} else {
-										response.message_body.device_info_response.board.arg = (void *)CONFIG_BOARD;
 										board_name = CONFIG_BOARD;
-										LOG_INF("Device info: family=nrf, board=%s (variant string empty)", CONFIG_BOARD);
 									}
 								#else
-									response.message_body.device_info_response.board.arg = (void *)CONFIG_BOARD;
 									board_name = CONFIG_BOARD;
-									LOG_INF("Device info: family=nrf, board=%s (no variant)", CONFIG_BOARD);
 								#endif
+
+								/* Map board name to enum */
+								if (strcmp(board_name, "seeed_xiao_nrf52840") == 0) {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_SEEED_XIAO_NRF52840;
+								} else if (strcmp(board_name, "nrf52840dongle_nrf52840") == 0 || strcmp(board_name, "nordic_nrf52840dongle") == 0) {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_NORDIC_NRF52840DONGLE;
+								} else if (strcmp(board_name, "nrf52840_blip") == 0 || strcmp(board_name, "aprbrother_nrf52840") == 0) {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_APRBROTHER_NRF52840;
+								} else if (strcmp(board_name, "raytac_mdbt50q_rx") == 0) {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_RAYTAC_MDBT50Q_RX;
+								} else if (strcmp(board_name, "raytac_mdbt50q_cx_40") == 0) {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_RAYTAC_MDBT50Q_CX_40;
+								} else if (strcmp(board_name, "nrf52840_mdk") == 0 || strcmp(board_name, "makerdiary_nrf52840_mdk") == 0) {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_MAKERDIARY_NRF52840_MDK;
+								} else if (strcmp(board_name, "adafruit_feather_nrf52840") == 0) {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_ADAFRUIT_FEATHER_NRF52840;
+								} else {
+									response.message_body.device_info_response.board = mouthware_message_DeviceBoard_DEVICE_BOARD_UNSPECIFIED;
+									LOG_WRN("Unknown board name: %s", board_name);
+								}
+
+								LOG_INF("Device info: family=nrf, board=%s (enum=%d)", board_name, response.message_body.device_info_response.board);
 
 								LOG_INF("Sending device info: bonded=%d, connected=%d, Addr=%s, Name=%s",
 									has_bonded, conn != NULL,

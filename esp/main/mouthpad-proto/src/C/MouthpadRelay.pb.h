@@ -24,6 +24,27 @@ typedef enum _mouthware_message_RelayBleConnectionStatus {
     mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTING = 4
 } mouthware_message_RelayBleConnectionStatus;
 
+typedef enum _mouthware_message_DeviceFamily {
+    mouthware_message_DeviceFamily_DEVICE_FAMILY_UNSPECIFIED = 0,
+    mouthware_message_DeviceFamily_DEVICE_FAMILY_NRF = 1,
+    mouthware_message_DeviceFamily_DEVICE_FAMILY_ESP = 2
+} mouthware_message_DeviceFamily;
+
+typedef enum _mouthware_message_DeviceBoard {
+    mouthware_message_DeviceBoard_DEVICE_BOARD_UNSPECIFIED = 0,
+    /* nRF52840 boards */
+    mouthware_message_DeviceBoard_DEVICE_BOARD_SEEED_XIAO_NRF52840 = 1,
+    mouthware_message_DeviceBoard_DEVICE_BOARD_NORDIC_NRF52840DONGLE = 2,
+    mouthware_message_DeviceBoard_DEVICE_BOARD_APRBROTHER_NRF52840 = 3,
+    mouthware_message_DeviceBoard_DEVICE_BOARD_RAYTAC_MDBT50Q_RX = 4,
+    mouthware_message_DeviceBoard_DEVICE_BOARD_RAYTAC_MDBT50Q_CX_40 = 5,
+    mouthware_message_DeviceBoard_DEVICE_BOARD_MAKERDIARY_NRF52840_MDK = 6,
+    mouthware_message_DeviceBoard_DEVICE_BOARD_ADAFRUIT_FEATHER_NRF52840 = 7,
+    /* ESP32-S3 boards */
+    mouthware_message_DeviceBoard_DEVICE_BOARD_SEEED_XIAO_ESP32S3 = 100,
+    mouthware_message_DeviceBoard_DEVICE_BOARD_LILYGO_TDISPLAY_S3 = 101
+} mouthware_message_DeviceBoard;
+
 typedef enum _mouthware_message_PassThroughToMouthpadErrorCode {
     mouthware_message_PassThroughToMouthpadErrorCode_PASS_THROUGH_TO_MOUTHPAD_ERROR_CODE_UNSPECIFIED = 0,
     mouthware_message_PassThroughToMouthpadErrorCode_PASS_THROUGH_TO_MOUTHPAD_ERROR_CODE_TIMEOUT = 1,
@@ -86,8 +107,8 @@ typedef struct _mouthware_message_DeviceInfoResponse {
     pb_callback_t address; /* BLE MAC address */
     uint32_t vid; /* USB Vendor ID from PnP ID characteristic */
     uint32_t pid; /* USB Product ID from PnP ID characteristic */
-    pb_callback_t family; /* Device family: "esp" or "nrf" */
-    pb_callback_t board; /* Target board: e.g., "xiao_ble", "nrf52840dongle_nrf52840" */
+    mouthware_message_DeviceFamily family; /* Device family */
+    mouthware_message_DeviceBoard board; /* Target board */
 } mouthware_message_DeviceInfoResponse;
 
 typedef struct _mouthware_message_ClearBondsResponse {
@@ -140,6 +161,14 @@ extern "C" {
 #define _mouthware_message_RelayBleConnectionStatus_MAX mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTING
 #define _mouthware_message_RelayBleConnectionStatus_ARRAYSIZE ((mouthware_message_RelayBleConnectionStatus)(mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTING+1))
 
+#define _mouthware_message_DeviceFamily_MIN mouthware_message_DeviceFamily_DEVICE_FAMILY_UNSPECIFIED
+#define _mouthware_message_DeviceFamily_MAX mouthware_message_DeviceFamily_DEVICE_FAMILY_ESP
+#define _mouthware_message_DeviceFamily_ARRAYSIZE ((mouthware_message_DeviceFamily)(mouthware_message_DeviceFamily_DEVICE_FAMILY_ESP+1))
+
+#define _mouthware_message_DeviceBoard_MIN mouthware_message_DeviceBoard_DEVICE_BOARD_UNSPECIFIED
+#define _mouthware_message_DeviceBoard_MAX mouthware_message_DeviceBoard_DEVICE_BOARD_LILYGO_TDISPLAY_S3
+#define _mouthware_message_DeviceBoard_ARRAYSIZE ((mouthware_message_DeviceBoard)(mouthware_message_DeviceBoard_DEVICE_BOARD_LILYGO_TDISPLAY_S3+1))
+
 #define _mouthware_message_PassThroughToMouthpadErrorCode_MIN mouthware_message_PassThroughToMouthpadErrorCode_PASS_THROUGH_TO_MOUTHPAD_ERROR_CODE_UNSPECIFIED
 #define _mouthware_message_PassThroughToMouthpadErrorCode_MAX mouthware_message_PassThroughToMouthpadErrorCode_PASS_THROUGH_TO_MOUTHPAD_ERROR_CODE_INVALID_MESSAGE
 #define _mouthware_message_PassThroughToMouthpadErrorCode_ARRAYSIZE ((mouthware_message_PassThroughToMouthpadErrorCode)(mouthware_message_PassThroughToMouthpadErrorCode_PASS_THROUGH_TO_MOUTHPAD_ERROR_CODE_INVALID_MESSAGE+1))
@@ -153,6 +182,8 @@ extern "C" {
 
 #define mouthware_message_BleConnectionStatusResponse_connection_status_ENUMTYPE mouthware_message_RelayBleConnectionStatus
 
+#define mouthware_message_DeviceInfoResponse_family_ENUMTYPE mouthware_message_DeviceFamily
+#define mouthware_message_DeviceInfoResponse_board_ENUMTYPE mouthware_message_DeviceBoard
 
 
 
@@ -169,7 +200,7 @@ extern "C" {
 #define mouthware_message_PassThroughToMouthpad_init_default {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_default {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_default}}
 #define mouthware_message_BleConnectionStatusResponse_init_default {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
-#define mouthware_message_DeviceInfoResponse_init_default {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0, {{NULL}, NULL}, {{NULL}, NULL}}
+#define mouthware_message_DeviceInfoResponse_init_default {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0, _mouthware_message_DeviceFamily_MIN, _mouthware_message_DeviceBoard_MIN}
 #define mouthware_message_ClearBondsResponse_init_default {0}
 #define mouthware_message_DfuResponse_init_default {0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_default {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
@@ -182,7 +213,7 @@ extern "C" {
 #define mouthware_message_PassThroughToMouthpad_init_zero {{0, {0}}}
 #define mouthware_message_AppToRelayMessage_init_zero {_mouthware_message_AppToRelayMessageDestination_MIN, 0, {mouthware_message_BleConnectionStatusRead_init_zero}}
 #define mouthware_message_BleConnectionStatusResponse_init_zero {_mouthware_message_RelayBleConnectionStatus_MIN, 0, 0}
-#define mouthware_message_DeviceInfoResponse_init_zero {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0, {{NULL}, NULL}, {{NULL}, NULL}}
+#define mouthware_message_DeviceInfoResponse_init_zero {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, 0, 0, _mouthware_message_DeviceFamily_MIN, _mouthware_message_DeviceBoard_MIN}
 #define mouthware_message_ClearBondsResponse_init_zero {0}
 #define mouthware_message_DfuResponse_init_zero  {0}
 #define mouthware_message_PassThroughToMouthpadResponse_init_zero {_mouthware_message_PassThroughToMouthpadErrorCode_MIN}
@@ -272,8 +303,8 @@ X(a, CALLBACK, SINGULAR, STRING,   firmware,          2) \
 X(a, CALLBACK, SINGULAR, STRING,   address,           3) \
 X(a, STATIC,   SINGULAR, UINT32,   vid,               4) \
 X(a, STATIC,   SINGULAR, UINT32,   pid,               5) \
-X(a, CALLBACK, SINGULAR, STRING,   family,            6) \
-X(a, CALLBACK, SINGULAR, STRING,   board,             7)
+X(a, STATIC,   SINGULAR, UENUM,    family,            6) \
+X(a, STATIC,   SINGULAR, UENUM,    board,             7)
 #define mouthware_message_DeviceInfoResponse_CALLBACK pb_default_field_callback
 #define mouthware_message_DeviceInfoResponse_DEFAULT NULL
 
