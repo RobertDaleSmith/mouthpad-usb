@@ -55,4 +55,7 @@ bool ble_central_is_connecting(void);
 /* Connected state query */
 bool ble_central_is_connected(void);
 
+/* Mark that GATT services are ready - transitions from CONNECTING to CONNECTED */
+void ble_central_mark_services_ready(void);
+
 #endif /* BLE_CENTRAL_H */

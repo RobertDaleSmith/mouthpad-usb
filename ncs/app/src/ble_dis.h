@@ -85,6 +85,20 @@ const ble_dis_info_t *ble_dis_get_info(void);
  */
 void ble_dis_clear_saved(void);
 
+/**
+ * @brief Callback type for DIS discovery completion
+ *
+ * @param conn BLE connection
+ */
+typedef void (*ble_dis_discovery_complete_cb_t)(struct bt_conn *conn);
+
+/**
+ * @brief Set callback to be called when DIS discovery completes
+ *
+ * @param cb Callback function
+ */
+void ble_dis_set_discovery_complete_cb(ble_dis_discovery_complete_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif

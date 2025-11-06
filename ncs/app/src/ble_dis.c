@@ -42,6 +42,9 @@ static uint16_t hw_rev_handle = 0;
 static uint16_t mfr_name_handle = 0;
 static uint16_t pnp_id_handle = 0;
 
+/* Discovery completion callback */
+static ble_dis_discovery_complete_cb_t discovery_complete_cb = NULL;
+
 /* Forward declarations */
 static void dis_discovery_completed_cb(struct bt_gatt_dm *dm, void *context);
 static void dis_discovery_service_not_found_cb(struct bt_conn *conn, void *context);
@@ -327,6 +330,11 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 		/* Save DIS info even if device name failed - we have firmware/PnP ID */
 		save_dis_info_to_settings();
 
+		/* Trigger discovery complete callback */
+		if (discovery_complete_cb && current_conn) {
+			discovery_complete_cb(current_conn);
+		}
+
 		return BT_GATT_ITER_STOP;
 	}
 
@@ -337,6 +345,11 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 
 		/* Save DIS info to persistent storage now that discovery is complete */
 		save_dis_info_to_settings();
+
+		/* Trigger discovery complete callback */
+		if (discovery_complete_cb && current_conn) {
+			discovery_complete_cb(current_conn);
+		}
 
 		return BT_GATT_ITER_STOP;
 	}
@@ -451,4 +464,14 @@ static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *co
 {
 	LOG_ERR("Device Information Service discovery failed: %d", err);
 	dis_ready = true;  /* Mark ready to unblock, but with no data */
+
+	/* Trigger discovery complete callback even on error so NUS can continue */
+	if (discovery_complete_cb && conn) {
+		discovery_complete_cb(conn);
+	}
+}
+
+void ble_dis_set_discovery_complete_cb(ble_dis_discovery_complete_cb_t cb)
+{
+	discovery_complete_cb = cb;
 }

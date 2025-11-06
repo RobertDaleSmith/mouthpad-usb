@@ -176,26 +176,22 @@ cleanup:
 		LOG_ERR("Could not release battery discovery data: %d", err);
 	}
 
-	/* Start Device Information Service discovery after BAS completes */
-	extern int ble_dis_discover(struct bt_conn *conn);
-	extern struct bt_conn *ble_central_get_default_conn(void);
-	ble_dis_discover(ble_central_get_default_conn());
+	/* DIS discovery is now started earlier in gatt_discover() for faster firmware/VID/PID retrieval */
+	LOG_DBG("Battery Service discovery complete (DIS already started)");
 }
 
 static void battery_discovery_service_not_found_cb(struct bt_conn *conn, void *context)
 {
+	ARG_UNUSED(conn);
+	ARG_UNUSED(context);
 	LOG_INF("Battery Service not found during discovery");
-
-	/* Start Device Information Service discovery even if BAS not found */
-	extern int ble_dis_discover(struct bt_conn *conn);
-	ble_dis_discover(conn);
+	/* DIS discovery is now started earlier in gatt_discover() */
 }
 
 static void battery_discovery_error_found_cb(struct bt_conn *conn, int err, void *context)
 {
+	ARG_UNUSED(conn);
+	ARG_UNUSED(context);
 	LOG_ERR("Battery Service discovery failed: %d", err);
-
-	/* Start Device Information Service discovery even if BAS discovery failed */
-	extern int ble_dis_discover(struct bt_conn *conn);
-	ble_dis_discover(conn);
+	/* DIS discovery is now started earlier in gatt_discover() */
 }

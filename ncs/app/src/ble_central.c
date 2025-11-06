@@ -162,9 +162,9 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	/* Store connection reference */
 	default_conn = bt_conn_ref(conn);
 
-	/* Update state to connected */
-	connection_state = BLE_CENTRAL_STATE_CONNECTED;
-	LOG_INF("*** STATE SET TO CONNECTED ***");
+	/* Update state to CONNECTING - will transition to CONNECTED when services are ready */
+	connection_state = BLE_CENTRAL_STATE_CONNECTING;
+	LOG_INF("*** STATE SET TO CONNECTING (waiting for service discovery) ***");
 
 	/* Stop scanning */
 	err = bt_scan_stop();
@@ -1123,4 +1123,15 @@ bool ble_central_is_connected(void)
 	bool result = connection_state == BLE_CENTRAL_STATE_CONNECTED;
 	LOG_INF("is_connected query: state=%d, returning %d", connection_state, result);
 	return result;
+}
+
+/* Mark that GATT services are ready - transitions from CONNECTING to CONNECTED */
+void ble_central_mark_services_ready(void)
+{
+	if (connection_state == BLE_CENTRAL_STATE_CONNECTING) {
+		connection_state = BLE_CENTRAL_STATE_CONNECTED;
+		LOG_INF("*** STATE SET TO CONNECTED (services ready) ***");
+	} else {
+		LOG_WRN("mark_services_ready called but state is not CONNECTING (state=%d)", connection_state);
+	}
 }

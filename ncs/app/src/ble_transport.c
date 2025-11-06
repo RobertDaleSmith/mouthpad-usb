@@ -68,6 +68,7 @@ static ble_ready_callback_t hid_ready_callback = NULL;
 /* Internal callback functions */
 static void ble_nus_data_received_cb(const uint8_t *data, uint16_t len);
 static void rssi_read_work_handler(struct k_work *work);
+static void dis_discovery_complete_cb(struct bt_conn *conn);
 static void ble_nus_discovery_complete_cb(void);
 static void ble_nus_mtu_exchange_cb(uint16_t mtu);
 static void ble_hid_data_received_cb(const uint8_t *data, uint16_t len);
@@ -82,17 +83,25 @@ static void nus_discovery_completed_cb(void)
 {
 	LOG_INF("=== NUS DISCOVERY COMPLETED ===");
 	nus_discovery_complete = true;
-	
-	/* Now start HID discovery after NUS is complete */
-	LOG_INF("Starting HID service discovery after NUS completion...");
-	int hid_discover_ret = ble_hid_discover(ble_central_get_default_conn());
-	if (hid_discover_ret != 0) {
-		LOG_ERR("BLE HID discovery failed (err %d)", hid_discover_ret);
-		LOG_ERR("This might mean the connected device doesn't have HID services");
-		LOG_ERR("Or there might be a GATT discovery conflict");
+
+	/* HID and NUS are complete, but wait for DIS firmware before marking CONNECTED */
+	LOG_INF("HID and NUS discovery complete - waiting for DIS firmware before marking CONNECTED");
+
+	/* Now start DIS discovery after NUS is complete */
+	LOG_INF("Starting DIS (Device Information Service) discovery after NUS completion...");
+	extern int ble_dis_discover(struct bt_conn *conn);
+	int dis_err = ble_dis_discover(ble_central_get_default_conn());
+	if (dis_err != 0) {
+		LOG_ERR("DIS discovery failed (err %d)", dis_err);
+		/* If DIS fails, mark as connected anyway */
+		ble_central_mark_services_ready();
+		fully_connected = true;
+		extern void buzzer_connected(void);
+		buzzer_connected();
 	} else {
-		LOG_INF("BLE HID discovery started successfully");
+		LOG_INF("DIS discovery started successfully - will mark CONNECTED when firmware is retrieved");
 	}
+	/* DIS completion callback will mark services ready and trigger BAS discovery */
 }
 
 /* BLE Transport initialization */
@@ -146,6 +155,9 @@ int ble_transport_init(void)
 		LOG_ERR("ble_dis_init failed (err %d)", err);
 		return err;
 	}
+
+	/* Register DIS discovery completion callback to start NUS discovery */
+	ble_dis_set_discovery_complete_cb(dis_discovery_complete_cb);
 
 	/* Initialize HID client */
 	err = ble_hid_init();
@@ -365,17 +377,34 @@ static void ble_hid_discovery_complete_cb(void)
 	LOG_INF("HID client ready - service discovery complete");
 	hid_client_ready = true;
 	hid_discovery_complete = true;
-	fully_connected = true;  /* Mark as fully connected - eligible for disconnect sound */
-	LOG_INF("HID client ready - bridge operational");
+	LOG_INF("HID client ready - starting NUS discovery");
 	LOG_INF("BLE HID discovery status: ready=%d, complete=%d", hid_client_ready, hid_discovery_complete);
-	
-	/* Play happy connection sound - full bridge is now operational! */
+
+	/* Start NUS discovery after HID is complete */
+	LOG_INF("Starting NUS service discovery after HID completion...");
+	ble_nus_client_discover(ble_central_get_default_conn());
+	/* NUS will trigger DIS discovery when it completes, then DIS will trigger BAS */
+}
+
+/* Callback when DIS discovery completes - mark services ready and start BAS discovery */
+static void dis_discovery_complete_cb(struct bt_conn *conn)
+{
+	LOG_INF("DIS discovery completed - HID, NUS, and DIS (firmware) are ready");
+
+	/* Now mark services as ready - all critical services (HID, NUS, DIS) are complete */
+	LOG_INF("Marking services ready and reporting CONNECTED");
+	ble_central_mark_services_ready();
+
+	/* Mark as fully connected - eligible for disconnect sound */
+	fully_connected = true;
+
+	/* Play happy connection sound - full bridge is now operational with firmware info! */
 	extern void buzzer_connected(void);
 	buzzer_connected();
 
-	/* Start Battery Service discovery after HID is complete */
-	/* BAS will trigger DIS discovery when it completes */
-	ble_bas_discover(ble_central_get_default_conn());
+	/* Start BAS discovery after DIS (runs in background, not critical for CONNECTED state) */
+	LOG_INF("Starting BAS (Battery Service) discovery...");
+	ble_bas_discover(conn);
 }
 
 static void gatt_discover(struct bt_conn *conn)
@@ -384,7 +413,7 @@ static void gatt_discover(struct bt_conn *conn)
 		return;
 	}
 
-	LOG_INF("Starting GATT discovery for both NUS and HID services");
+	LOG_INF("Starting GATT discovery for all services");
 	char addr_str[BT_ADDR_LE_STR_LEN];
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
 	LOG_INF("Connected device address: %s", addr_str);
@@ -392,11 +421,17 @@ static void gatt_discover(struct bt_conn *conn)
 	/* Reset discovery state */
 	nus_discovery_complete = false;
 
-	/* Discover NUS service first */
-	LOG_INF("Starting NUS service discovery...");
-	ble_nus_client_discover(conn);
-	
-	/* HID discovery will be started in nus_discovery_completed_cb */
+	/* Start HID (HOGP) discovery FIRST for fastest input passthrough */
+	LOG_INF("Starting HID service discovery first for fastest input...");
+	int hid_err = ble_hid_discover(conn);
+	if (hid_err != 0) {
+		LOG_ERR("HID discovery failed to start (err %d), starting NUS anyway", hid_err);
+		/* If HID fails to start, begin NUS discovery immediately */
+		LOG_INF("Starting NUS service discovery...");
+		ble_nus_client_discover(conn);
+	}
+	/* Otherwise, NUS discovery will be started when HID completes */
+	/* DIS and BAS will be started after NUS completes */
 }
 
 static void ble_central_connected_cb(struct bt_conn *conn)
