@@ -114,7 +114,7 @@ static void service_discovery_timer_callback(void *arg)
     }
 #endif
 
-    // Start DIS service discovery
+    // Start DIS service discovery (runs in parallel with NUS)
     if (s_active_conn_id != 0xFFFF && s_dis_gattc_if != ESP_GATT_IF_NONE && s_has_active_addr) {
         esp_err_t ret = ble_device_info_discover(s_dis_gattc_if, s_active_conn_id, s_active_addr, "RDSMouthPad");
         if (ret != ESP_OK) {
@@ -166,11 +166,45 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
 
 static void start_scan_task(void);
 
+// Track whether we've reported Connected state yet
+static bool s_connection_state_reported = false;
+
+// Public function to check if we're ready to report Connected state
+bool ble_connection_is_fully_ready(void)
+{
+    return s_connection_state_reported;
+}
+
+// Called when NUS service is fully ready (CCCD enabled and notifications working)
+void nus_ready_callback(void)
+{
+    ESP_LOGI(TAG, "NUS service is ready");
+
+    // Check if we have cached device info with firmware version
+    if (ble_device_info_has_cached_firmware()) {
+        ESP_LOGI(TAG, "Cached device info exists - reporting Connected state immediately");
+        s_connection_state_reported = true;
+        // Note: Connected state is determined by relay_protocol checking:
+        // s_ble_connected && ble_hid_client_is_connected()
+        // These are already set by hid_connected_cb, so app will see Connected state now
+    } else {
+        ESP_LOGI(TAG, "No cached device info - waiting for DIS to complete before reporting Connected");
+        // s_connection_state_reported stays false, will be set in device_info_complete_callback
+    }
+}
+
 // Device info completion callback
 static void device_info_complete_callback(const ble_device_info_t *device_info)
 {
     // ESP_LOGI(TAG, "Device info discovery completed for connected device");
     ble_device_info_print(device_info);
+
+    // If we haven't reported Connected state yet, report it now
+    if (!s_connection_state_reported) {
+        ESP_LOGI(TAG, "DIS complete - now reporting Connected state");
+        s_connection_state_reported = true;
+        // Connected state is now available to relay protocol queries
+    }
 }
 
 // Wrapper GATT client callback that handles both HID and NUS events
@@ -336,6 +370,7 @@ static void hid_disconnected_cb(esp_hidh_dev_t *dev)
     ESP_LOGI(TAG, "Device disconnected");
     stop_rssi_timer();
     s_has_active_addr = false;
+    s_connection_state_reported = false;  // Reset for next connection
 
     // Handle disconnect and release any stuck HID inputs
     transport_hid_handle_disconnect();

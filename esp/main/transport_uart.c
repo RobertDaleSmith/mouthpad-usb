@@ -1,6 +1,7 @@
 #include "transport_uart.h"
 #include "ble_nus.h"
 #include "usb_cdc.h"
+#include "main.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -93,6 +94,7 @@ esp_err_t transport_uart_init(void)
         .data_sent_cb = nus_client_data_sent_cb,
         .connected_cb = nus_client_connected_cb,
         .disconnected_cb = nus_client_disconnected_cb,
+        .ready_cb = nus_ready_callback,  // From main.c - handles connection state logic
     };
 
     esp_err_t ret = ble_nus_client_init(&nus_config);

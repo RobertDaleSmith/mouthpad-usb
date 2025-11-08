@@ -419,6 +419,12 @@ void ble_nus_client_handle_gattc_event(esp_gattc_cb_event_t event, esp_gatt_if_t
                 if (ret == ESP_OK) {
                     ESP_LOGI(TAG, "Notification handler registered");
                     nus_tx_notify_enabled = true;
+
+                    // NUS is now fully ready - notify via callback
+                    if (nus_config.ready_cb) {
+                        ESP_LOGI(TAG, "NUS service is now ready, invoking ready callback");
+                        nus_config.ready_cb();
+                    }
                 } else {
                     ESP_LOGE(TAG, "Failed to register notification handler: %s",
                             esp_err_to_name(ret));

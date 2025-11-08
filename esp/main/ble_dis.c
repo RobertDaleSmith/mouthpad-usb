@@ -193,6 +193,13 @@ static esp_err_t load_device_info_from_nvs(void)
     return ret;
 }
 
+bool ble_device_info_has_cached_firmware(void)
+{
+    // Check if current_device_info has valid firmware version
+    // This info is loaded from NVS on init, so it persists across reboots
+    return current_device_info.firmware_revision[0] != '\0';
+}
+
 // Clear saved device info from NVS (called when bonds are cleared)
 esp_err_t ble_device_info_clear_saved(void)
 {

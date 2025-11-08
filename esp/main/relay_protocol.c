@@ -188,9 +188,16 @@ static esp_err_t handle_ble_connection_status_read(void) {
     mouthware_message_RelayBleConnectionStatus status;
     const char *status_str;
 
-    if (s_ble_connected && ble_hid_client_is_connected()) {
+    // Connection is fully ready when:
+    // 1. BLE and HID are connected AND
+    // 2. Either NUS is ready with cached device info OR DIS discovery is complete
+    if (s_ble_connected && ble_hid_client_is_connected() && ble_connection_is_fully_ready()) {
         status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTED;
         status_str = "connected";
+    } else if (s_ble_connected && ble_hid_client_is_connected()) {
+        // HID connected but not fully ready yet (waiting for NUS + DIS)
+        status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_CONNECTING;
+        status_str = "connecting";
     } else if (s_ble_scanning) {
         status = mouthware_message_RelayBleConnectionStatus_RELAY_CONNECTION_STATUS_SEARCHING;
         status_str = "searching";

@@ -210,6 +210,15 @@ void ble_dis_clear_saved(void)
 	}
 }
 
+bool ble_dis_has_cached_firmware(void)
+{
+	/* Check if device_info has valid firmware version
+	 * This info is loaded from persistent storage on init via settings callback,
+	 * so it persists across reboots
+	 */
+	return device_info.has_firmware_version && (device_info.firmware_version[0] != '\0');
+}
+
 /* GATT read callbacks for each characteristic */
 static uint8_t read_fw_rev_cb(struct bt_conn *conn, uint8_t err,
 			      struct bt_gatt_read_params *params,

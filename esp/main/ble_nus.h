@@ -25,6 +25,7 @@ typedef void (*ble_nus_client_data_received_cb_t)(const uint8_t *data, uint16_t 
 typedef void (*ble_nus_client_data_sent_cb_t)(esp_err_t status);
 typedef void (*ble_nus_client_connected_cb_t)(void);
 typedef void (*ble_nus_client_disconnected_cb_t)(void);
+typedef void (*ble_nus_client_ready_cb_t)(void);  // Called when NUS is fully ready (CCCD enabled)
 
 // NUS client configuration
 typedef struct {
@@ -32,6 +33,7 @@ typedef struct {
     ble_nus_client_data_sent_cb_t data_sent_cb;
     ble_nus_client_connected_cb_t connected_cb;
     ble_nus_client_disconnected_cb_t disconnected_cb;
+    ble_nus_client_ready_cb_t ready_cb;  // Called when NUS service is fully ready
 } ble_nus_client_config_t;
 
 /**

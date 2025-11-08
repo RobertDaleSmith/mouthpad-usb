@@ -86,6 +86,16 @@ const ble_dis_info_t *ble_dis_get_info(void);
 void ble_dis_clear_saved(void);
 
 /**
+ * @brief Check if we have cached device info with firmware version
+ *
+ * This is used to determine if we can report Connected state early
+ * (when NUS is ready) or if we need to wait for DIS to retrieve firmware version.
+ *
+ * @return true if cached device info exists with valid firmware version
+ */
+bool ble_dis_has_cached_firmware(void);
+
+/**
  * @brief Callback type for DIS discovery completion
  *
  * @param conn BLE connection

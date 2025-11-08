@@ -84,24 +84,41 @@ static void nus_discovery_completed_cb(void)
 	LOG_INF("=== NUS DISCOVERY COMPLETED ===");
 	nus_discovery_complete = true;
 
-	/* HID and NUS are complete, but wait for DIS firmware before marking CONNECTED */
-	LOG_INF("HID and NUS discovery complete - waiting for DIS firmware before marking CONNECTED");
-
-	/* Now start DIS discovery after NUS is complete */
-	LOG_INF("Starting DIS (Device Information Service) discovery after NUS completion...");
-	extern int ble_dis_discover(struct bt_conn *conn);
-	int dis_err = ble_dis_discover(ble_central_get_default_conn());
-	if (dis_err != 0) {
-		LOG_ERR("DIS discovery failed (err %d)", dis_err);
-		/* If DIS fails, mark as connected anyway */
+	/* Check if we have cached firmware version from previous connection */
+	extern bool ble_dis_has_cached_firmware(void);
+	if (ble_dis_has_cached_firmware()) {
+		/* Fast path: We have cached device info, can report CONNECTED immediately */
+		LOG_INF("HID and NUS complete with cached firmware - reporting CONNECTED immediately");
 		ble_central_mark_services_ready();
 		fully_connected = true;
 		extern void buzzer_connected(void);
 		buzzer_connected();
+
+		/* Still start DIS discovery in background to refresh cached data */
+		LOG_INF("Starting DIS discovery in background to refresh cached firmware info...");
+		extern int ble_dis_discover(struct bt_conn *conn);
+		ble_dis_discover(ble_central_get_default_conn());
+		/* DIS completion won't re-trigger buzzer since fully_connected is already true */
 	} else {
-		LOG_INF("DIS discovery started successfully - will mark CONNECTED when firmware is retrieved");
+		/* Slow path: No cached firmware, must wait for DIS before marking CONNECTED */
+		LOG_INF("HID and NUS discovery complete - waiting for DIS firmware before marking CONNECTED");
+
+		/* Now start DIS discovery after NUS is complete */
+		LOG_INF("Starting DIS (Device Information Service) discovery after NUS completion...");
+		extern int ble_dis_discover(struct bt_conn *conn);
+		int dis_err = ble_dis_discover(ble_central_get_default_conn());
+		if (dis_err != 0) {
+			LOG_ERR("DIS discovery failed (err %d)", dis_err);
+			/* If DIS fails, mark as connected anyway */
+			ble_central_mark_services_ready();
+			fully_connected = true;
+			extern void buzzer_connected(void);
+			buzzer_connected();
+		} else {
+			LOG_INF("DIS discovery started successfully - will mark CONNECTED when firmware is retrieved");
+		}
+		/* DIS completion callback will mark services ready and trigger BAS discovery */
 	}
-	/* DIS completion callback will mark services ready and trigger BAS discovery */
 }
 
 /* BLE Transport initialization */
@@ -391,16 +408,22 @@ static void dis_discovery_complete_cb(struct bt_conn *conn)
 {
 	LOG_INF("DIS discovery completed - HID, NUS, and DIS (firmware) are ready");
 
-	/* Now mark services as ready - all critical services (HID, NUS, DIS) are complete */
-	LOG_INF("Marking services ready and reporting CONNECTED");
-	ble_central_mark_services_ready();
+	/* Only mark services ready and play buzzer if not already done (slow path) */
+	if (!fully_connected) {
+		/* Slow path: NUS didn't have cached firmware, so DIS completion triggers CONNECTED */
+		LOG_INF("Marking services ready and reporting CONNECTED (slow path - no cached firmware)");
+		ble_central_mark_services_ready();
 
-	/* Mark as fully connected - eligible for disconnect sound */
-	fully_connected = true;
+		/* Mark as fully connected - eligible for disconnect sound */
+		fully_connected = true;
 
-	/* Play happy connection sound - full bridge is now operational with firmware info! */
-	extern void buzzer_connected(void);
-	buzzer_connected();
+		/* Play happy connection sound - full bridge is now operational with firmware info! */
+		extern void buzzer_connected(void);
+		buzzer_connected();
+	} else {
+		/* Fast path: Already marked connected when NUS completed, just refreshing DIS data */
+		LOG_INF("DIS discovery complete (background refresh - already CONNECTED via cached firmware)");
+	}
 
 	/* Start BAS discovery after DIS (runs in background, not critical for CONNECTED state) */
 	LOG_INF("Starting BAS (Battery Service) discovery...");

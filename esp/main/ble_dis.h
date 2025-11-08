@@ -98,6 +98,16 @@ const ble_device_info_t* ble_device_info_get_current(void);
 void ble_device_info_print(const ble_device_info_t *device_info);
 
 /**
+ * @brief Check if we have cached device info with firmware version
+ *
+ * This is used to determine if we can report Connected state early
+ * (when NUS is ready) or if we need to wait for DIS to retrieve firmware version.
+ *
+ * @return true if cached device info exists with valid firmware version
+ */
+bool ble_device_info_has_cached_firmware(void);
+
+/**
  * @brief Clear saved device info from NVS (call when bonds are cleared)
  *
  * @return esp_err_t ESP_OK on success
