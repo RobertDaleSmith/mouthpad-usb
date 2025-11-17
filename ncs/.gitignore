@@ -1,55 +1,6 @@
-# Nordic Connect SDK / Zephyr West workspace
-# These directories are downloaded by 'west init' and 'west update'
-.west/
-nrf/
-zephyr/
-zephyrproject/
-nrfxlib/
-modules/
-bootloader/
-tools/
-test/
+# Twister test output
+twister-out/
+twister-out.*/
 
 # Build artifacts
 build/
-build-*/
-*.elf
-*.bin
-*.uf2
-*.map
-*.lst
-*.o
-*.a
-*.so
-*.d
-*.d.ts
-
-# West config backup
-.west.backup/
-
-# Zephyr generated files
-**/zephyr/include/generated/
-include/generated/
-
-# CMake generated files
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-compile_commands.json
-*.cmake
-!CMakeLists.txt
-.ninja_deps
-.ninja_log
-build.ninja
-
-# Partition manager
-pm_config.h
-pm_config.c
-
-# Kconfig generated
-Kconfig.dts
-Kconfig.modules
-
-# Generated headers
-nrf_connect_sdk_version.txt
-nrf_connect_sdk_version.h
