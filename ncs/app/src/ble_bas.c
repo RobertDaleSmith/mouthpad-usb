@@ -21,7 +21,13 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 /* Battery Service client instance */
 static struct bt_bas_client bas;
 static bool bas_ready = false;
+
+/* Allow tests to access battery level for unit testing */
+#ifdef CONFIG_ZTEST
+uint8_t current_battery_level = 0xFF; /* Invalid/unknown initially */
+#else
 static uint8_t current_battery_level = 0xFF; /* Invalid/unknown initially */
+#endif
 
 /* Battery Service callbacks following Nordic central_bas pattern */
 static void battery_notify_cb(struct bt_bas_client *bas, uint8_t battery_level);

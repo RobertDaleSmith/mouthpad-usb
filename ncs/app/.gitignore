@@ -1,0 +1,9 @@
+# Twister test output
+twister-out/
+twister-out.*/
+
+# Build artifacts
+build/
+
+# Test binaries
+**/test_*_native

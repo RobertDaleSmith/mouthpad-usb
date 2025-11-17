@@ -1,0 +1,7 @@
+tests:
+  app.unit.ble_bas.color_discrete:
+    type: unit
+    tags: ble battery discrete
+  app.unit.ble_bas.color_gradient:
+    type: unit
+    tags: ble battery gradient
