@@ -49,14 +49,7 @@ static int64_t additional_scan_start_time = 0;
 #define ADDITIONAL_SCAN_TIMEOUT_MS 10000  /* 10 second timeout for additional scan */
 
 /* Multi-bond device tracking */
-#define MAX_BONDED_DEVICES 4  /* Support up to 4 bonded MouthPads */
-
-struct bonded_device {
-	bt_addr_le_t addr;
-	char name[32];
-	uint32_t last_seen;  /* Timestamp for prioritizing reconnection */
-	bool is_valid;       /* Slot is occupied */
-};
+/* MAX_BONDED_DEVICES and struct bonded_device are defined in ble_central.h */
 
 static struct bonded_device bonded_devices[MAX_BONDED_DEVICES];
 static uint8_t bonded_device_count = 0;
@@ -131,6 +124,9 @@ static void stop_background_scan(void);
 
 /* Forward declaration for no_match callback */
 static void scan_no_match(struct bt_scan_device_info *device_info, bool connectable);
+
+/* Forward declaration for additional scan timeout check */
+static void check_additional_scan_timeout(void);
 
 /* Scan callbacks structure */
 BT_SCAN_CB_INIT(scan_cb, scan_filter_match, scan_no_match,
@@ -510,7 +506,6 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 /* Settings handlers for persisting bonded device name */
 static int bonded_name_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
 {
-	const char *next;
 	int rc;
 	int bond_idx;
 	char temp_buf[64];
@@ -660,32 +655,6 @@ static void check_bonded_device(const struct bt_bond_info *info, void *user_data
 	k_mutex_unlock(&bonded_devices_mutex);
 }
 
-/* Address filter helper function */
-static void try_add_address_filter(const struct bt_bond_info *info, void *user_data)
-{
-	int err;
-	char addr[BT_ADDR_LE_STR_LEN];
-	uint8_t *filter_mode = user_data;
-
-	bt_addr_le_to_str(&info->addr, addr, sizeof(addr));
-
-	struct bt_conn *conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &info->addr);
-
-	if (conn) {
-		bt_conn_unref(conn);
-		return;
-	}
-
-	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_ADDR, &info->addr);
-	if (err) {
-		LOG_ERR("Address filter cannot be added (err %d): %s", err, addr);
-		return;
-	}
-
-	LOG_INF("Address filter added: %s", addr);
-	*filter_mode |= BT_SCAN_ADDR_FILTER;
-}
-
 /* Helper structure for UUID search */
 struct uuid_search_context {
 	bool found;
@@ -800,6 +769,12 @@ int ble_central_init(void)
 	}
 	LOG_INF("Authorization info callbacks registered");
 
+	/* Initialize bonded devices array to zero */
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+	memset(bonded_devices, 0, sizeof(bonded_devices));
+	bonded_device_count = 0;
+	k_mutex_unlock(&bonded_devices_mutex);
+
 	/* Check if we have any bonded devices on startup */
 	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
 	LOG_INF("Found %d bonded device(s) at startup", bonded_device_count);
@@ -830,7 +805,6 @@ int ble_central_init(void)
 int ble_central_start_scan(void)
 {
 	int err;
-	uint8_t filter_mode = 0;
 
 	/* Don't start scanning if we're currently connecting - let the connection complete */
 	if (connection_state == BLE_CENTRAL_STATE_CONNECTING) {
