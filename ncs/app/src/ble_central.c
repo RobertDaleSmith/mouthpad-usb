@@ -505,25 +505,56 @@ static int bonded_name_set(const char *name, size_t len, settings_read_cb read_c
 {
 	const char *next;
 	int rc;
+	int bond_idx;
+	char temp_buf[64];
 
 	LOG_INF("Settings callback: name='%s', len=%d", name, len);
 
-	if (settings_name_steq(name, "bonded_name", &next) && !next) {
-		/* This is the "bonded_name" setting */
-		if (len > sizeof(bonded_device_name)) {
-			LOG_ERR("Bonded name too long: %d bytes", len);
+	/* Parse bond_X/name or bond_X/addr patterns */
+	if (sscanf(name, "bond_%d", &bond_idx) == 1) {
+		if (bond_idx < 0 || bond_idx >= MAX_BONDED_DEVICES) {
+			LOG_WRN("Invalid bond index in settings: %d", bond_idx);
 			return -EINVAL;
 		}
 
-		rc = read_cb(cb_arg, bonded_device_name, len);
-		if (rc >= 0) {
-			bonded_device_name[rc] = '\0';
-			LOG_INF("Loaded bonded device name from settings: '%s'", bonded_device_name);
+		/* Find the subkey (name or addr) */
+		const char *slash = strchr(name, '/');
+		if (!slash) {
+			return -ENOENT;
+		}
+		slash++; /* Skip the '/' */
+
+		if (strcmp(slash, "name") == 0) {
+			/* Load device name */
+			if (len > sizeof(temp_buf) - 1) {
+				LOG_ERR("Bonded name too long: %d bytes", len);
+				return -EINVAL;
+			}
+
+			rc = read_cb(cb_arg, temp_buf, len);
+			if (rc >= 0) {
+				temp_buf[rc] = '\0';
+
+				k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+				if (bonded_devices[bond_idx].is_valid) {
+					strncpy(bonded_devices[bond_idx].name, temp_buf,
+						sizeof(bonded_devices[bond_idx].name) - 1);
+					bonded_devices[bond_idx].name[sizeof(bonded_devices[bond_idx].name) - 1] = '\0';
+					LOG_INF("Loaded bond %d name: '%s'", bond_idx, temp_buf);
+				}
+				k_mutex_unlock(&bonded_devices_mutex);
+				return 0;
+			}
+
+			LOG_ERR("Failed to read bond %d name (err %d)", bond_idx, rc);
+			return rc;
+
+		} else if (strcmp(slash, "addr") == 0) {
+			/* We don't need to load addresses from settings since bt_foreach_bond
+			 * already populates them. Just acknowledge and skip. */
+			LOG_DBG("Skipping bond %d addr (populated by bt_foreach_bond)", bond_idx);
 			return 0;
 		}
-
-		LOG_ERR("Failed to read bonded name from settings (err %d)", rc);
-		return rc;
 	}
 
 	return -ENOENT;
@@ -531,8 +562,31 @@ static int bonded_name_set(const char *name, size_t len, settings_read_cb read_c
 
 static int bonded_name_commit(void)
 {
-	/* Settings have been loaded */
+	/* Settings have been loaded - names are now populated in bonded_devices array */
+	LOG_INF("Settings loaded for %d bonded devices", bonded_device_count);
 	return 0;
+}
+
+/* Save bonded device name to persistent settings */
+static void save_bonded_device_name(int bond_idx, const char *name)
+{
+	if (!IS_ENABLED(CONFIG_SETTINGS)) {
+		return;
+	}
+
+	if (bond_idx < 0 || bond_idx >= MAX_BONDED_DEVICES) {
+		return;
+	}
+
+	char key[32];
+	snprintf(key, sizeof(key), "ble_central/bond_%d/name", bond_idx);
+
+	int err = settings_save_one(key, name, name ? strlen(name) : 0);
+	if (err) {
+		LOG_ERR("Failed to save bond %d name to settings (err %d)", bond_idx, err);
+	} else {
+		LOG_INF("Saved bond %d name to settings: '%s'", bond_idx, name ? name : "");
+	}
 }
 
 /* Helper to check and store bonded device */
@@ -1117,6 +1171,7 @@ int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name)
 			if (name) {
 				strncpy(bonded_devices[i].name, name, sizeof(bonded_devices[i].name) - 1);
 				bonded_devices[i].name[sizeof(bonded_devices[i].name) - 1] = '\0';
+				save_bonded_device_name(i, name);
 			}
 			bonded_devices[i].last_seen = k_uptime_get_32();
 
@@ -1149,6 +1204,11 @@ int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name)
 			bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 			LOG_INF("Added new bonded device %d/%d: %s (%s)",
 				bonded_device_count, MAX_BONDED_DEVICES, addr_str, name ? name : "no name");
+
+			/* Save to persistent settings */
+			if (name) {
+				save_bonded_device_name(i, name);
+			}
 
 			ret = 0;
 			goto unlock;
