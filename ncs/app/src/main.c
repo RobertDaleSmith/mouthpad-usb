@@ -146,8 +146,8 @@ static void button_event_callback(button_event_t event)
 {
 	switch (event) {
 	case BUTTON_EVENT_CLICK:
-		LOG_INF("=== BUTTON CLICK ===");
-		/* TODO: Add click functionality */
+		LOG_INF("=== BUTTON CLICK - STARTING ADDITIONAL SCAN ===");
+		ble_central_start_additional_scan();
 		break;
 		
 	case BUTTON_EVENT_DOUBLE_CLICK:

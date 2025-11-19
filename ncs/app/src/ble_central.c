@@ -247,14 +247,16 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 static void scan_indicator_handler(struct k_work *work)
 {
 	if (connection_state == BLE_CENTRAL_STATE_SCANNING) {
-		if (has_bonded_device) {
-			/* Format address without type suffix like "(random)" */
-			char addr_str[18]; // "XX:XX:XX:XX:XX:XX\0"
-			snprintf(addr_str, sizeof(addr_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-				bonded_device_addr.a.val[5], bonded_device_addr.a.val[4],
-				bonded_device_addr.a.val[3], bonded_device_addr.a.val[2],
-				bonded_device_addr.a.val[1], bonded_device_addr.a.val[0]);
-			LOG_INF("Scanning for MouthPad (%s)...", addr_str);
+		/* Check for additional scan timeout */
+		check_additional_scan_timeout();
+
+		if (scan_mode == SCAN_MODE_ADDITIONAL) {
+			int64_t elapsed = k_uptime_get() - additional_scan_start_time;
+			int remaining = (ADDITIONAL_SCAN_TIMEOUT_MS - elapsed) / 1000;
+			LOG_INF("Scanning for ADDITIONAL MouthPad (%ds remaining, %d bonded)...",
+				remaining, bonded_device_count);
+		} else if (bonded_device_count > 0) {
+			LOG_INF("Scanning for bonded MouthPad (%d bonded)...", bonded_device_count);
 		} else {
 			LOG_INF("Scanning for MouthPad...");
 		}
@@ -303,10 +305,22 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
 
-	/* If we have a bonded device, reject all other devices */
-	if (has_bonded_device) {
-		if (bt_addr_le_cmp(device_info->recv_info->addr, &bonded_device_addr) != 0) {
-			LOG_DBG("Rejecting non-bonded device: %s", addr);
+	/* Check if device is already bonded */
+	bool is_bonded = ble_central_is_device_bonded(device_info->recv_info->addr);
+
+	/* Handle different scan modes */
+	if (scan_mode == SCAN_MODE_ADDITIONAL) {
+		/* ADDITIONAL mode: Only connect to NEW devices (not already bonded) */
+		if (is_bonded) {
+			LOG_DBG("ADDITIONAL scan: Skipping already-bonded device: %s", addr);
+			return;
+		}
+		LOG_INF("ADDITIONAL scan: Found NEW device: %s", addr);
+	} else {
+		/* NORMAL mode: Prioritize bonded devices */
+		if (bonded_device_count > 0 && !is_bonded) {
+			LOG_DBG("NORMAL scan: Skipping non-bonded device (have %d bonds): %s",
+				bonded_device_count, addr);
 			return;
 		}
 	}
@@ -460,33 +474,26 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 
 	LOG_INF("Pairing completed: %s, bonded: %d", addr, bonded);
 
-	/* If bonded, store this as our bonded device */
+	/* If bonded, add to bonded devices list */
 	if (bonded) {
-		bt_addr_le_copy(&bonded_device_addr, bt_conn_get_dst(conn));
-		has_bonded_device = true;
-
-		/* Cache the device name from transport layer */
+		/* Get device name from transport layer */
 		extern const char *ble_transport_get_device_name(void);
 		const char *device_name = ble_transport_get_device_name();
-		if (device_name && device_name[0] != '\0') {
-			strncpy(bonded_device_name, device_name, sizeof(bonded_device_name) - 1);
-			bonded_device_name[sizeof(bonded_device_name) - 1] = '\0';
-			LOG_INF("Device bonded - cached name: '%s', address: %s", bonded_device_name, addr);
 
-			/* Save device name to persistent settings */
-			if (IS_ENABLED(CONFIG_SETTINGS)) {
-				int err = settings_save_one("ble_central/bonded_name", bonded_device_name, strlen(bonded_device_name));
-				if (err) {
-					LOG_ERR("Failed to save bonded device name to settings (err %d)", err);
-				} else {
-					LOG_INF("Saved bonded device name to persistent storage");
-				}
-			}
+		/* Add to bonded devices (this also saves to settings) */
+		int err = ble_central_add_bonded_device(bt_conn_get_dst(conn), device_name);
+		if (err == 0) {
+			LOG_INF("Device bonded and added to list - name: '%s', address: %s",
+				device_name ? device_name : "(no name)", addr);
 		} else {
-			bonded_device_name[0] = '\0';
-			LOG_INF("Device bonded - no name available, address: %s", addr);
+			LOG_ERR("Failed to add bonded device to list (err %d)", err);
 		}
-		LOG_INF("Will only reconnect to this MouthPad");
+
+		/* Switch back to NORMAL scan mode if we were in ADDITIONAL mode */
+		if (scan_mode == SCAN_MODE_ADDITIONAL) {
+			LOG_INF("New bond complete - switching back to NORMAL scan mode");
+			scan_mode = SCAN_MODE_NORMAL;
+		}
 	}
 }
 
@@ -747,13 +754,6 @@ int ble_central_init(void)
 	}
 	LOG_INF("Bluetooth initialized successfully");
 
-	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		LOG_INF("Loading settings...");
-		settings_load();
-		LOG_INF("Settings loaded - bonded_device_name='%s'",
-			bonded_device_name[0] ? bonded_device_name : "(empty)");
-	}
-
 	/* Register authentication callbacks */
 	err = bt_conn_auth_cb_register(&conn_auth_callbacks);
 	if (err) {
@@ -770,12 +770,14 @@ int ble_central_init(void)
 	LOG_INF("Authorization info callbacks registered");
 
 	/* Check if we have any bonded devices on startup */
-	has_bonded_device = false;
 	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
-	if (has_bonded_device) {
-		char addr[BT_ADDR_LE_STR_LEN];
-		bt_addr_le_to_str(&bonded_device_addr, addr, sizeof(addr));
-		LOG_INF("Found existing bond at startup: %s", addr);
+	LOG_INF("Found %d bonded device(s) at startup", bonded_device_count);
+
+	/* Load device names from settings */
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		LOG_INF("Loading settings...");
+		settings_load();
+		LOG_INF("Settings loaded for %d bonded devices", bonded_device_count);
 	}
 
 	/* Initialize scan without auto-connect so we can verify both HID+NUS before connecting */
@@ -819,10 +821,6 @@ int ble_central_start_scan(void)
 
 	bt_scan_filter_remove_all();
 
-	/* Check if we have a bonded device */
-	has_bonded_device = false;
-	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
-
 	/* Add UUID filters for both HID and NUS services (MouthPad has both) */
 	err = bt_scan_filter_add(BT_SCAN_FILTER_TYPE_UUID, BT_UUID_HIDS);
 	if (err) {
@@ -836,25 +834,20 @@ int ble_central_start_scan(void)
 		return err;
 	}
 
-	/* If we have a bonded device, only scan for that specific address */
-	if (has_bonded_device) {
-		bt_foreach_bond(BT_ID_DEFAULT, try_add_address_filter, &filter_mode);
-	}
-
-	/* Always enable UUID filter, optionally add address filters */
-	uint8_t enable_filters = BT_SCAN_UUID_FILTER;
-	if (filter_mode != 0) {
-		enable_filters |= filter_mode;
-		char addr[BT_ADDR_LE_STR_LEN];
-		bt_addr_le_to_str(&bonded_device_addr, addr, sizeof(addr));
-		LOG_INF("Enabling HID+NUS UUID + address filter for bonded device: %s", addr);
+	/* Enable UUID filters - bond checking happens in scan_filter_match */
+	if (scan_mode == SCAN_MODE_ADDITIONAL) {
+		LOG_INF("Enabling HID+NUS UUID filter in ADDITIONAL scan mode (%d bonded, looking for NEW device)",
+			bonded_device_count);
+	} else if (bonded_device_count > 0) {
+		LOG_INF("Enabling HID+NUS UUID filter in NORMAL scan mode (%d bonded devices)",
+			bonded_device_count);
 	} else {
 		LOG_INF("Enabling HID+NUS UUID filter (no bonded devices - will pair with first MouthPad found)");
 	}
 
 	/* Enable filters with match_all=false (OR logic) so we get callbacks for devices with HID or NUS
 	 * We'll manually verify both UUIDs are present in scan_filter_match callback */
-	err = bt_scan_filter_enable(enable_filters, false);
+	err = bt_scan_filter_enable(BT_SCAN_UUID_FILTER, false);
 	if (err) {
 		LOG_ERR("Filters cannot be turned on (err %d)", err);
 		return err;
@@ -902,6 +895,47 @@ int ble_central_start_scan(void)
 int ble_central_stop_scan(void)
 {
 	return bt_scan_stop();
+}
+
+/* Start additional scan mode - scan for NEW devices (not already bonded) */
+int ble_central_start_additional_scan(void)
+{
+	LOG_INF("Starting ADDITIONAL scan mode (scan for NEW device, ignore %d bonded)", bonded_device_count);
+
+	/* Disconnect current connection if any (but keep the bond!) */
+	if (default_conn) {
+		LOG_INF("Disconnecting current connection to search for additional device");
+		int err = bt_conn_disconnect(default_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		if (err && err != -ENOTCONN) {
+			LOG_ERR("Failed to disconnect (err %d)", err);
+		}
+	}
+
+	/* Switch to ADDITIONAL scan mode */
+	scan_mode = SCAN_MODE_ADDITIONAL;
+	additional_scan_start_time = k_uptime_get();
+
+	/* Start scanning */
+	return ble_central_start_scan();
+}
+
+/* Check and handle additional scan timeout */
+static void check_additional_scan_timeout(void)
+{
+	if (scan_mode != SCAN_MODE_ADDITIONAL) {
+		return;
+	}
+
+	int64_t elapsed = k_uptime_get() - additional_scan_start_time;
+	if (elapsed > ADDITIONAL_SCAN_TIMEOUT_MS) {
+		LOG_INF("ADDITIONAL scan timeout (%lld ms) - resuming NORMAL scan mode", elapsed);
+		scan_mode = SCAN_MODE_NORMAL;
+
+		/* Restart scan in NORMAL mode */
+		if (connection_state == BLE_CENTRAL_STATE_SCANNING) {
+			ble_central_start_scan();
+		}
+	}
 }
 
 struct bt_conn *ble_central_get_default_conn(void)

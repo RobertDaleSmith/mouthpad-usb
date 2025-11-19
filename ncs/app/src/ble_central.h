@@ -17,6 +17,7 @@
 int ble_central_init(void);
 int ble_central_start_scan(void);
 int ble_central_stop_scan(void);
+int ble_central_start_additional_scan(void);  /* Scan for NEW device (ignore already bonded) */
 
 /* Connection management */
 struct bt_conn *ble_central_get_default_conn(void);
