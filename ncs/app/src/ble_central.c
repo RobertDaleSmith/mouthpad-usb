@@ -38,10 +38,29 @@ static struct k_work scan_work;
 static struct k_work_delayable scan_indicator_work;
 static enum ble_central_state connection_state = BLE_CENTRAL_STATE_DISCONNECTED;
 
-/* Bonded device tracking */
-static bt_addr_le_t bonded_device_addr;
-static bool has_bonded_device = false;
-static char bonded_device_name[32] = {0};  /* Cached device name for bonded device */
+/* Scanning mode for multi-bond support */
+typedef enum {
+	SCAN_MODE_NORMAL,      /* Connect to any bonded device */
+	SCAN_MODE_ADDITIONAL,  /* Only connect to NEW devices (not already bonded) */
+} ble_scan_mode_t;
+
+static ble_scan_mode_t scan_mode = SCAN_MODE_NORMAL;
+static int64_t additional_scan_start_time = 0;
+#define ADDITIONAL_SCAN_TIMEOUT_MS 10000  /* 10 second timeout for additional scan */
+
+/* Multi-bond device tracking */
+#define MAX_BONDED_DEVICES 4  /* Support up to 4 bonded MouthPads */
+
+struct bonded_device {
+	bt_addr_le_t addr;
+	char name[32];
+	uint32_t last_seen;  /* Timestamp for prioritizing reconnection */
+	bool is_valid;       /* Slot is occupied */
+};
+
+static struct bonded_device bonded_devices[MAX_BONDED_DEVICES];
+static uint8_t bonded_device_count = 0;
+static K_MUTEX_DEFINE(bonded_devices_mutex);
 
 /* Device UUID tracking - to verify both HID and NUS across multiple packets */
 struct device_uuid_state {
@@ -519,13 +538,34 @@ static int bonded_name_commit(void)
 /* Helper to check and store bonded device */
 static void check_bonded_device(const struct bt_bond_info *info, void *user_data)
 {
-	/* Store the bonded device address (there should only be one with MAX_PAIRED=1) */
-	bt_addr_le_copy(&bonded_device_addr, &info->addr);
-	has_bonded_device = true;
-
 	char addr[BT_ADDR_LE_STR_LEN];
 	bt_addr_le_to_str(&info->addr, addr, sizeof(addr));
-	LOG_INF("Found bonded device: %s", addr);
+
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+
+	/* Find empty slot or existing entry */
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (!bonded_devices[i].is_valid) {
+			/* Empty slot - add new bond */
+			bt_addr_le_copy(&bonded_devices[i].addr, &info->addr);
+			bonded_devices[i].is_valid = true;
+			bonded_devices[i].last_seen = k_uptime_get_32();
+			bonded_devices[i].name[0] = '\0';  /* Will be loaded from settings */
+			bonded_device_count++;
+			LOG_INF("Found bonded device %d/%d: %s", bonded_device_count, MAX_BONDED_DEVICES, addr);
+			break;
+		} else if (bt_addr_le_eq(&bonded_devices[i].addr, &info->addr)) {
+			/* Already in list */
+			LOG_DBG("Bonded device already tracked: %s", addr);
+			break;
+		}
+	}
+
+	if (bonded_device_count >= MAX_BONDED_DEVICES) {
+		LOG_WRN("Maximum bonded devices (%d) reached", MAX_BONDED_DEVICES);
+	}
+
+	k_mutex_unlock(&bonded_devices_mutex);
 }
 
 /* Address filter helper function */
@@ -1042,62 +1082,210 @@ static void scan_no_match(struct bt_scan_device_info *device_info, bool connecta
 	}
 }
 
-/* Clear bonded device tracking (called when bonds are cleared) */
-void ble_central_clear_bonded_device(void)
+/* ==== Multi-Bond Management Functions ==== */
+
+/* Check if a device is already bonded */
+bool ble_central_is_device_bonded(const bt_addr_le_t *addr)
 {
-	if (has_bonded_device) {
-		char addr_str[18];
-		snprintf(addr_str, sizeof(addr_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-			bonded_device_addr.a.val[5], bonded_device_addr.a.val[4],
-			bonded_device_addr.a.val[3], bonded_device_addr.a.val[2],
-			bonded_device_addr.a.val[1], bonded_device_addr.a.val[0]);
-		LOG_INF("Clearing bonded device tracking: %s (name: '%s')", addr_str,
-			bonded_device_name[0] ? bonded_device_name : "(none)");
-	}
+	bool found = false;
 
-	has_bonded_device = false;
-	memset(&bonded_device_addr, 0, sizeof(bonded_device_addr));
-	memset(bonded_device_name, 0, sizeof(bonded_device_name));
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
 
-	/* Delete saved device name from persistent settings */
-	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		int err = settings_delete("ble_central/bonded_name");
-		if (err) {
-			LOG_ERR("Failed to delete bonded device name from settings (err %d)", err);
-		} else {
-			LOG_INF("Deleted bonded device name from persistent storage");
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (bonded_devices[i].is_valid && bt_addr_le_eq(&bonded_devices[i].addr, addr)) {
+			found = true;
+			break;
 		}
 	}
 
-	LOG_INF("Bonded device tracking cleared - will pair with any MouthPad");
+	k_mutex_unlock(&bonded_devices_mutex);
+
+	return found;
 }
 
-/* Get bonded device address and name if one exists */
+/* Add a device to the bonded list (called during pairing) */
+int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name)
+{
+	int ret = -ENOMEM;
+
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+
+	/* Check if already bonded */
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (bonded_devices[i].is_valid && bt_addr_le_eq(&bonded_devices[i].addr, addr)) {
+			/* Already bonded - update name and timestamp */
+			if (name) {
+				strncpy(bonded_devices[i].name, name, sizeof(bonded_devices[i].name) - 1);
+				bonded_devices[i].name[sizeof(bonded_devices[i].name) - 1] = '\0';
+			}
+			bonded_devices[i].last_seen = k_uptime_get_32();
+
+			char addr_str[BT_ADDR_LE_STR_LEN];
+			bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+			LOG_INF("Updated existing bonded device: %s (%s)", addr_str, name ? name : "no name");
+
+			ret = 0;
+			goto unlock;
+		}
+	}
+
+	/* Find empty slot */
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (!bonded_devices[i].is_valid) {
+			bt_addr_le_copy(&bonded_devices[i].addr, addr);
+			bonded_devices[i].is_valid = true;
+			bonded_devices[i].last_seen = k_uptime_get_32();
+
+			if (name) {
+				strncpy(bonded_devices[i].name, name, sizeof(bonded_devices[i].name) - 1);
+				bonded_devices[i].name[sizeof(bonded_devices[i].name) - 1] = '\0';
+			} else {
+				bonded_devices[i].name[0] = '\0';
+			}
+
+			bonded_device_count++;
+
+			char addr_str[BT_ADDR_LE_STR_LEN];
+			bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+			LOG_INF("Added new bonded device %d/%d: %s (%s)",
+				bonded_device_count, MAX_BONDED_DEVICES, addr_str, name ? name : "no name");
+
+			ret = 0;
+			goto unlock;
+		}
+	}
+
+	LOG_WRN("Cannot add bonded device - maximum reached (%d)", MAX_BONDED_DEVICES);
+
+unlock:
+	k_mutex_unlock(&bonded_devices_mutex);
+	return ret;
+}
+
+/* Remove a specific device from the bonded list */
+int ble_central_remove_bonded_device(const bt_addr_le_t *addr)
+{
+	int ret = -ENOENT;
+
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (bonded_devices[i].is_valid && bt_addr_le_eq(&bonded_devices[i].addr, addr)) {
+			char addr_str[BT_ADDR_LE_STR_LEN];
+			bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+			LOG_INF("Removing bonded device: %s (%s)", addr_str, bonded_devices[i].name);
+
+			bonded_devices[i].is_valid = false;
+			memset(&bonded_devices[i].addr, 0, sizeof(bonded_devices[i].addr));
+			bonded_devices[i].name[0] = '\0';
+			bonded_devices[i].last_seen = 0;
+			bonded_device_count--;
+
+			ret = 0;
+			break;
+		}
+	}
+
+	k_mutex_unlock(&bonded_devices_mutex);
+
+	return ret;
+}
+
+/* Get all bonded devices (for app query) */
+int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_count)
+{
+	int count = 0;
+
+	if (!out_list || max_count == 0) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+
+	for (int i = 0; i < MAX_BONDED_DEVICES && count < max_count; i++) {
+		if (bonded_devices[i].is_valid) {
+			memcpy(&out_list[count], &bonded_devices[i], sizeof(struct bonded_device));
+			count++;
+		}
+	}
+
+	k_mutex_unlock(&bonded_devices_mutex);
+
+	return count;
+}
+
+/* Clear ALL bonded device tracking (called when bonds are cleared) */
+void ble_central_clear_bonded_device(void)
+{
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+
+	LOG_INF("Clearing all bonded device tracking (%d devices)", bonded_device_count);
+
+	/* Log each bonded device being cleared */
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (bonded_devices[i].is_valid) {
+			char addr_str[BT_ADDR_LE_STR_LEN];
+			bt_addr_le_to_str(&bonded_devices[i].addr, addr_str, sizeof(addr_str));
+			LOG_INF("Clearing bond: %s (%s)", addr_str, bonded_devices[i].name);
+		}
+	}
+
+	/* Clear all bonds */
+	memset(bonded_devices, 0, sizeof(bonded_devices));
+	bonded_device_count = 0;
+
+	k_mutex_unlock(&bonded_devices_mutex);
+
+	/* Delete saved device names from persistent settings */
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+			char key[32];
+			snprintf(key, sizeof(key), "ble_central/bond_%d/name", i);
+			settings_delete(key);
+
+			snprintf(key, sizeof(key), "ble_central/bond_%d/addr", i);
+			settings_delete(key);
+		}
+		LOG_INF("Deleted all bonded device names from persistent storage");
+	}
+
+	LOG_INF("All bonded device tracking cleared - will pair with any MouthPad");
+}
+
+/* Get bonded device address and name if one exists (returns first bonded device for backwards compatibility) */
 bool ble_central_get_bonded_device_addr(bt_addr_le_t *out_addr, char *out_name, size_t name_size)
 {
 	if (!out_addr) {
 		return false;
 	}
 
-	if (has_bonded_device) {
-		bt_addr_le_copy(out_addr, &bonded_device_addr);
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
 
-		/* Copy cached device name if requested */
-		if (out_name && name_size > 0) {
-			if (bonded_device_name[0] != '\0') {
-				strncpy(out_name, bonded_device_name, name_size - 1);
-				out_name[name_size - 1] = '\0';
-				LOG_INF("Returning bonded device with name: '%s'", out_name);
-			} else {
-				out_name[0] = '\0';
-				LOG_INF("Returning bonded device with NO cached name");
+	/* Find first valid bonded device */
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (bonded_devices[i].is_valid) {
+			bt_addr_le_copy(out_addr, &bonded_devices[i].addr);
+
+			/* Copy cached device name if requested */
+			if (out_name && name_size > 0) {
+				if (bonded_devices[i].name[0] != '\0') {
+					strncpy(out_name, bonded_devices[i].name, name_size - 1);
+					out_name[name_size - 1] = '\0';
+					LOG_INF("Returning bonded device with name: '%s'", out_name);
+				} else {
+					out_name[0] = '\0';
+					LOG_INF("Returning bonded device with NO cached name");
+				}
 			}
-		}
 
-		return true;
+			k_mutex_unlock(&bonded_devices_mutex);
+			return true;
+		}
 	}
 
-	LOG_INF("No bonded device found");
+	k_mutex_unlock(&bonded_devices_mutex);
+
+	LOG_INF("No bonded devices found");
 	return false;
 }
 
