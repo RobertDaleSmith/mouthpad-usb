@@ -567,10 +567,41 @@ static int bonded_name_set(const char *name, size_t len, settings_read_cb read_c
 	return -ENOENT;
 }
 
+/* Display all bonded devices with names and addresses */
+static void display_bonded_devices(void)
+{
+	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+
+	if (bonded_device_count == 0) {
+		LOG_INF("No bonded devices");
+	} else {
+		LOG_INF("=== Bonded Devices (%d/%d) ===", bonded_device_count, MAX_BONDED_DEVICES);
+		for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+			if (bonded_devices[i].is_valid) {
+				char addr_str[BT_ADDR_LE_STR_LEN];
+				bt_addr_le_to_str(&bonded_devices[i].addr, addr_str, sizeof(addr_str));
+
+				if (bonded_devices[i].name[0] != '\0') {
+					LOG_INF("  [%d] %s - %s", i, bonded_devices[i].name, addr_str);
+				} else {
+					LOG_INF("  [%d] (no name) - %s", i, addr_str);
+				}
+			}
+		}
+		LOG_INF("===========================");
+	}
+
+	k_mutex_unlock(&bonded_devices_mutex);
+}
+
 static int bonded_name_commit(void)
 {
 	/* Settings have been loaded - names are now populated in bonded_devices array */
 	LOG_INF("Settings loaded for %d bonded devices", bonded_device_count);
+
+	/* Display all bonded devices */
+	display_bonded_devices();
+
 	return 0;
 }
 

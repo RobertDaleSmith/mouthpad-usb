@@ -132,6 +132,43 @@ static int cmd_version(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Display bonded devices */
+static int cmd_bonds(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	struct bonded_device bonds[MAX_BONDED_DEVICES];
+	int count = ble_central_get_bonded_devices(bonds, MAX_BONDED_DEVICES);
+
+	if (count < 0) {
+		shell_error(sh, "Failed to get bonded devices (err %d)", count);
+		return count;
+	}
+
+	if (count == 0) {
+		shell_print(sh, "No bonded devices");
+	} else {
+		shell_print(sh, "=== Bonded Devices (%d/%d) ===", count, MAX_BONDED_DEVICES);
+		for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+			if (bonds[i].is_valid) {
+				char addr_str[BT_ADDR_LE_STR_LEN];
+				bt_addr_le_to_str(&bonds[i].addr, addr_str, sizeof(addr_str));
+
+				if (bonds[i].name[0] != '\0') {
+					shell_print(sh, "  [%d] %s - %s", i, bonds[i].name, addr_str);
+				} else {
+					shell_print(sh, "  [%d] (no name) - %s", i, addr_str);
+				}
+			}
+		}
+		shell_print(sh, "===========================");
+	}
+
+	return 0;
+}
+
+SHELL_CMD_REGISTER(bonds, NULL, "Display bonded devices", cmd_bonds);
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
 SHELL_CMD_REGISTER(reset, NULL, "Reset stored BLE bonds", cmd_reset);
 SHELL_CMD_REGISTER(restart, NULL, "Restart firmware", cmd_restart);
