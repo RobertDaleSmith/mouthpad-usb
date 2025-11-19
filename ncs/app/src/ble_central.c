@@ -1299,6 +1299,9 @@ int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_co
 		return -EINVAL;
 	}
 
+	/* Zero the output array to prevent garbage data in unused slots */
+	memset(out_list, 0, max_count * sizeof(struct bonded_device));
+
 	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
 
 	for (int i = 0; i < MAX_BONDED_DEVICES && count < max_count; i++) {
