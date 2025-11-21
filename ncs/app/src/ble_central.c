@@ -573,10 +573,45 @@ static int bonded_name_set(const char *name, size_t len, settings_read_cb read_c
 			return rc;
 
 		} else if (strcmp(slash, "addr") == 0) {
-			/* We don't need to load addresses from settings since bt_foreach_bond
-			 * already populates them. Just acknowledge and skip. */
-			LOG_DBG("Skipping bond %d addr (populated by bt_foreach_bond)", bond_idx);
-			return 0;
+			/* Load device address from settings */
+			bt_addr_le_t addr;
+			if (len != sizeof(bt_addr_le_t)) {
+				LOG_ERR("Invalid address size: %d bytes", len);
+				return -EINVAL;
+			}
+
+			rc = read_cb(cb_arg, &addr, len);
+			if (rc >= 0) {
+				k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
+				/* Check if this address is already loaded */
+				bool already_loaded = false;
+				for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+					if (bonded_devices[i].is_valid &&
+					    bt_addr_le_eq(&bonded_devices[i].addr, &addr)) {
+						already_loaded = true;
+						break;
+					}
+				}
+
+				if (!already_loaded && !bonded_devices[bond_idx].is_valid) {
+					/* Load into this slot */
+					bt_addr_le_copy(&bonded_devices[bond_idx].addr, &addr);
+					bonded_devices[bond_idx].is_valid = true;
+					bonded_devices[bond_idx].last_seen = 0;
+					bonded_devices[bond_idx].name[0] = '\0';
+					bonded_device_count++;
+
+					char addr_str[BT_ADDR_LE_STR_LEN];
+					bt_addr_le_to_str(&addr, addr_str, sizeof(addr_str));
+					LOG_INF("Loaded bond %d address from settings: %s (count now %d)",
+						bond_idx, addr_str, bonded_device_count);
+				}
+				k_mutex_unlock(&bonded_devices_mutex);
+				return 0;
+			}
+
+			LOG_ERR("Failed to read bond %d address (err %d)", bond_idx, rc);
+			return rc;
 		}
 	}
 
@@ -619,6 +654,30 @@ static int bonded_name_commit(void)
 	display_bonded_devices();
 
 	return 0;
+}
+
+/* Save bonded device address to persistent settings */
+static void save_bonded_device_addr(int bond_idx, const bt_addr_le_t *addr)
+{
+	if (!IS_ENABLED(CONFIG_SETTINGS)) {
+		return;
+	}
+
+	if (bond_idx < 0 || bond_idx >= MAX_BONDED_DEVICES) {
+		return;
+	}
+
+	char key[32];
+	snprintf(key, sizeof(key), "ble_central/bond_%d/addr", bond_idx);
+
+	int err = settings_save_one(key, addr, sizeof(bt_addr_le_t));
+	if (err) {
+		LOG_ERR("Failed to save bond %d address to settings (err %d)", bond_idx, err);
+	} else {
+		char addr_str[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+		LOG_DBG("Saved bond %d address to settings: %s", bond_idx, addr_str);
+	}
 }
 
 /* Save bonded device name to persistent settings */
@@ -1236,6 +1295,9 @@ int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name)
 			}
 			bonded_devices[i].last_seen = k_uptime_get_32();
 
+			/* Save address to ensure it persists across reboots */
+			save_bonded_device_addr(i, addr);
+
 			char addr_str[BT_ADDR_LE_STR_LEN];
 			bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 			LOG_INF("Updated existing bonded device: %s (%s)", addr_str, name ? name : "no name");
@@ -1267,6 +1329,7 @@ int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name)
 				bonded_device_count, MAX_BONDED_DEVICES, addr_str, name ? name : "no name");
 
 			/* Save to persistent settings */
+			save_bonded_device_addr(i, addr);
 			if (name) {
 				save_bonded_device_name(i, name);
 			}
