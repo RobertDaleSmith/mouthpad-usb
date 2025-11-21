@@ -79,7 +79,23 @@ void ble_dis_reset(void);
 const ble_dis_info_t *ble_dis_get_info(void);
 
 /**
- * @brief Clear saved device information from persistent storage
+ * @brief Load device information for a specific bonded device address
+ *
+ * @param addr BLE address of the bonded device
+ * @param out_info Output structure to fill with device info
+ * @return 0 on success, negative error code if not found or on failure
+ */
+int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_info);
+
+/**
+ * @brief Clear saved device information for a specific address
+ *
+ * @param addr BLE address of the device to clear
+ */
+void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr);
+
+/**
+ * @brief Clear all saved device information from persistent storage
  *
  * This should be called when bonds are cleared to remove cached DIS info.
  */

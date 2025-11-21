@@ -64,51 +64,66 @@ static struct bt_gatt_dm_cb dis_discovery_cb = {
 };
 
 /* Settings storage for persistent DIS info across power cycles */
-#define SETTINGS_DIS_INFO_KEY "ble_dis/info"
+/* Build settings key for a specific device address */
+static void build_dis_settings_key(const bt_addr_le_t *addr, char *key_buf, size_t buf_size)
+{
+	/* Convert address to hex string for use in settings key */
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 
-static int save_dis_info_to_settings(void)
+	/* Replace colons and spaces with underscores for settings key */
+	for (int i = 0; addr_str[i]; i++) {
+		if (addr_str[i] == ':' || addr_str[i] == ' ') {
+			addr_str[i] = '_';
+		}
+	}
+
+	snprintf(key_buf, buf_size, "ble_dis/%s/info", addr_str);
+}
+
+static int save_dis_info_to_settings(const bt_addr_le_t *addr)
 {
 	if (!IS_ENABLED(CONFIG_SETTINGS)) {
 		return 0;
 	}
 
-	LOG_INF("Saving DIS info: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+	if (!addr) {
+		LOG_ERR("Cannot save DIS info: no address provided");
+		return -EINVAL;
+	}
+
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
+
+	LOG_INF("Saving DIS info for device: has_fw=%d, fw='%s', has_name=%d, name='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
 		device_info.has_firmware_version, device_info.firmware_version,
+		device_info.has_device_name, device_info.device_name,
 		device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
 
-	int err = settings_save_one(SETTINGS_DIS_INFO_KEY, &device_info, sizeof(ble_dis_info_t));
+	int err = settings_save_one(key, &device_info, sizeof(ble_dis_info_t));
 	if (err) {
 		LOG_ERR("Failed to save DIS info to settings (err %d)", err);
 		return err;
 	}
 
-	LOG_INF("Saved DIS info to persistent storage successfully");
+	LOG_INF("Saved DIS info to persistent storage: %s", key);
 	return 0;
 }
 
 static int settings_set_cb(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
 {
-	const char *next;
+	LOG_DBG("DIS settings_set_cb called: name='%s', len=%d", name, len);
 
-	LOG_INF("DIS settings_set_cb called: name='%s', len=%d", name, len);
-
-	if (settings_name_steq(name, "info", &next) && !next) {
-		if (len != sizeof(ble_dis_info_t)) {
-			LOG_WRN("DIS info settings size mismatch: expected %d, got %d",
-				sizeof(ble_dis_info_t), len);
-			return -EINVAL;
+	/* Settings are now per-device (ble_dis/<addr>/info), loaded on-demand */
+	/* Just acknowledge all DIS settings without loading them globally */
+	if (len == sizeof(ble_dis_info_t)) {
+		/* Valid DIS info size, consume it but don't load globally */
+		ble_dis_info_t temp_info;
+		ssize_t bytes_read = read_cb(cb_arg, &temp_info, sizeof(ble_dis_info_t));
+		if (bytes_read == sizeof(ble_dis_info_t)) {
+			LOG_DBG("Found DIS info in settings: %s", name);
+			return 0;
 		}
-
-		ssize_t bytes_read = read_cb(cb_arg, &device_info, sizeof(ble_dis_info_t));
-		if (bytes_read != sizeof(ble_dis_info_t)) {
-			LOG_ERR("Failed to read DIS info from settings");
-			return -EIO;
-		}
-
-		LOG_INF("Loaded DIS info from persistent storage: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
-			device_info.has_firmware_version, device_info.firmware_version,
-			device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
-		return 0;
 	}
 
 	return -ENOENT;
@@ -192,22 +207,61 @@ const ble_dis_info_t *ble_dis_get_info(void)
 	return NULL;
 }
 
+int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_info)
+{
+	if (!addr || !out_info) {
+		return -EINVAL;
+	}
+
+	if (!IS_ENABLED(CONFIG_SETTINGS)) {
+		return -ENOTSUP;
+	}
+
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
+
+	/* Use settings_runtime_get to load the data directly */
+	int err = settings_runtime_get(key, out_info, sizeof(ble_dis_info_t));
+	if (err <= 0) {
+		LOG_DBG("No DIS info found for device (key: %s, err: %d)", key, err);
+		return -ENOENT;
+	}
+
+	if (out_info->has_device_name) {
+		LOG_DBG("Loaded DIS info for device: name='%s'", out_info->device_name);
+	}
+
+	return 0;
+}
+
+void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr)
+{
+	if (!addr || !IS_ENABLED(CONFIG_SETTINGS)) {
+		return;
+	}
+
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
+
+	LOG_INF("Clearing DIS info for device: %s", key);
+
+	int err = settings_delete(key);
+	if (err && err != -ENOENT) {
+		LOG_ERR("Failed to delete DIS info (err %d)", err);
+	} else {
+		LOG_DBG("Cleared DIS info from storage");
+	}
+}
+
 void ble_dis_clear_saved(void)
 {
-	LOG_INF("Clearing saved DIS info");
+	LOG_INF("Clearing all saved DIS info");
 
 	/* Clear in-memory cache */
 	memset(&device_info, 0, sizeof(device_info));
 
-	/* Clear from persistent storage */
-	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		int err = settings_delete(SETTINGS_DIS_INFO_KEY);
-		if (err && err != -ENOENT) {
-			LOG_ERR("Failed to delete DIS info from settings (err %d)", err);
-		} else {
-			LOG_INF("Cleared DIS info from persistent storage");
-		}
-	}
+	/* Note: Per-device DIS info in settings will be cleaned up when bonds are cleared */
+	/* This function now just clears the global cache */
 }
 
 bool ble_dis_has_cached_firmware(void)
@@ -337,7 +391,9 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 		LOG_INF("Device Information Service ready (device name unavailable)");
 
 		/* Save DIS info even if device name failed - we have firmware/PnP ID */
-		save_dis_info_to_settings();
+		if (current_conn) {
+			save_dis_info_to_settings(bt_conn_get_dst(current_conn));
+		}
 
 		/* Trigger discovery complete callback */
 		if (discovery_complete_cb && current_conn) {
@@ -353,7 +409,9 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 		LOG_INF("Device Information Service ready");
 
 		/* Save DIS info to persistent storage now that discovery is complete */
-		save_dis_info_to_settings();
+		if (current_conn) {
+			save_dis_info_to_settings(bt_conn_get_dst(current_conn));
+		}
 
 		/* Trigger discovery complete callback */
 		if (discovery_complete_cb && current_conn) {

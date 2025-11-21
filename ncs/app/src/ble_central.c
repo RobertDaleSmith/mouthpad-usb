@@ -6,6 +6,7 @@
  */
 
 #include "ble_central.h"
+#include "ble_dis.h"
 #include <zephyr/kernel.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -707,6 +708,13 @@ static void check_bonded_device(const struct bt_bond_info *info, void *user_data
 	char addr[BT_ADDR_LE_STR_LEN];
 	bt_addr_le_to_str(&info->addr, addr, sizeof(addr));
 
+	/* Load DIS info for this bonded device to get the name */
+	ble_dis_info_t dis_info;
+	memset(&dis_info, 0, sizeof(dis_info));
+
+	extern int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_info);
+	int err = ble_dis_load_info_for_addr(&info->addr, &dis_info);
+
 	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
 
 	/* Find empty slot or existing entry */
@@ -716,9 +724,21 @@ static void check_bonded_device(const struct bt_bond_info *info, void *user_data
 			bt_addr_le_copy(&bonded_devices[i].addr, &info->addr);
 			bonded_devices[i].is_valid = true;
 			bonded_devices[i].last_seen = k_uptime_get_32();
-			bonded_devices[i].name[0] = '\0';  /* Will be loaded from settings */
+
+			/* Get device name from DIS info if available */
+			if (err == 0 && dis_info.has_device_name) {
+				strncpy(bonded_devices[i].name, dis_info.device_name,
+					sizeof(bonded_devices[i].name) - 1);
+				bonded_devices[i].name[sizeof(bonded_devices[i].name) - 1] = '\0';
+				LOG_INF("Found bonded device %d/%d: %s (%s)", bonded_device_count + 1,
+					MAX_BONDED_DEVICES, addr, bonded_devices[i].name);
+			} else {
+				bonded_devices[i].name[0] = '\0';
+				LOG_INF("Found bonded device %d/%d: %s (no name)", bonded_device_count + 1,
+					MAX_BONDED_DEVICES, addr);
+			}
+
 			bonded_device_count++;
-			LOG_INF("Found bonded device %d/%d: %s", bonded_device_count, MAX_BONDED_DEVICES, addr);
 			break;
 		} else if (bt_addr_le_eq(&bonded_devices[i].addr, &info->addr)) {
 			/* Already in list */
