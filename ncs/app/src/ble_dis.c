@@ -214,10 +214,10 @@ int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_inf
 	char key[64];
 	build_dis_settings_key(addr, key, sizeof(key));
 
-	/* Use settings_runtime_get to load the data directly */
-	int err = settings_runtime_get(key, out_info, sizeof(ble_dis_info_t));
-	if (err <= 0) {
-		LOG_DBG("No DIS info found for device (key: %s, err: %d)", key, err);
+	/* Use settings_load_one to load the data directly */
+	ssize_t len = settings_load_one(key, out_info, sizeof(ble_dis_info_t));
+	if (len <= 0) {
+		LOG_DBG("No DIS info found for device (key: %s, len: %d)", key, (int)len);
 		return -ENOENT;
 	}
 

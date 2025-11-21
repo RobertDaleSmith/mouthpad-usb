@@ -559,26 +559,42 @@ int main(void)
 									response.message_body.device_info_response.name.arg = (void *)device_name;
 								}
 
-								/* Get device info from DIS client (may be cached from previous connection) */
-								const ble_dis_info_t *info = ble_dis_get_info();
-								if (info) {
-									LOG_INF("DIS info available: has_fw=%d, has_pnp=%d",
-										info->has_firmware_version, info->has_pnp_id);
+								/* Get device info from DIS client for the specific device
+								 * Prefer connected device, fallback to first bonded device */
+								static ble_dis_info_t dis_info_buf;
+								const bt_addr_le_t *target_addr = NULL;
+
+								if (conn) {
+									/* Get DIS info for currently connected device */
+									target_addr = bt_conn_get_dst(conn);
+								} else if (has_bonded) {
+									/* Get DIS info for first bonded device */
+									target_addr = &bonded_addr;
+								}
+
+								int dis_err = -ENOENT;
+								if (target_addr) {
+									dis_err = ble_dis_load_info_for_addr(target_addr, &dis_info_buf);
+								}
+
+								if (dis_err == 0) {
+									LOG_INF("DIS info loaded: has_fw=%d, has_pnp=%d",
+										dis_info_buf.has_firmware_version, dis_info_buf.has_pnp_id);
 									/* Firmware version */
-									if (info->has_firmware_version) {
-										LOG_INF("DIS firmware: %s", info->firmware_version);
+									if (dis_info_buf.has_firmware_version) {
+										LOG_INF("DIS firmware: %s", dis_info_buf.firmware_version);
 										response.message_body.device_info_response.firmware.funcs.encode = encode_string_callback;
-										response.message_body.device_info_response.firmware.arg = (void *)info->firmware_version;
+										response.message_body.device_info_response.firmware.arg = (void *)dis_info_buf.firmware_version;
 									}
 									/* VID and PID from PnP ID */
-									if (info->has_pnp_id) {
+									if (dis_info_buf.has_pnp_id) {
 										LOG_INF("DIS PnP ID: VID=0x%04X, PID=0x%04X",
-											info->vendor_id, info->product_id);
-										response.message_body.device_info_response.vid = info->vendor_id;
-										response.message_body.device_info_response.pid = info->product_id;
+											dis_info_buf.vendor_id, dis_info_buf.product_id);
+										response.message_body.device_info_response.vid = dis_info_buf.vendor_id;
+										response.message_body.device_info_response.pid = dis_info_buf.product_id;
 									}
 								} else {
-									LOG_WRN("DIS info not available (ble_dis_get_info returned NULL)");
+									LOG_WRN("DIS info not available for device (err: %d)", dis_err);
 								}
 
 								/* Device family and board (always available) */
