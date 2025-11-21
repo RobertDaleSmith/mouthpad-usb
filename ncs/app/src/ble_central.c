@@ -559,12 +559,11 @@ static int bonded_name_set(const char *name, size_t len, settings_read_cb read_c
 				temp_buf[rc] = '\0';
 
 				k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
-				if (bonded_devices[bond_idx].is_valid) {
-					strncpy(bonded_devices[bond_idx].name, temp_buf,
-						sizeof(bonded_devices[bond_idx].name) - 1);
-					bonded_devices[bond_idx].name[sizeof(bonded_devices[bond_idx].name) - 1] = '\0';
-					LOG_INF("Loaded bond %d name: '%s'", bond_idx, temp_buf);
-				}
+				/* Load name regardless of is_valid (address might load after name) */
+				strncpy(bonded_devices[bond_idx].name, temp_buf,
+					sizeof(bonded_devices[bond_idx].name) - 1);
+				bonded_devices[bond_idx].name[sizeof(bonded_devices[bond_idx].name) - 1] = '\0';
+				LOG_INF("Loaded bond %d name: '%s'", bond_idx, temp_buf);
 				k_mutex_unlock(&bonded_devices_mutex);
 				return 0;
 			}
