@@ -37,6 +37,8 @@ static void clear_ble_pairings(void)
 	if (ble_transport_is_connected()) {
 		LOG_INF("Disconnecting current BLE connection before clearing bonds...");
 		ble_transport_disconnect();
+		/* Wait for disconnect to complete before clearing bonds */
+		k_sleep(K_MSEC(500));
 	}
 
 	ble_transport_clear_bonds();
@@ -183,15 +185,15 @@ static void button_event_callback(button_event_t event)
 {
 	switch (event) {
 	case BUTTON_EVENT_CLICK:
-		LOG_INF("=== BUTTON CLICK - STARTING ADDITIONAL SCAN ===");
-		ble_central_start_additional_scan();
+		LOG_INF("=== BUTTON CLICK ===");
+		/* Reserved for future functionality */
 		break;
-		
+
 	case BUTTON_EVENT_DOUBLE_CLICK:
 		LOG_INF("=== BUTTON DOUBLE CLICK ===");
-		/* TODO: Add double-click functionality */
+		/* Reserved for future functionality */
 		break;
-		
+
 	case BUTTON_EVENT_HOLD:
 		LOG_INF("=== BUTTON HOLD - CLEARING BLE BONDS ===");
 		/* Clear BLE bonds and reset for new pairing */

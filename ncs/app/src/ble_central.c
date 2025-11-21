@@ -1357,6 +1357,9 @@ void ble_central_clear_bonded_device(void)
 
 	k_mutex_unlock(&bonded_devices_mutex);
 
+	/* Reset scan mode to NORMAL (in case it was in ADDITIONAL mode) */
+	scan_mode = SCAN_MODE_NORMAL;
+
 	/* Delete saved device names from persistent settings */
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
@@ -1366,6 +1369,9 @@ void ble_central_clear_bonded_device(void)
 
 			snprintf(key, sizeof(key), "ble_central/bond_%d/addr", i);
 			settings_delete(key);
+
+			/* Yield to prevent blocking too long during flash operations */
+			k_yield();
 		}
 		LOG_INF("Deleted all bonded device names from persistent storage");
 	}
