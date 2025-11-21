@@ -67,18 +67,12 @@ static struct bt_gatt_dm_cb dis_discovery_cb = {
 /* Build settings key for a specific device address */
 static void build_dis_settings_key(const bt_addr_le_t *addr, char *key_buf, size_t buf_size)
 {
-	/* Convert address to hex string for use in settings key */
-	char addr_str[BT_ADDR_LE_STR_LEN];
-	bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-
-	/* Replace colons and spaces with underscores for settings key */
-	for (int i = 0; addr_str[i]; i++) {
-		if (addr_str[i] == ':' || addr_str[i] == ' ') {
-			addr_str[i] = '_';
-		}
-	}
-
-	snprintf(key_buf, buf_size, "ble_dis/%s/info", addr_str);
+	/* Create clean hex string from address bytes + type for settings key */
+	/* Format: "ble_dis/<6 hex bytes><type>/info" e.g., "ble_dis/F01A5F522A3E_1/info" */
+	snprintf(key_buf, buf_size, "ble_dis/%02X%02X%02X%02X%02X%02X_%d/info",
+		 addr->a.val[5], addr->a.val[4], addr->a.val[3],
+		 addr->a.val[2], addr->a.val[1], addr->a.val[0],
+		 addr->type);
 }
 
 static int save_dis_info_to_settings(const bt_addr_le_t *addr)
