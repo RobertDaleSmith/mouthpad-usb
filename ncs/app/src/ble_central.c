@@ -775,16 +775,15 @@ int ble_central_init(void)
 	bonded_device_count = 0;
 	k_mutex_unlock(&bonded_devices_mutex);
 
-	/* Check if we have any bonded devices on startup */
-	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
-	LOG_INF("Found %d bonded device(s) at startup", bonded_device_count);
-
-	/* Load device names from settings */
+	/* Load settings BEFORE enumerating bonds (fixes bond restoration after reboot) */
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		LOG_INF("Loading settings...");
 		settings_load();
-		LOG_INF("Settings loaded for %d bonded devices", bonded_device_count);
 	}
+
+	/* Check if we have any bonded devices (AFTER settings loaded) */
+	bt_foreach_bond(BT_ID_DEFAULT, check_bonded_device, NULL);
+	LOG_INF("Found %d bonded device(s) at startup", bonded_device_count);
 
 	/* Initialize scan without auto-connect so we can verify both HID+NUS before connecting */
 	struct bt_scan_init_param scan_init = {
