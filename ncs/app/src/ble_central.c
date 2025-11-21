@@ -165,12 +165,15 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 		connection_state = BLE_CENTRAL_STATE_DISCONNECTED;
 		LOG_INF("*** STATE SET TO DISCONNECTED (connection failed) ***");
 
+		/* Clean up connection reference if it was stored */
 		if (default_conn == conn) {
 			bt_conn_unref(default_conn);
 			default_conn = NULL;
-
-			(void)k_work_submit(&scan_work);
 		}
+
+		/* Always restart scanning after connection failure */
+		LOG_INF("Restarting scan after connection failure");
+		(void)k_work_submit(&scan_work);
 
 		return;
 	}
