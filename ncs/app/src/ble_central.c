@@ -48,6 +48,9 @@ static ble_scan_mode_t scan_mode = SCAN_MODE_NORMAL;
 static int64_t additional_scan_start_time = 0;
 #define ADDITIONAL_SCAN_TIMEOUT_MS 10000  /* 10 second timeout for additional scan */
 
+/* Track if any bonded devices are advertising in current scan session */
+static bool bonded_device_seen_advertising = false;
+
 /* Multi-bond device tracking */
 /* MAX_BONDED_DEVICES and struct bonded_device are defined in ble_central.h */
 
@@ -252,7 +255,13 @@ static void scan_indicator_handler(struct k_work *work)
 			LOG_INF("Scanning for ADDITIONAL MouthPad (%ds remaining, %d bonded)...",
 				remaining, bonded_device_count);
 		} else if (bonded_device_count > 0) {
-			LOG_INF("Scanning for bonded MouthPad (%d bonded)...", bonded_device_count);
+			if (bonded_device_seen_advertising) {
+				LOG_INF("Scanning for bonded MouthPad (%d bonded, bonded device found)...",
+					bonded_device_count);
+			} else {
+				LOG_INF("Scanning for MouthPad (prefer bonded, %d bonded)...",
+					bonded_device_count);
+			}
 		} else {
 			LOG_INF("Scanning for MouthPad...");
 		}
@@ -313,11 +322,20 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		}
 		LOG_INF("ADDITIONAL scan: Found NEW device: %s", addr);
 	} else {
-		/* NORMAL mode: Prioritize bonded devices */
-		if (bonded_device_count > 0 && !is_bonded) {
-			LOG_DBG("NORMAL scan: Skipping non-bonded device (have %d bonds): %s",
-				bonded_device_count, addr);
-			return;
+		/* NORMAL mode: Always prefer bonded, but accept unbonded if no bonded devices advertising */
+		if (is_bonded) {
+			/* Mark that we've seen a bonded device advertising */
+			bonded_device_seen_advertising = true;
+			LOG_DBG("NORMAL scan: Found bonded device: %s", addr);
+		} else if (bonded_device_count > 0) {
+			/* We have bonds but this device isn't bonded */
+			if (bonded_device_seen_advertising) {
+				/* We've seen bonded devices advertising - skip unbonded */
+				LOG_DBG("NORMAL scan: Skipping non-bonded device (bonded devices available): %s", addr);
+				return;
+			}
+			/* No bonded devices seen advertising - accept unbonded as fallback */
+			LOG_INF("NORMAL scan: No bonded devices found - accepting unbonded device: %s", addr);
 		}
 	}
 
@@ -843,7 +861,9 @@ int ble_central_start_scan(void)
 		LOG_INF("Enabling HID+NUS UUID filter in ADDITIONAL scan mode (%d bonded, looking for NEW device)",
 			bonded_device_count);
 	} else if (bonded_device_count > 0) {
-		LOG_INF("Enabling HID+NUS UUID filter in NORMAL scan mode (%d bonded devices)",
+		/* Reset bonded device advertising flag for new scan session */
+		bonded_device_seen_advertising = false;
+		LOG_INF("Enabling HID+NUS UUID filter in NORMAL scan mode (%d bonded devices, prefer bonded)",
 			bonded_device_count);
 	} else {
 		LOG_INF("Enabling HID+NUS UUID filter (no bonded devices - will pair with first MouthPad found)");
