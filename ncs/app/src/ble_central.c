@@ -1361,7 +1361,68 @@ int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name)
 		}
 	}
 
-	LOG_WRN("Cannot add bonded device - maximum reached (%d)", MAX_BONDED_DEVICES);
+	/* No empty slot - find and remove oldest bonded device */
+	LOG_WRN("Maximum bonded devices reached (%d) - removing oldest", MAX_BONDED_DEVICES);
+
+	int oldest_idx = -1;
+	uint32_t oldest_time = UINT32_MAX;
+
+	for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+		if (bonded_devices[i].is_valid && bonded_devices[i].last_seen < oldest_time) {
+			oldest_time = bonded_devices[i].last_seen;
+			oldest_idx = i;
+		}
+	}
+
+	if (oldest_idx >= 0) {
+		char old_addr_str[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(&bonded_devices[oldest_idx].addr, old_addr_str, sizeof(old_addr_str));
+		LOG_INF("Removing oldest bonded device [%d]: %s (%s)",
+			oldest_idx, old_addr_str,
+			bonded_devices[oldest_idx].name[0] ? bonded_devices[oldest_idx].name : "no name");
+
+		/* Clear DIS info for the device being removed */
+		extern void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr);
+		ble_dis_clear_saved_for_addr(&bonded_devices[oldest_idx].addr);
+
+		/* Unbond from BT stack */
+		int err = bt_unpair(BT_ID_DEFAULT, &bonded_devices[oldest_idx].addr);
+		if (err) {
+			LOG_ERR("Failed to unpair device (err %d)", err);
+		}
+
+		/* Clear settings for this slot */
+		char key[32];
+		snprintf(key, sizeof(key), "ble_central/bond_%d/name", oldest_idx);
+		settings_delete(key);
+		snprintf(key, sizeof(key), "ble_central/bond_%d/addr", oldest_idx);
+		settings_delete(key);
+
+		/* Replace with new device */
+		bt_addr_le_copy(&bonded_devices[oldest_idx].addr, addr);
+		bonded_devices[oldest_idx].is_valid = true;
+		bonded_devices[oldest_idx].last_seen = k_uptime_get_32();
+
+		if (name) {
+			strncpy(bonded_devices[oldest_idx].name, name, sizeof(bonded_devices[oldest_idx].name) - 1);
+			bonded_devices[oldest_idx].name[sizeof(bonded_devices[oldest_idx].name) - 1] = '\0';
+		} else {
+			bonded_devices[oldest_idx].name[0] = '\0';
+		}
+
+		char new_addr_str[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(addr, new_addr_str, sizeof(new_addr_str));
+		LOG_INF("Replaced with new bonded device [%d]: %s (%s)",
+			oldest_idx, new_addr_str, name ? name : "no name");
+
+		/* Save to persistent settings */
+		save_bonded_device_addr(oldest_idx, addr);
+		if (name) {
+			save_bonded_device_name(oldest_idx, name);
+		}
+
+		ret = 0;
+	}
 
 unlock:
 	k_mutex_unlock(&bonded_devices_mutex);
