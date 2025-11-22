@@ -714,6 +714,9 @@ static void check_bonded_device(const struct bt_bond_info *info, void *user_data
 
 	extern int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_info);
 	int err = ble_dis_load_info_for_addr(&info->addr, &dis_info);
+	if (err != 0) {
+		LOG_WRN("Failed to load DIS info for %s (err: %d)", addr, err);
+	}
 
 	k_mutex_lock(&bonded_devices_mutex, K_FOREVER);
 
