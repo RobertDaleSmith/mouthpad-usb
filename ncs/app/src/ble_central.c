@@ -598,7 +598,7 @@ static int bonded_name_set(const char *name, size_t len, settings_read_cb read_c
 					bt_addr_le_copy(&bonded_devices[bond_idx].addr, &addr);
 					bonded_devices[bond_idx].is_valid = true;
 					bonded_devices[bond_idx].last_seen = 0;
-					bonded_devices[bond_idx].name[0] = '\0';
+					/* Don't clear name - it may have already been loaded from settings */
 					bonded_device_count++;
 
 					char addr_str[BT_ADDR_LE_STR_LEN];
