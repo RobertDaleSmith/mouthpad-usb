@@ -1442,6 +1442,20 @@ int ble_central_remove_bonded_device(const bt_addr_le_t *addr)
 			bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 			LOG_INF("Removing bonded device: %s (%s)", addr_str, bonded_devices[i].name);
 
+			/* Clear DIS info for the device being removed */
+			extern void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr);
+			ble_dis_clear_saved_for_addr(addr);
+
+			/* Clear settings for this slot */
+			if (IS_ENABLED(CONFIG_SETTINGS)) {
+				char key[32];
+				snprintf(key, sizeof(key), "ble_central/bond_%d/name", i);
+				settings_delete(key);
+				snprintf(key, sizeof(key), "ble_central/bond_%d/addr", i);
+				settings_delete(key);
+			}
+
+			/* Clear in-memory data */
 			bonded_devices[i].is_valid = false;
 			memset(&bonded_devices[i].addr, 0, sizeof(bonded_devices[i].addr));
 			bonded_devices[i].name[0] = '\0';
