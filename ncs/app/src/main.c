@@ -170,7 +170,22 @@ static int cmd_bonds(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Clear cached firmware versions */
+static int cmd_clear_fw_cache(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Clearing cached firmware versions for all bonds...");
+	extern void ble_dis_clear_all_cached_firmware(void);
+	ble_dis_clear_all_cached_firmware();
+	shell_print(sh, "Done. Firmware versions will be re-read on next connection.");
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(bonds, NULL, "Display bonded devices", cmd_bonds);
+SHELL_CMD_REGISTER(clearfwcache, NULL, "Clear cached firmware versions", cmd_clear_fw_cache);
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
 SHELL_CMD_REGISTER(reset, NULL, "Reset stored BLE bonds", cmd_reset);
 SHELL_CMD_REGISTER(restart, NULL, "Restart firmware", cmd_restart);

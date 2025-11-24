@@ -258,6 +258,64 @@ void ble_dis_clear_saved(void)
 	/* This function now just clears the global cache */
 }
 
+void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr)
+{
+	if (!addr || !IS_ENABLED(CONFIG_SETTINGS)) {
+		return;
+	}
+
+	/* Load existing DIS info */
+	ble_dis_info_t dis_info;
+	int err = ble_dis_load_info_for_addr(addr, &dis_info);
+
+	if (err != 0) {
+		LOG_DBG("No cached DIS info to clear firmware from");
+		return;
+	}
+
+	/* Clear only the firmware version field */
+	dis_info.has_firmware_version = false;
+	dis_info.firmware_version[0] = '\0';
+
+	/* Save back to storage */
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
+
+	err = settings_save_one(key, &dis_info, sizeof(ble_dis_info_t));
+	if (err) {
+		LOG_ERR("Failed to save DIS info after clearing firmware (err %d)", err);
+	} else {
+		char addr_str[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+		LOG_INF("Cleared cached firmware version for device: %s", addr_str);
+	}
+}
+
+void ble_dis_clear_all_cached_firmware(void)
+{
+	LOG_INF("Clearing cached firmware version for all bonded devices");
+
+	/* Get list of bonded devices from ble_central */
+	extern int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_count);
+
+	struct bonded_device bonds[4]; /* MAX_BONDED_DEVICES */
+	int count = ble_central_get_bonded_devices(bonds, 4);
+
+	if (count <= 0) {
+		LOG_DBG("No bonded devices to clear firmware from");
+		return;
+	}
+
+	/* Clear firmware version for each bonded device */
+	for (int i = 0; i < count; i++) {
+		if (bonds[i].is_valid) {
+			ble_dis_clear_cached_firmware_for_addr(&bonds[i].addr);
+		}
+	}
+
+	LOG_INF("Cleared cached firmware for %d device(s)", count);
+}
+
 bool ble_dis_has_cached_firmware(void)
 {
 	/* Check if device_info has valid firmware version
