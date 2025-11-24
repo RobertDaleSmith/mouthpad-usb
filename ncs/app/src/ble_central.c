@@ -667,7 +667,7 @@ static void save_bonded_device_addr(int bond_idx, const bt_addr_le_t *addr)
 		return;
 	}
 
-	char key[32];
+	char key[64];
 	snprintf(key, sizeof(key), "ble_central/bond_%d/addr", bond_idx);
 
 	int err = settings_save_one(key, addr, sizeof(bt_addr_le_t));
@@ -691,7 +691,7 @@ static void save_bonded_device_name(int bond_idx, const char *name)
 		return;
 	}
 
-	char key[32];
+	char key[64];
 	snprintf(key, sizeof(key), "ble_central/bond_%d/name", bond_idx);
 
 	int err = settings_save_one(key, name, name ? strlen(name) : 0);
@@ -1392,7 +1392,7 @@ int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name)
 		}
 
 		/* Clear settings for this slot */
-		char key[32];
+		char key[64];
 		snprintf(key, sizeof(key), "ble_central/bond_%d/name", oldest_idx);
 		settings_delete(key);
 		snprintf(key, sizeof(key), "ble_central/bond_%d/addr", oldest_idx);
@@ -1448,7 +1448,7 @@ int ble_central_remove_bonded_device(const bt_addr_le_t *addr)
 
 			/* Clear settings for this slot */
 			if (IS_ENABLED(CONFIG_SETTINGS)) {
-				char key[32];
+				char key[64];
 				snprintf(key, sizeof(key), "ble_central/bond_%d/name", i);
 				settings_delete(key);
 				snprintf(key, sizeof(key), "ble_central/bond_%d/addr", i);
@@ -1526,7 +1526,7 @@ void ble_central_clear_bonded_device(void)
 	/* Delete saved device names from persistent settings */
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
-			char key[32];
+			char key[64];
 			snprintf(key, sizeof(key), "ble_central/bond_%d/name", i);
 			settings_delete(key);
 
