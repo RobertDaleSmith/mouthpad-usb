@@ -31,10 +31,19 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #define BT_UUID_DIS_MFR_NAME BT_UUID_DECLARE_16(BT_UUID_DIS_MFR_NAME_VAL)
 
 /* Device Information client state */
-static ble_dis_info_t device_info;
+static ble_dis_info_t device_info;  /* Active device's DIS info */
 static bool dis_ready = false;
 static struct bt_conn *current_conn = NULL;
 static struct bt_gatt_read_params read_params;
+
+/* In-memory cache for all bonded devices' DIS info (loaded from flash at boot) */
+#define MAX_DIS_CACHE_ENTRIES 4
+struct dis_cache_entry {
+	bt_addr_le_t addr;
+	ble_dis_info_t info;
+	bool valid;
+};
+static struct dis_cache_entry dis_cache[MAX_DIS_CACHE_ENTRIES];
 
 /* Characteristic handles */
 static uint16_t fw_rev_handle = 0;
@@ -101,6 +110,32 @@ static int save_dis_info_to_settings(const bt_addr_le_t *addr)
 	}
 
 	LOG_INF("Saved DIS info to persistent storage: %s", key);
+
+	/* Also update in-memory cache */
+	bool found = false;
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
+			/* Update existing entry */
+			memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
+			LOG_DBG("Updated in-memory cache entry %d", i);
+			found = true;
+			break;
+		}
+	}
+
+	/* If not found, add new entry */
+	if (!found) {
+		for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+			if (!dis_cache[i].valid) {
+				memcpy(&dis_cache[i].addr, addr, sizeof(bt_addr_le_t));
+				memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
+				dis_cache[i].valid = true;
+				LOG_INF("Added new in-memory cache entry %d", i);
+				break;
+			}
+		}
+	}
+
 	return 0;
 }
 
@@ -108,14 +143,28 @@ static int settings_set_cb(const char *name, size_t len, settings_read_cb read_c
 {
 	LOG_DBG("DIS settings_set_cb called: name='%s', len=%d", name, len);
 
-	/* Settings are now per-device (ble_dis/<addr>/info), loaded on-demand */
-	/* Just acknowledge all DIS settings without loading them globally */
+	/* Settings are per-device: ble_dis/<addr>/info */
+	/* Load all cached DIS info into memory at boot */
 	if (len == sizeof(ble_dis_info_t)) {
-		/* Valid DIS info size, consume it but don't load globally */
 		ble_dis_info_t temp_info;
 		ssize_t bytes_read = read_cb(cb_arg, &temp_info, sizeof(ble_dis_info_t));
 		if (bytes_read == sizeof(ble_dis_info_t)) {
-			LOG_DBG("Found DIS info in settings: %s", name);
+			/* Parse address from key format: "<addr>/info" */
+			bt_addr_le_t addr;
+			if (bt_addr_le_from_str(name, "RPA", &addr) == 0 ||
+			    bt_addr_le_from_str(name, "random", &addr) == 0 ||
+			    bt_addr_le_from_str(name, "public", &addr) == 0) {
+				/* Find empty slot in cache */
+				for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+					if (!dis_cache[i].valid) {
+						memcpy(&dis_cache[i].addr, &addr, sizeof(bt_addr_le_t));
+						memcpy(&dis_cache[i].info, &temp_info, sizeof(ble_dis_info_t));
+						dis_cache[i].valid = true;
+						LOG_INF("Loaded DIS cache entry %d from flash: has_fw=%d", i, temp_info.has_firmware_version);
+						break;
+					}
+				}
+			}
 			return 0;
 		}
 	}
@@ -277,7 +326,7 @@ void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr)
 	dis_info.has_firmware_version = false;
 	dis_info.firmware_version[0] = '\0';
 
-	/* Save back to storage */
+	/* Save back to flash storage */
 	char key[64];
 	build_dis_settings_key(addr, key, sizeof(key));
 
@@ -287,7 +336,17 @@ void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr)
 	} else {
 		char addr_str[BT_ADDR_LE_STR_LEN];
 		bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-		LOG_INF("Cleared cached firmware version for device: %s", addr_str);
+		LOG_INF("Cleared cached firmware version in flash for device: %s", addr_str);
+	}
+
+	/* Also clear from in-memory cache */
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
+			dis_cache[i].info.has_firmware_version = false;
+			dis_cache[i].info.firmware_version[0] = '\0';
+			LOG_INF("Cleared cached firmware version in memory cache entry %d", i);
+			break;
+		}
 	}
 }
 
@@ -316,12 +375,39 @@ void ble_dis_clear_all_cached_firmware(void)
 	LOG_INF("Cleared cached firmware for %d device(s)", count);
 }
 
+/* Load cached DIS from in-memory cache into device_info for the connected device */
+static void load_cache_for_addr(const bt_addr_le_t *addr)
+{
+	if (!addr) {
+		/* No address - clear device_info */
+		memset(&device_info, 0, sizeof(device_info));
+		return;
+	}
+
+	/* Search for this address in the cache */
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
+			/* Found cached info for this device */
+			memcpy(&device_info, &dis_cache[i].info, sizeof(ble_dis_info_t));
+			LOG_INF("Loaded cached DIS from memory: has_fw=%d, fw='%s'",
+				device_info.has_firmware_version, device_info.firmware_version);
+			return;
+		}
+	}
+
+	/* No cache found - clear device_info */
+	memset(&device_info, 0, sizeof(device_info));
+	LOG_DBG("No cached DIS found in memory for this device");
+}
+
+void ble_dis_load_cache_for_connected_device(const bt_addr_le_t *addr)
+{
+	load_cache_for_addr(addr);
+}
+
 bool ble_dis_has_cached_firmware(void)
 {
-	/* Check if device_info has valid firmware version
-	 * This info is loaded from persistent storage on init via settings callback,
-	 * so it persists across reboots
-	 */
+	/* Check if device_info has valid firmware version */
 	return device_info.has_firmware_version && (device_info.firmware_version[0] != '\0');
 }
 
