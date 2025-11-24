@@ -670,6 +670,21 @@ int main(void)
 
 								LOG_INF("Bonds cleared successfully, sending response");
 								usb_cdc_send_proto_message_async(response);
+							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_clear_firmware_cache_write_tag) {
+								/* Handle ClearFirmwareCacheWrite request */
+								LOG_INF("=== CLEAR FIRMWARE CACHE REQUEST (via protobuf) ===");
+
+								/* Clear cached firmware versions for all bonded devices */
+								extern void ble_dis_clear_all_cached_firmware(void);
+								ble_dis_clear_all_cached_firmware();
+
+								/* Send success response */
+								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
+								response.which_message_body = mouthware_message_RelayToAppMessage_clear_firmware_cache_response_tag;
+								response.message_body.clear_firmware_cache_response.success = true;
+
+								LOG_INF("Firmware cache cleared successfully, sending response");
+								usb_cdc_send_proto_message_async(response);
 							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_dfu_write_tag) {
 								/* Handle DfuWrite request - enter bootloader mode */
 								LOG_INF("=== DFU REQUEST (via protobuf) - entering bootloader ===");
