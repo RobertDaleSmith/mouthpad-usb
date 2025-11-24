@@ -17,6 +17,7 @@
 int ble_central_init(void);
 int ble_central_start_scan(void);
 int ble_central_stop_scan(void);
+int ble_central_start_additional_scan(void);  /* Scan for NEW device (ignore already bonded) */
 
 /* Connection management */
 struct bt_conn *ble_central_get_default_conn(void);
@@ -40,10 +41,24 @@ const char *ble_central_get_device_type_string(const struct bt_scan_device_info 
 /* Background scanning for RSSI updates during connections */
 int ble_central_start_background_scan_for_rssi(void);
 
-/* Bonding management */
-void ble_central_clear_bonded_device(void);
+/* Multi-bond support - bonded device structure */
+#define MAX_BONDED_DEVICES 4
 
-/* Get bonded device address and name (returns true if bonded device exists, address/name copied to out params) */
+struct bonded_device {
+	bt_addr_le_t addr;
+	char name[32];
+	uint32_t last_seen;
+	bool is_valid;
+};
+
+/* Multi-bond management functions */
+bool ble_central_is_device_bonded(const bt_addr_le_t *addr);
+int ble_central_add_bonded_device(const bt_addr_le_t *addr, const char *name);
+int ble_central_remove_bonded_device(const bt_addr_le_t *addr);
+int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_count);
+void ble_central_clear_bonded_device(void);  /* Clears ALL bonds */
+
+/* Get bonded device address and name (returns first bonded device for backwards compatibility) */
 bool ble_central_get_bonded_device_addr(bt_addr_le_t *out_addr, char *out_name, size_t name_size);
 
 /* Scanning state query */

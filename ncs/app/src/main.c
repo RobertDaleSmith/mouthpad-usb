@@ -37,6 +37,8 @@ static void clear_ble_pairings(void)
 	if (ble_transport_is_connected()) {
 		LOG_INF("Disconnecting current BLE connection before clearing bonds...");
 		ble_transport_disconnect();
+		/* Wait for disconnect to complete before clearing bonds */
+		k_sleep(K_MSEC(500));
 	}
 
 	ble_transport_clear_bonds();
@@ -132,6 +134,43 @@ static int cmd_version(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Display bonded devices */
+static int cmd_bonds(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	struct bonded_device bonds[MAX_BONDED_DEVICES];
+	int count = ble_central_get_bonded_devices(bonds, MAX_BONDED_DEVICES);
+
+	if (count < 0) {
+		shell_error(sh, "Failed to get bonded devices (err %d)", count);
+		return count;
+	}
+
+	if (count == 0) {
+		shell_print(sh, "No bonded devices");
+	} else {
+		shell_print(sh, "=== Bonded Devices (%d/%d) ===", count, MAX_BONDED_DEVICES);
+		for (int i = 0; i < MAX_BONDED_DEVICES; i++) {
+			if (bonds[i].is_valid) {
+				char addr_str[BT_ADDR_LE_STR_LEN];
+				bt_addr_le_to_str(&bonds[i].addr, addr_str, sizeof(addr_str));
+
+				if (bonds[i].name[0] != '\0') {
+					shell_print(sh, "  [%d] %s - %s", i, bonds[i].name, addr_str);
+				} else {
+					shell_print(sh, "  [%d] (no name) - %s", i, addr_str);
+				}
+			}
+		}
+		shell_print(sh, "===========================");
+	}
+
+	return 0;
+}
+
+SHELL_CMD_REGISTER(bonds, NULL, "Display bonded devices", cmd_bonds);
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
 SHELL_CMD_REGISTER(reset, NULL, "Reset stored BLE bonds", cmd_reset);
 SHELL_CMD_REGISTER(restart, NULL, "Restart firmware", cmd_restart);
@@ -147,14 +186,14 @@ static void button_event_callback(button_event_t event)
 	switch (event) {
 	case BUTTON_EVENT_CLICK:
 		LOG_INF("=== BUTTON CLICK ===");
-		/* TODO: Add click functionality */
+		/* Reserved for future functionality */
 		break;
-		
+
 	case BUTTON_EVENT_DOUBLE_CLICK:
 		LOG_INF("=== BUTTON DOUBLE CLICK ===");
-		/* TODO: Add double-click functionality */
+		/* Reserved for future functionality */
 		break;
-		
+
 	case BUTTON_EVENT_HOLD:
 		LOG_INF("=== BUTTON HOLD - CLEARING BLE BONDS ===");
 		/* Clear BLE bonds and reset for new pairing */
@@ -520,26 +559,42 @@ int main(void)
 									response.message_body.device_info_response.name.arg = (void *)device_name;
 								}
 
-								/* Get device info from DIS client (may be cached from previous connection) */
-								const ble_dis_info_t *info = ble_dis_get_info();
-								if (info) {
-									LOG_INF("DIS info available: has_fw=%d, has_pnp=%d",
-										info->has_firmware_version, info->has_pnp_id);
+								/* Get device info from DIS client for the specific device
+								 * Prefer connected device, fallback to first bonded device */
+								static ble_dis_info_t dis_info_buf;
+								const bt_addr_le_t *target_addr = NULL;
+
+								if (conn) {
+									/* Get DIS info for currently connected device */
+									target_addr = bt_conn_get_dst(conn);
+								} else if (has_bonded) {
+									/* Get DIS info for first bonded device */
+									target_addr = &bonded_addr;
+								}
+
+								int dis_err = -ENOENT;
+								if (target_addr) {
+									dis_err = ble_dis_load_info_for_addr(target_addr, &dis_info_buf);
+								}
+
+								if (dis_err == 0) {
+									LOG_INF("DIS info loaded: has_fw=%d, has_pnp=%d",
+										dis_info_buf.has_firmware_version, dis_info_buf.has_pnp_id);
 									/* Firmware version */
-									if (info->has_firmware_version) {
-										LOG_INF("DIS firmware: %s", info->firmware_version);
+									if (dis_info_buf.has_firmware_version) {
+										LOG_INF("DIS firmware: %s", dis_info_buf.firmware_version);
 										response.message_body.device_info_response.firmware.funcs.encode = encode_string_callback;
-										response.message_body.device_info_response.firmware.arg = (void *)info->firmware_version;
+										response.message_body.device_info_response.firmware.arg = (void *)dis_info_buf.firmware_version;
 									}
 									/* VID and PID from PnP ID */
-									if (info->has_pnp_id) {
+									if (dis_info_buf.has_pnp_id) {
 										LOG_INF("DIS PnP ID: VID=0x%04X, PID=0x%04X",
-											info->vendor_id, info->product_id);
-										response.message_body.device_info_response.vid = info->vendor_id;
-										response.message_body.device_info_response.pid = info->product_id;
+											dis_info_buf.vendor_id, dis_info_buf.product_id);
+										response.message_body.device_info_response.vid = dis_info_buf.vendor_id;
+										response.message_body.device_info_response.pid = dis_info_buf.product_id;
 									}
 								} else {
-									LOG_WRN("DIS info not available (ble_dis_get_info returned NULL)");
+									LOG_WRN("DIS info not available for device (err: %d)", dis_err);
 								}
 
 								/* Device family and board (always available) */
