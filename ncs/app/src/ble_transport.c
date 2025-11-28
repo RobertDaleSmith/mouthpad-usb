@@ -84,6 +84,14 @@ static void nus_discovery_completed_cb(void)
 	LOG_INF("=== NUS DISCOVERY COMPLETED ===");
 	nus_discovery_complete = true;
 
+	/* Load cached DIS info from in-memory cache for the connected device */
+	struct bt_conn *conn = ble_central_get_default_conn();
+	if (conn) {
+		const bt_addr_le_t *addr = bt_conn_get_dst(conn);
+		extern void ble_dis_load_cache_for_connected_device(const bt_addr_le_t *addr);
+		ble_dis_load_cache_for_connected_device(addr);
+	}
+
 	/* Check if we have cached firmware version from previous connection */
 	extern bool ble_dis_has_cached_firmware(void);
 	if (ble_dis_has_cached_firmware()) {

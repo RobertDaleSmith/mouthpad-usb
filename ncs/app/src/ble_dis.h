@@ -102,6 +102,35 @@ void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr);
 void ble_dis_clear_saved(void);
 
 /**
+ * @brief Clear cached firmware version for a specific device
+ *
+ * Loads the cached DIS info, clears only the firmware version field,
+ * and saves it back. This forces firmware version to be re-read on
+ * next connection (useful after MouthPad firmware update).
+ *
+ * @param addr BLE address of the device
+ */
+void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr);
+
+/**
+ * @brief Clear cached firmware version for all bonded devices
+ *
+ * This should be called when initiating a firmware update flow to ensure
+ * the dongle re-reads firmware version on next connection.
+ */
+void ble_dis_clear_all_cached_firmware(void);
+
+/**
+ * @brief Load cached DIS info from in-memory cache for connected device
+ *
+ * Called when device connects to populate device_info from the in-memory cache.
+ * The in-memory cache is loaded from flash at boot.
+ *
+ * @param addr BLE address of the connected device
+ */
+void ble_dis_load_cache_for_connected_device(const bt_addr_le_t *addr);
+
+/**
  * @brief Check if we have cached device info with firmware version
  *
  * This is used to determine if we can report Connected state early

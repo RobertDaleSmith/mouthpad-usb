@@ -170,7 +170,22 @@ static int cmd_bonds(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Shell command: Clear cached firmware versions */
+static int cmd_clear_fw_cache(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Clearing cached firmware versions for all bonds...");
+	extern void ble_dis_clear_all_cached_firmware(void);
+	ble_dis_clear_all_cached_firmware();
+	shell_print(sh, "Done. Firmware versions will be re-read on next connection.");
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(bonds, NULL, "Display bonded devices", cmd_bonds);
+SHELL_CMD_REGISTER(clearfwcache, NULL, "Clear cached firmware versions", cmd_clear_fw_cache);
 SHELL_CMD_REGISTER(dfu, NULL, "Enter DFU bootloader mode", cmd_dfu);
 SHELL_CMD_REGISTER(reset, NULL, "Reset stored BLE bonds", cmd_reset);
 SHELL_CMD_REGISTER(restart, NULL, "Restart firmware", cmd_restart);
@@ -654,6 +669,21 @@ int main(void)
 								response.message_body.clear_bonds_response.success = true;
 
 								LOG_INF("Bonds cleared successfully, sending response");
+								usb_cdc_send_proto_message_async(response);
+							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_clear_firmware_cache_write_tag) {
+								/* Handle ClearFirmwareCacheWrite request */
+								LOG_INF("=== CLEAR FIRMWARE CACHE REQUEST (via protobuf) ===");
+
+								/* Clear cached firmware versions for all bonded devices */
+								extern void ble_dis_clear_all_cached_firmware(void);
+								ble_dis_clear_all_cached_firmware();
+
+								/* Send success response */
+								mouthware_message_RelayToAppMessage response = mouthware_message_RelayToAppMessage_init_zero;
+								response.which_message_body = mouthware_message_RelayToAppMessage_clear_firmware_cache_response_tag;
+								response.message_body.clear_firmware_cache_response.success = true;
+
+								LOG_INF("Firmware cache cleared, sending response");
 								usb_cdc_send_proto_message_async(response);
 							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_dfu_write_tag) {
 								/* Handle DfuWrite request - enter bootloader mode */
