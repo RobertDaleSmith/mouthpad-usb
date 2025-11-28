@@ -45,6 +45,67 @@ struct dis_cache_entry {
 };
 static struct dis_cache_entry dis_cache[MAX_DIS_CACHE_ENTRIES];
 
+/* Mutex to protect dis_cache from concurrent access */
+static K_MUTEX_DEFINE(dis_cache_mutex);
+
+/* Forward declarations needed by work handler */
+static void build_dis_settings_key(const bt_addr_le_t *addr, char *key, size_t key_len);
+int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_info);
+
+/* Work queue item for deferred flash writes */
+static struct k_work clear_fw_cache_work;
+static bool clear_fw_cache_pending = false;
+
+static void clear_fw_cache_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	LOG_INF("Clearing cached firmware version for all bonded devices (deferred)");
+
+	/* Get list of bonded devices from ble_central */
+	extern int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_count);
+
+	struct bonded_device bonds[4];
+	int count = ble_central_get_bonded_devices(bonds, 4);
+
+	if (count <= 0) {
+		LOG_DBG("No bonded devices to clear firmware from");
+		clear_fw_cache_pending = false;
+		return;
+	}
+
+	/* Clear firmware version for each bonded device */
+	for (int i = 0; i < count; i++) {
+		if (bonds[i].is_valid) {
+			/* Load existing DIS info */
+			ble_dis_info_t dis_info;
+			int err = ble_dis_load_info_for_addr(&bonds[i].addr, &dis_info);
+			if (err != 0) {
+				continue;
+			}
+
+			/* Clear only the firmware version field */
+			dis_info.has_firmware_version = false;
+			dis_info.firmware_version[0] = '\0';
+
+			/* Save back to flash storage */
+			char key[64];
+			build_dis_settings_key(&bonds[i].addr, key, sizeof(key));
+			err = settings_save_one(key, &dis_info, sizeof(ble_dis_info_t));
+			if (err) {
+				LOG_ERR("Failed to save DIS info after clearing firmware (err %d)", err);
+			} else {
+				char addr_str[BT_ADDR_LE_STR_LEN];
+				bt_addr_le_to_str(&bonds[i].addr, addr_str, sizeof(addr_str));
+				LOG_INF("Cleared cached firmware in flash for: %s", addr_str);
+			}
+		}
+	}
+
+	clear_fw_cache_pending = false;
+	LOG_INF("Cleared cached firmware for %d device(s) in flash", count);
+}
+
 /* Characteristic handles */
 static uint16_t fw_rev_handle = 0;
 static uint16_t hw_rev_handle = 0;
@@ -111,7 +172,8 @@ static int save_dis_info_to_settings(const bt_addr_le_t *addr)
 
 	LOG_INF("Saved DIS info to persistent storage: %s", key);
 
-	/* Also update in-memory cache */
+	/* Also update in-memory cache (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
 	bool found = false;
 	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
 		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
@@ -135,6 +197,7 @@ static int save_dis_info_to_settings(const bt_addr_le_t *addr)
 			}
 		}
 	}
+	k_mutex_unlock(&dis_cache_mutex);
 
 	return 0;
 }
@@ -154,7 +217,8 @@ static int settings_set_cb(const char *name, size_t len, settings_read_cb read_c
 			if (bt_addr_le_from_str(name, "RPA", &addr) == 0 ||
 			    bt_addr_le_from_str(name, "random", &addr) == 0 ||
 			    bt_addr_le_from_str(name, "public", &addr) == 0) {
-				/* Find empty slot in cache */
+				/* Find empty slot in cache (protected by mutex) */
+				k_mutex_lock(&dis_cache_mutex, K_FOREVER);
 				for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
 					if (!dis_cache[i].valid) {
 						memcpy(&dis_cache[i].addr, &addr, sizeof(bt_addr_le_t));
@@ -164,6 +228,7 @@ static int settings_set_cb(const char *name, size_t len, settings_read_cb read_c
 						break;
 					}
 				}
+				k_mutex_unlock(&dis_cache_mutex);
 			}
 			return 0;
 		}
@@ -182,6 +247,9 @@ int ble_dis_init(void)
 	 * persistent storage via settings_set_cb() when settings subsystem initialized
 	 */
 	dis_ready = false;
+
+	/* Initialize work queue for deferred flash writes */
+	k_work_init(&clear_fw_cache_work, clear_fw_cache_work_handler);
 
 	LOG_INF("DIS init - device_info state: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
 		device_info.has_firmware_version, device_info.firmware_version,
@@ -339,7 +407,8 @@ void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr)
 		LOG_INF("Cleared cached firmware version in flash for device: %s", addr_str);
 	}
 
-	/* Also clear from in-memory cache */
+	/* Also clear from in-memory cache (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
 	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
 		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
 			dis_cache[i].info.has_firmware_version = false;
@@ -348,31 +417,37 @@ void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr)
 			break;
 		}
 	}
+	k_mutex_unlock(&dis_cache_mutex);
 }
 
 void ble_dis_clear_all_cached_firmware(void)
 {
-	LOG_INF("Clearing cached firmware version for all bonded devices");
+	LOG_INF("Clearing cached firmware version for all devices");
 
-	/* Get list of bonded devices from ble_central */
-	extern int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_count);
-
-	struct bonded_device bonds[4]; /* MAX_BONDED_DEVICES */
-	int count = ble_central_get_bonded_devices(bonds, 4);
-
-	if (count <= 0) {
-		LOG_DBG("No bonded devices to clear firmware from");
-		return;
-	}
-
-	/* Clear firmware version for each bonded device */
-	for (int i = 0; i < count; i++) {
-		if (bonds[i].is_valid) {
-			ble_dis_clear_cached_firmware_for_addr(&bonds[i].addr);
+	/* Clear all in-memory cache entries immediately (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
+	int cleared = 0;
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && dis_cache[i].info.has_firmware_version) {
+			dis_cache[i].info.has_firmware_version = false;
+			dis_cache[i].info.firmware_version[0] = '\0';
+			cleared++;
 		}
 	}
+	k_mutex_unlock(&dis_cache_mutex);
 
-	LOG_INF("Cleared cached firmware for %d device(s)", count);
+	/* Also clear current device_info */
+	device_info.has_firmware_version = false;
+	device_info.firmware_version[0] = '\0';
+
+	LOG_INF("Cleared firmware from %d in-memory cache entries", cleared);
+
+	/* Submit work to clear flash asynchronously (non-blocking) */
+	if (!clear_fw_cache_pending) {
+		clear_fw_cache_pending = true;
+		k_work_submit(&clear_fw_cache_work);
+		LOG_INF("Submitted deferred flash clear work");
+	}
 }
 
 /* Load cached DIS from in-memory cache into device_info for the connected device */
@@ -384,20 +459,27 @@ static void load_cache_for_addr(const bt_addr_le_t *addr)
 		return;
 	}
 
-	/* Search for this address in the cache */
+	/* Search for this address in the cache (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
+	bool found = false;
 	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
 		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
 			/* Found cached info for this device */
 			memcpy(&device_info, &dis_cache[i].info, sizeof(ble_dis_info_t));
-			LOG_INF("Loaded cached DIS from memory: has_fw=%d, fw='%s'",
-				device_info.has_firmware_version, device_info.firmware_version);
-			return;
+			found = true;
+			break;
 		}
 	}
+	k_mutex_unlock(&dis_cache_mutex);
 
-	/* No cache found - clear device_info */
-	memset(&device_info, 0, sizeof(device_info));
-	LOG_DBG("No cached DIS found in memory for this device");
+	if (found) {
+		LOG_INF("Loaded cached DIS from memory: has_fw=%d, fw='%s'",
+			device_info.has_firmware_version, device_info.firmware_version);
+	} else {
+		/* No cache found - clear device_info */
+		memset(&device_info, 0, sizeof(device_info));
+		LOG_DBG("No cached DIS found in memory for this device");
+	}
 }
 
 void ble_dis_load_cache_for_connected_device(const bt_addr_le_t *addr)

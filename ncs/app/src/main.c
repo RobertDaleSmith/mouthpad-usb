@@ -683,7 +683,7 @@ int main(void)
 								response.which_message_body = mouthware_message_RelayToAppMessage_clear_firmware_cache_response_tag;
 								response.message_body.clear_firmware_cache_response.success = true;
 
-								LOG_INF("Firmware cache cleared successfully, sending response");
+								LOG_INF("Firmware cache cleared, sending response");
 								usb_cdc_send_proto_message_async(response);
 							} else if (message.which_message_body == mouthware_message_AppToRelayMessage_dfu_write_tag) {
 								/* Handle DfuWrite request - enter bootloader mode */
