@@ -121,9 +121,9 @@ static void trigger_usb_recovery_reset(const char *reason)
 	/* Increment retry counter */
 	NRF_POWER->GPREGRET2 = retry_count + 1;
 
-	/* Force disconnect and reset */
+	/* Extended disconnect - longer on each retry to handle stubborn hosts/hubs */
 	NRF_USBD->USBPULLUP = 0;
-	k_msleep(50);
+	k_msleep(500 + (retry_count * 500));  /* 500ms, 1s, 1.5s */
 
 	NVIC_SystemReset();
 }
@@ -313,6 +313,16 @@ int usb_init(void)
 	/* Initialize USB enumeration watchdog */
 	k_work_init_delayable(&usb_enum_check_work, usb_enum_check_handler);
 	usb_enumerated = false;
+
+	/*
+	 * Force USB disconnect before init to ensure clean enumeration.
+	 * This handles post-DFU scenarios where macOS (especially Intel + hub)
+	 * may have cached stale device state. The delay is imperceptible at
+	 * boot but critical for reliable enumeration.
+	 */
+	NRF_USBD->USBPULLUP = 0;
+	k_msleep(1000);  /* 1 second - enough for macOS + hub to clear state */
+	LOG_INF("USB disconnect hold complete - starting enumeration");
 
 	/* Configure status blue LED - only if available */
 #if DT_NODE_EXISTS(DT_ALIAS(led2)) && DT_NODE_HAS_PROP(DT_ALIAS(led2), gpios)
