@@ -453,10 +453,24 @@ int usb_hid_send_release_all(void)
 		0x00   /* Y high byte = 0 */
 	};
 
-	/* Report ID 3: Release all consumer controls */
+	/* Report ID 3: Release all consumer controls (16-bit usage selector) */
 	uint8_t report3[] = {
 		0x03,  /* Report ID 3 */
-		0x00   /* No consumer controls pressed */
+		0x00,  /* Consumer control usage low byte */
+		0x00   /* Consumer control usage high byte */
+	};
+
+	/* Report ID 4: Release all keyboard keys */
+	uint8_t report4[] = {
+		0x04,  /* Report ID 4 */
+		0x00,  /* Modifier keys */
+		0x00,  /* Reserved */
+		0x00,  /* Key 1 */
+		0x00,  /* Key 2 */
+		0x00,  /* Key 3 */
+		0x00,  /* Key 4 */
+		0x00,  /* Key 5 */
+		0x00   /* Key 6 */
 	};
 
 	/* Send clear reports 3 times to ensure USB host processes them */
@@ -490,6 +504,16 @@ int usb_hid_send_release_all(void)
 			failed_count++;
 		} else {
 			LOG_INF("Release report 3 sent round %d (consumer controls cleared)", round + 1);
+		}
+		k_msleep(10);  /* 10ms delay between reports */
+
+		/* Send Report 4 - Release keyboard keys */
+		ret = usb_hid_send_report(report4, sizeof(report4));
+		if (ret != 0) {
+			LOG_ERR("Failed to send release report 4 round %d (err %d)", round + 1, ret);
+			failed_count++;
+		} else {
+			LOG_INF("Release report 4 sent round %d (keyboard cleared)", round + 1);
 		}
 
 		if (round < 2) {
