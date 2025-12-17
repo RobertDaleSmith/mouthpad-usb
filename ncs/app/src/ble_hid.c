@@ -42,6 +42,40 @@ static ble_hid_data_received_cb_t data_received_callback = NULL;
 static ble_hid_ready_cb_t ready_callback = NULL;
 
 /**
+ * Consumer Control usage codes for backwards compatibility.
+ * Maps old 1-byte bitmap format to new 16-bit usage selector format.
+ * Old firmware used 8 individual bit flags, new descriptor uses usage codes.
+ */
+static const uint16_t consumer_bitmap_to_usage[] = {
+	0x00CD,  /* bit 0: Play/Pause */
+	0x0183,  /* bit 1: AL Consumer Control Configuration */
+	0x00B5,  /* bit 2: Scan Next Track */
+	0x00B6,  /* bit 3: Scan Previous Track */
+	0x00EA,  /* bit 4: Volume Decrement */
+	0x00E9,  /* bit 5: Volume Increment */
+	0x0225,  /* bit 6: AC Forward */
+	0x0224,  /* bit 7: AC Back */
+};
+
+/**
+ * Translate old consumer control bitmap to new 16-bit usage format.
+ * Returns the usage code for the first set bit, or 0 if no bits set.
+ */
+static uint16_t translate_consumer_bitmap(uint8_t bitmap)
+{
+	if (bitmap == 0) {
+		return 0;
+	}
+	/* Find first set bit and return corresponding usage */
+	for (int i = 0; i < 8; i++) {
+		if (bitmap & (1 << i)) {
+			return consumer_bitmap_to_usage[i];
+		}
+	}
+	return 0;
+}
+
+/**
  * Switch between boot protocol and report protocol mode.
  */
 #define KEY_BOOTMODE_MASK DK_BTN2_MSK
@@ -172,14 +206,29 @@ static uint8_t hogp_notify_cb(struct bt_hogp *hogp,
 	
 	// Parse and forward each report ID independently
 	if (size >= 1) {
-		/* Send directly to USB for zero latency */
-		uint8_t report_with_id[size + 1];
-		report_with_id[0] = report_id;
-		for (uint8_t i = 0; i < size; i++) {
-			report_with_id[i + 1] = data[i];
+		int ret;
+
+		/* Handle Report ID 3 (Consumer Control) backwards compatibility */
+		if (report_id == 3 && size == 1) {
+			/* Old firmware sends 1-byte bitmap, translate to 16-bit usage */
+			uint16_t usage = translate_consumer_bitmap(data[0]);
+			uint8_t consumer_report[3] = {
+				0x03,              /* Report ID 3 */
+				usage & 0xFF,     /* Usage low byte */
+				(usage >> 8) & 0xFF  /* Usage high byte */
+			};
+			LOG_DBG("Consumer control: bitmap 0x%02x -> usage 0x%04x", data[0], usage);
+			ret = hid_device_submit_report(hid_dev, sizeof(consumer_report), consumer_report);
+		} else {
+			/* Send directly to USB for zero latency */
+			uint8_t report_with_id[size + 1];
+			report_with_id[0] = report_id;
+			for (uint8_t i = 0; i < size; i++) {
+				report_with_id[i + 1] = data[i];
+			}
+			ret = hid_device_submit_report(hid_dev, size + 1, report_with_id);
 		}
 
-		int ret = hid_device_submit_report(hid_dev, size + 1, report_with_id);
 		if (ret) {
 			LOG_ERR("HID write error, %d", ret);
 		} else {
