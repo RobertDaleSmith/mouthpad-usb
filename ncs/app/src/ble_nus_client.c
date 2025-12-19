@@ -27,8 +27,11 @@ static ble_nus_data_sent_cb_t data_sent_cb;
 static ble_nus_mtu_exchange_cb_t mtu_exchange_cb;
 static ble_nus_discovery_complete_cb_t discovery_complete_cb;
 
-/* Semaphore for NUS write operations */
-K_SEM_DEFINE(nus_write_sem, 0, 1);
+/* Semaphore for NUS write operations - initialized to 1 so first send doesn't block */
+K_SEM_DEFINE(nus_write_sem, 1, 1);
+
+/* Timeout for waiting on NUS write completion (500ms) */
+#define NUS_WRITE_TIMEOUT_MS 500
 
 /* NUS Client callbacks */
 static uint8_t nus_data_received(struct bt_nus_client *nus, const uint8_t *data, uint16_t len);
@@ -151,11 +154,34 @@ int ble_nus_client_init(void)
 
 int ble_nus_client_send_data(const uint8_t *data, uint16_t len)
 {
+	int err;
+
 	if (!data || len == 0) {
 		return -EINVAL;
 	}
 
-	return bt_nus_client_send(&nus_client, data, len);
+	/* Wait for previous send to complete before sending next message.
+	 * This provides flow control to prevent buffer overflow when
+	 * messages arrive faster than BLE can transmit them. */
+	err = k_sem_take(&nus_write_sem, K_MSEC(NUS_WRITE_TIMEOUT_MS));
+	if (err) {
+		LOG_WRN("NUS write timeout waiting for previous send (err %d)", err);
+		/* Reset semaphore state to allow recovery */
+		k_sem_give(&nus_write_sem);
+		return -ETIMEDOUT;
+	}
+
+	err = bt_nus_client_send(&nus_client, data, len);
+	if (err) {
+		/* Send failed immediately, release semaphore for next attempt */
+		LOG_ERR("bt_nus_client_send failed (err %d)", err);
+		k_sem_give(&nus_write_sem);
+		return err;
+	}
+
+	/* Semaphore will be released by nus_data_sent callback when
+	 * the BLE stack confirms the transmission was completed */
+	return 0;
 }
 
 void ble_nus_client_discover(struct bt_conn *conn)
