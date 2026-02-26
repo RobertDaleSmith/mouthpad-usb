@@ -11,6 +11,7 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/sys/util.h>
 #include <bluetooth/gatt_dm.h>
 #include <string.h>
 
@@ -30,11 +31,24 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #define BT_UUID_DIS_HW_REV  BT_UUID_DECLARE_16(BT_UUID_DIS_HW_REV_VAL)
 #define BT_UUID_DIS_MFR_NAME BT_UUID_DECLARE_16(BT_UUID_DIS_MFR_NAME_VAL)
 
+/* Read pipeline step.
+ * params      — fully pre-populated; .func is assigned from callback at runtime,
+ *               and .single.handle is refreshed from *handle_ptr for handle-based steps.
+ * handle_ptr  — points to the discovered handle variable for handle-based steps,
+ *               NULL for by-UUID steps. A zero value at runtime causes the step to be skipped.
+ * callback    — the bt_gatt_read_func_t for this step.
+ * name        — human-readable label used in log messages. */
+typedef struct {
+	struct bt_gatt_read_params params;
+	uint16_t *handle_ptr;
+	bt_gatt_read_func_t callback;
+	const char *name;
+} dis_read_step_t;
+
 /* Device Information client state */
 static ble_dis_info_t device_info;  /* Active device's DIS info */
 static bool dis_ready = false;
 static struct bt_conn *current_conn = NULL;
-static struct bt_gatt_read_params read_params;
 
 /* In-memory cache for all bonded devices' DIS info (loaded from flash at boot) */
 #define MAX_DIS_CACHE_ENTRIES 4
@@ -69,7 +83,7 @@ static void clear_fw_cache_work_handler(struct k_work *work)
 	int count = ble_central_get_bonded_devices(bonds, 4);
 
 	if (count <= 0) {
-		LOG_DBG("No bonded devices to clear firmware from");
+		LOG_INF("No bonded devices to clear firmware from");
 		clear_fw_cache_pending = false;
 		return;
 	}
@@ -119,12 +133,8 @@ static ble_dis_discovery_complete_cb_t discovery_complete_cb = NULL;
 static void dis_discovery_completed_cb(struct bt_gatt_dm *dm, void *context);
 static void dis_discovery_service_not_found_cb(struct bt_conn *conn, void *context);
 static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *context);
-static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
-				   struct bt_gatt_read_params *params,
-				   const void *data, uint16_t length);
-static uint8_t read_pnp_id_cb(struct bt_conn *conn, uint8_t err,
-			      struct bt_gatt_read_params *params,
-			      const void *data, uint16_t length);
+static void on_dis_reads_complete(void);
+static void advance_read_pipeline(dis_read_step_t *next_step);
 
 /* GATT Discovery Manager callback structure */
 static struct bt_gatt_dm_cb dis_discovery_cb = {
@@ -179,7 +189,7 @@ static int save_dis_info_to_settings(const bt_addr_le_t *addr)
 		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
 			/* Update existing entry */
 			memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
-			LOG_DBG("Updated in-memory cache entry %d", i);
+			LOG_INF("Updated in-memory cache entry %d", i);
 			found = true;
 			break;
 		}
@@ -204,7 +214,7 @@ static int save_dis_info_to_settings(const bt_addr_le_t *addr)
 
 static int settings_set_cb(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
 {
-	LOG_DBG("DIS settings_set_cb called: name='%s', len=%d", name, len);
+	LOG_INF("DIS settings_set_cb called: name='%s', len=%d", name, len);
 
 	/* Settings are per-device: ble_dis/<addr>/info */
 	/* Load all cached DIS info into memory at boot */
@@ -300,7 +310,7 @@ void ble_dis_reset(void)
 	/* Note: device_info is NOT cleared - it persists across disconnections
 	 * This allows the host to query bonded device info even when disconnected
 	 */
-	LOG_DBG("Device Information Service reset (device_info preserved)");
+	LOG_INF("Device Information Service reset (device_info preserved)");
 }
 
 const ble_dis_info_t *ble_dis_get_info(void)
@@ -334,12 +344,12 @@ int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_inf
 	/* Use settings_load_one to load the data directly */
 	ssize_t len = settings_load_one(key, out_info, sizeof(ble_dis_info_t));
 	if (len <= 0) {
-		LOG_DBG("No DIS info found for device (key: %s, len: %d)", key, (int)len);
+		LOG_INF("No DIS info found for device (key: %s, len: %d)", key, (int)len);
 		return -ENOENT;
 	}
 
 	if (out_info->has_device_name) {
-		LOG_DBG("Loaded DIS info for device: name='%s'", out_info->device_name);
+		LOG_INF("Loaded DIS info for device: name='%s'", out_info->device_name);
 	}
 
 	return 0;
@@ -360,7 +370,7 @@ void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr)
 	if (err && err != -ENOENT) {
 		LOG_ERR("Failed to delete DIS info (err %d)", err);
 	} else {
-		LOG_DBG("Cleared DIS info from storage");
+		LOG_INF("Cleared DIS info from storage");
 	}
 }
 
@@ -386,7 +396,7 @@ void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr)
 	int err = ble_dis_load_info_for_addr(addr, &dis_info);
 
 	if (err != 0) {
-		LOG_DBG("No cached DIS info to clear firmware from");
+		LOG_INF("No cached DIS info to clear firmware from");
 		return;
 	}
 
@@ -478,7 +488,7 @@ static void load_cache_for_addr(const bt_addr_le_t *addr)
 	} else {
 		/* No cache found - clear device_info */
 		memset(&device_info, 0, sizeof(device_info));
-		LOG_DBG("No cached DIS found in memory for this device");
+		LOG_INF("No cached DIS found in memory for this device");
 	}
 }
 
@@ -498,50 +508,24 @@ static uint8_t read_fw_rev_cb(struct bt_conn *conn, uint8_t err,
 			      struct bt_gatt_read_params *params,
 			      const void *data, uint16_t length)
 {
+	dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
+
 	if (err) {
 		LOG_ERR("Firmware Revision read failed: %d", err);
+		advance_read_pipeline(step + 1);
 		return BT_GATT_ITER_STOP;
 	}
 
 	if (!data) {
-		LOG_DBG("Firmware Revision read complete");
-
-		/* Read PnP ID if available */
-		if (pnp_id_handle) {
-			LOG_DBG("Reading PnP ID...");
-			memset(&read_params, 0, sizeof(read_params));
-			read_params.func = (bt_gatt_read_func_t)read_pnp_id_cb;
-			read_params.handle_count = 1;
-			read_params.single.handle = pnp_id_handle;
-			read_params.single.offset = 0;
-
-			int err = bt_gatt_read(current_conn, &read_params);
-			if (err) {
-				LOG_ERR("PnP ID read failed to start: %d", err);
-				/* Continue to read device name anyway */
-				goto read_device_name;
-			}
-		} else {
-read_device_name:
-			/* Read device name from GAP service */
-			LOG_DBG("Reading device name from GAP...");
-			memset(&read_params, 0, sizeof(read_params));
-			read_params.func = read_device_name_cb;
-			read_params.by_uuid.uuid = BT_UUID_GAP_DEVICE_NAME;
-			read_params.by_uuid.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
-			read_params.by_uuid.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
-
-			int err = bt_gatt_read(current_conn, &read_params);
-			if (err) {
-				LOG_ERR("Device name read failed to start: %d", err);
-				dis_ready = true;  /* Mark ready even without device name */
-			}
-		}
-
+		LOG_INF("Firmware Revision read complete");
+		advance_read_pipeline(step + 1);
 		return BT_GATT_ITER_STOP;
 	}
 
 	/* Copy firmware revision string */
+	// TODO: This overwrites from offset 0 on each fragment rather than accumulating.
+	// We know values are short for now, but a proper long-read would need to track
+	// how much has been copied and append at the correct offset.
 	size_t copy_len = MIN(length, BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1);
 	memcpy(device_info.firmware_version, data, copy_len);
 	device_info.firmware_version[copy_len] = '\0';
@@ -556,16 +540,18 @@ static uint8_t read_pnp_id_cb(struct bt_conn *conn, uint8_t err,
 			      struct bt_gatt_read_params *params,
 			      const void *data, uint16_t length)
 {
+	dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
+
 	if (err) {
 		LOG_ERR("PnP ID read failed: %d", err);
-		/* Continue to read device name */
-		goto read_device_name;
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
 	}
 
 	if (!data) {
-		LOG_DBG("PnP ID read complete");
-		/* Continue to read device name */
-		goto read_device_name;
+		LOG_INF("PnP ID read complete");
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
 	}
 
 	/* Parse PnP ID: 7 bytes total
@@ -583,61 +569,24 @@ static uint8_t read_pnp_id_cb(struct bt_conn *conn, uint8_t err,
 		LOG_WRN("PnP ID data too short: %d bytes", length);
 	}
 
-read_device_name:
-	/* Read device name from GAP service */
-	LOG_DBG("Reading device name from GAP...");
-	memset(&read_params, 0, sizeof(read_params));
-	read_params.func = read_device_name_cb;
-	read_params.by_uuid.uuid = BT_UUID_GAP_DEVICE_NAME;
-	read_params.by_uuid.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
-	read_params.by_uuid.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
-
-	int read_err = bt_gatt_read(current_conn, &read_params);
-	if (read_err) {
-		LOG_ERR("Device name read failed to start: %d", read_err);
-		dis_ready = true;  /* Mark ready even without device name */
-	}
-
-	return BT_GATT_ITER_STOP;
+	return BT_GATT_ITER_CONTINUE;
 }
 
 static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 				   struct bt_gatt_read_params *params,
 				   const void *data, uint16_t length)
 {
+	dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
+
 	if (err) {
 		LOG_ERR("Device Name read failed: %d", err);
-		dis_ready = true;  /* Mark ready even without device name */
-		LOG_INF("Device Information Service ready (device name unavailable)");
-
-		/* Save DIS info even if device name failed - we have firmware/PnP ID */
-		if (current_conn) {
-			save_dis_info_to_settings(bt_conn_get_dst(current_conn));
-		}
-
-		/* Trigger discovery complete callback */
-		if (discovery_complete_cb && current_conn) {
-			discovery_complete_cb(current_conn);
-		}
-
+		advance_read_pipeline(step + 1);
 		return BT_GATT_ITER_STOP;
 	}
 
 	if (!data) {
-		LOG_DBG("Device Name read complete");
-		dis_ready = true;
-		LOG_INF("Device Information Service ready");
-
-		/* Save DIS info to persistent storage now that discovery is complete */
-		if (current_conn) {
-			save_dis_info_to_settings(bt_conn_get_dst(current_conn));
-		}
-
-		/* Trigger discovery complete callback */
-		if (discovery_complete_cb && current_conn) {
-			discovery_complete_cb(current_conn);
-		}
-
+		LOG_INF("Device Name read complete");
+		advance_read_pipeline(step + 1);
 		return BT_GATT_ITER_STOP;
 	}
 
@@ -648,7 +597,87 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 	device_info.has_device_name = true;
 
 	LOG_INF("Device Name: %s", device_info.device_name);
+
 	return BT_GATT_ITER_CONTINUE;
+}
+
+/* Read pipeline: one entry per characteristic to read, in order.
+ * For handle-based steps, params.single.handle is overwritten at runtime from
+ * the discovered handle variables; a value of 0 causes the step to be skipped.
+ * For by-UUID steps, params.by_uuid is used as-is. */
+static dis_read_step_t on_connection_read_steps[] = {
+	{
+		.params     = { .handle_count = 1,
+		                .single = { .handle = 0, .offset = 0 } },
+		.handle_ptr = &fw_rev_handle,
+		.callback   = read_fw_rev_cb,
+		.name       = "Firmware Revision",
+	},
+	{
+		.params     = { .handle_count = 1,
+		                .single = { .handle = 0, .offset = 0 } },
+		.handle_ptr = &pnp_id_handle,
+		.callback   = read_pnp_id_cb,
+		.name       = "PnP ID",
+	},
+	{
+		.params     = { .handle_count = 0,
+		                .by_uuid = { .uuid         = BT_UUID_GAP_DEVICE_NAME,
+		                             .start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE,
+		                             .end_handle   = BT_ATT_LAST_ATTRIBUTE_HANDLE } },
+		.handle_ptr = NULL,
+		.callback   = read_device_name_cb,
+		.name       = "Device Name",
+	},
+};
+
+static void on_dis_reads_complete(void)
+{
+	LOG_INF("DIS read pipeline complete");
+	dis_ready = true;
+
+	if (current_conn) {
+		save_dis_info_to_settings(bt_conn_get_dst(current_conn));
+	}
+
+	if (discovery_complete_cb && current_conn) {
+		discovery_complete_cb(current_conn);
+	}
+}
+
+/* Advance the read pipeline starting from next_step.
+ * Skips steps whose handle is zero (characteristic not found on remote).
+ * Calls on_dis_reads_complete() when all steps are exhausted. */
+static void advance_read_pipeline(dis_read_step_t *step)
+{
+	dis_read_step_t *end = on_connection_read_steps + ARRAY_SIZE(on_connection_read_steps);
+
+	if (step >= end) {
+		on_dis_reads_complete();
+		return;
+	}
+
+	/* For handle-based steps, refresh the handle and skip if not discovered. */
+	if (step->handle_ptr != NULL) {
+		step->params.single.handle = *step->handle_ptr;
+
+		if (step->params.single.handle == 0) {
+			LOG_INF("Skipping step '%s' (handle not found)", step->name);
+			advance_read_pipeline(step + 1);
+			return;
+		}
+	}
+
+	step->params.func = step->callback;
+
+	LOG_INF("Starting read: %s", step->name);
+
+	int err = bt_gatt_read(current_conn, &step->params);
+	if (err) {
+		LOG_ERR("Failed to start read for '%s': %d", step->name, err);
+		advance_read_pipeline(step + 1);
+		return;
+	}
 }
 
 /* DIS Discovery callbacks */
@@ -707,55 +736,25 @@ static void dis_discovery_completed_cb(struct bt_gatt_dm *dm, void *context)
 		LOG_ERR("Could not release DIS discovery data: %d", err);
 	}
 
-	/* Start reading characteristics - begin with Firmware Revision */
-	if (fw_rev_handle) {
-		LOG_DBG("Reading Firmware Revision...");
-		memset(&read_params, 0, sizeof(read_params));
-		read_params.func = (bt_gatt_read_func_t)read_fw_rev_cb;
-		read_params.handle_count = 1;
-		read_params.single.handle = fw_rev_handle;
-		read_params.single.offset = 0;
-
-		err = bt_gatt_read(current_conn, &read_params);
-		if (err) {
-			LOG_ERR("Firmware Revision read failed to start: %d", err);
-			dis_ready = true;  /* Mark ready even if reads fail */
-		}
-	} else {
-		LOG_WRN("No DIS characteristics found");
-		dis_ready = true;
-	}
+	/* Start the read pipeline from the first step */
+	advance_read_pipeline(&on_connection_read_steps[0]);
 }
 
 static void dis_discovery_service_not_found_cb(struct bt_conn *conn, void *context)
 {
 	LOG_INF("Device Information Service not found during discovery");
-
-	/* Still try to read device name from GAP */
-	LOG_DBG("Reading device name from GAP...");
 	current_conn = conn;
-	memset(&read_params, 0, sizeof(read_params));
-	read_params.func = read_device_name_cb;
-	read_params.by_uuid.uuid = BT_UUID_GAP_DEVICE_NAME;
-	read_params.by_uuid.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
-	read_params.by_uuid.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
 
-	int err = bt_gatt_read(conn, &read_params);
-	if (err) {
-		LOG_ERR("Device name read failed to start: %d", err);
-		dis_ready = true;  /* Mark ready even without device name */
-	}
+	/* Start from the beginning — handle-based steps will be skipped naturally
+	 * since no handles were discovered. The device name step will still run. */
+	advance_read_pipeline(&on_connection_read_steps[0]);
 }
 
 static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *context)
 {
 	LOG_ERR("Device Information Service discovery failed: %d", err);
-	dis_ready = true;  /* Mark ready to unblock, but with no data */
-
-	/* Trigger discovery complete callback even on error so NUS can continue */
-	if (discovery_complete_cb && conn) {
-		discovery_complete_cb(conn);
-	}
+	current_conn = conn;
+	on_dis_reads_complete();
 }
 
 void ble_dis_set_discovery_complete_cb(ble_dis_discovery_complete_cb_t cb)
