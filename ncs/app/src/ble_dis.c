@@ -713,6 +713,22 @@ static void on_dis_reads_complete(void)
 		save_dis_info_to_settings(bt_conn_get_dst(current_conn));
 	}
 
+	/* Validate device identity */
+	bool mfr_ok = device_info.has_manufacturer_name &&
+		      strcmp(device_info.manufacturer_name, "Augmental") == 0;
+	bool model_ok = device_info.has_model_number &&
+			strcmp(device_info.model_number, "MouthPad^") == 0;
+
+	if (!mfr_ok || !model_ok) {
+		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting",
+			device_info.has_manufacturer_name ? device_info.manufacturer_name : "(none)",
+			device_info.has_model_number      ? device_info.model_number      : "(none)");
+		if (current_conn) {
+			bt_conn_disconnect(current_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		}
+		return;
+	}
+
 	if (discovery_complete_cb && current_conn) {
 		discovery_complete_cb(current_conn);
 	}
