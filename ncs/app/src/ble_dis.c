@@ -26,6 +26,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #define BT_UUID_DIS_FW_REV_VAL    0x2A26  /* Firmware Revision String */
 #define BT_UUID_DIS_HW_REV_VAL    0x2A27  /* Hardware Revision String */
 #define BT_UUID_DIS_MFR_NAME_VAL  0x2A29  /* Manufacturer Name String */
+/* Note: BT_UUID_DIS_MODEL_NUMBER_VAL (0x2A24) and BT_UUID_DIS_MODEL_NUMBER are already defined in zephyr/bluetooth/uuid.h */
 
 #define BT_UUID_DIS_FW_REV  BT_UUID_DECLARE_16(BT_UUID_DIS_FW_REV_VAL)
 #define BT_UUID_DIS_HW_REV  BT_UUID_DECLARE_16(BT_UUID_DIS_HW_REV_VAL)
@@ -124,6 +125,7 @@ static void clear_fw_cache_work_handler(struct k_work *work)
 static uint16_t fw_rev_handle = 0;
 static uint16_t hw_rev_handle = 0;
 static uint16_t mfr_name_handle = 0;
+static uint16_t model_number_handle = 0;
 static uint16_t pnp_id_handle = 0;
 
 /* Discovery completion callback */
@@ -306,6 +308,7 @@ void ble_dis_reset(void)
 	fw_rev_handle = 0;
 	hw_rev_handle = 0;
 	mfr_name_handle = 0;
+	model_number_handle = 0;
 	pnp_id_handle = 0;
 	/* Note: device_info is NOT cleared - it persists across disconnections
 	 * This allows the host to query bonded device info even when disconnected
@@ -601,11 +604,81 @@ static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
 	return BT_GATT_ITER_CONTINUE;
 }
 
+static uint8_t read_mfr_name_cb(struct bt_conn *conn, uint8_t err,
+				struct bt_gatt_read_params *params,
+				const void *data, uint16_t length)
+{
+	dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
+
+	if (err) {
+		LOG_ERR("Manufacturer Name read failed: %d", err);
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
+	}
+
+	if (!data) {
+		LOG_INF("Manufacturer Name read complete");
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
+	}
+
+	size_t copy_len = MIN(length, BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1);
+	memcpy(device_info.manufacturer_name, data, copy_len);
+	device_info.manufacturer_name[copy_len] = '\0';
+	device_info.has_manufacturer_name = true;
+
+	LOG_INF("Manufacturer Name: %s", device_info.manufacturer_name);
+
+	return BT_GATT_ITER_CONTINUE;
+}
+
+static uint8_t read_model_number_cb(struct bt_conn *conn, uint8_t err,
+				    struct bt_gatt_read_params *params,
+				    const void *data, uint16_t length)
+{
+	dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
+
+	if (err) {
+		LOG_ERR("Model Number read failed: %d", err);
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
+	}
+
+	if (!data) {
+		LOG_INF("Model Number read complete");
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
+	}
+
+	size_t copy_len = MIN(length, BLE_DIS_MODEL_NUMBER_MAX_LEN - 1);
+	memcpy(device_info.model_number, data, copy_len);
+	device_info.model_number[copy_len] = '\0';
+	device_info.has_model_number = true;
+
+	LOG_INF("Model Number: %s", device_info.model_number);
+
+	return BT_GATT_ITER_CONTINUE;
+}
+
 /* Read pipeline: one entry per characteristic to read, in order.
  * For handle-based steps, params.single.handle is overwritten at runtime from
  * the discovered handle variables; a value of 0 causes the step to be skipped.
  * For by-UUID steps, params.by_uuid is used as-is. */
 static dis_read_step_t on_connection_read_steps[] = {
+	{
+		.params     = { .handle_count = 1,
+		                .single = { .handle = 0, .offset = 0 } },
+		.handle_ptr = &mfr_name_handle,
+		.callback   = read_mfr_name_cb,
+		.name       = "Manufacturer Name",
+	},
+	{
+		.params     = { .handle_count = 1,
+		                .single = { .handle = 0, .offset = 0 } },
+		.handle_ptr = &model_number_handle,
+		.callback   = read_model_number_cb,
+		.name       = "Model Number",
+	},
 	{
 		.params     = { .handle_count = 1,
 		                .single = { .handle = 0, .offset = 0 } },
@@ -717,6 +790,16 @@ static void dis_discovery_completed_cb(struct bt_gatt_dm *dm, void *context)
 		if (gatt_desc) {
 			mfr_name_handle = gatt_desc->handle;
 			LOG_INF("Found Manufacturer Name characteristic (handle: %d)", mfr_name_handle);
+		}
+	}
+
+	/* Find Model Number characteristic */
+	gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_MODEL_NUMBER);
+	if (gatt_chrc) {
+		gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_MODEL_NUMBER);
+		if (gatt_desc) {
+			model_number_handle = gatt_desc->handle;
+			LOG_INF("Found Model Number characteristic (handle: %d)", model_number_handle);
 		}
 	}
 
