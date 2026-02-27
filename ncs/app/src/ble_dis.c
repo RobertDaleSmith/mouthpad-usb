@@ -82,7 +82,7 @@ static void clear_fw_cache_work_handler(struct k_work *work) {
 	int count = ble_central_get_bonded_devices(bonds, 4);
 
 	if (count <= 0) {
-		LOG_INF("No bonded devices to clear firmware from");
+		LOG_DBG("No bonded devices to clear firmware from");
 		clear_fw_cache_pending = false;
 		return;
 	}
@@ -195,7 +195,7 @@ static int save_dis_info_to_settings(const bt_addr_le_t *addr) {
 		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
 			/* Update existing entry */
 			memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
-			LOG_INF("Updated in-memory cache entry %d", i);
+			LOG_DBG("Updated in-memory cache entry %d", i);
 			found = true;
 			break;
 		}
@@ -219,7 +219,7 @@ static int save_dis_info_to_settings(const bt_addr_le_t *addr) {
 }
 
 static int settings_set_cb(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg) {
-	LOG_INF("DIS settings_set_cb called: name='%s', len=%d", name, len);
+	LOG_DBG("DIS settings_set_cb called: name='%s', len=%d", name, len);
 
 	/* Settings are per-device: ble_dis/<addr>/info */
 	/* Load all cached DIS info into memory at boot */
@@ -313,7 +313,7 @@ void ble_dis_reset(void) {
 	/* Note: device_info is NOT cleared - it persists across disconnections
 	 * This allows the host to query bonded device info even when disconnected
 	 */
-	LOG_INF("Device Information Service reset (device_info preserved)");
+	LOG_DBG("Device Information Service reset (device_info preserved)");
 }
 
 const ble_dis_info_t *ble_dis_get_info(void) {
@@ -345,12 +345,12 @@ int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_inf
 	/* Use settings_load_one to load the data directly */
 	ssize_t len = settings_load_one(key, out_info, sizeof(ble_dis_info_t));
 	if (len <= 0) {
-		LOG_INF("No DIS info found for device (key: %s, len: %d)", key, (int) len);
+		LOG_DBG("No DIS info found for device (key: %s, len: %d)", key, (int) len);
 		return -ENOENT;
 	}
 
 	if (out_info->has_device_name) {
-		LOG_INF("Loaded DIS info for device: name='%s'", out_info->device_name);
+		LOG_DBG("Loaded DIS info for device: name='%s'", out_info->device_name);
 	}
 
 	return 0;
@@ -370,7 +370,7 @@ void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr) {
 	if (err && err != -ENOENT) {
 		LOG_ERR("Failed to delete DIS info (err %d)", err);
 	} else {
-		LOG_INF("Cleared DIS info from storage");
+		LOG_DBG("Cleared DIS info from storage");
 	}
 }
 
@@ -394,7 +394,7 @@ void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr) {
 	int err = ble_dis_load_info_for_addr(addr, &dis_info);
 
 	if (err != 0) {
-		LOG_INF("No cached DIS info to clear firmware from");
+		LOG_DBG("No cached DIS info to clear firmware from");
 		return;
 	}
 
@@ -484,7 +484,7 @@ static void load_cache_for_addr(const bt_addr_le_t *addr) {
 	} else {
 		/* No cache found - clear device_info */
 		memset(&device_info, 0, sizeof(device_info));
-		LOG_INF("No cached DIS found in memory for this device");
+		LOG_DBG("No cached DIS found in memory for this device");
 	}
 }
 
