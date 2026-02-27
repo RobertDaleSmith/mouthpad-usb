@@ -153,8 +153,6 @@ static void dis_discovery_service_not_found_cb(struct bt_conn *conn, void *conte
 
 static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *context);
 
-static void on_dis_reads_complete(void);
-
 static void advance_read_pipeline(dis_read_step_t *next_step);
 
 static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
@@ -579,8 +577,7 @@ static void process_device_name(const void *data, uint16_t length, uint16_t offs
 	device_info.has_device_name = true;
 }
 
-static void verify_device_identity(dis_read_step_t *step)
-{
+static void verify_device_identity(dis_read_step_t *step) {
 	bool mfr_ok = device_info.has_manufacturer_name &&
 				  strcmp(device_info.manufacturer_name, DIS_EXPECTED_MANUFACTURER_NAME) == 0;
 	bool model_ok = device_info.has_model_number &&
@@ -625,6 +622,20 @@ static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
 	}
 
 	return BT_GATT_ITER_CONTINUE;
+}
+
+static void dis_reads_complete(dis_read_step_t *step) {
+	ARG_UNUSED(step);
+	LOG_INF("DIS read pipeline complete");
+	dis_ready = true;
+
+	if (current_conn) {
+		save_dis_info_to_settings(bt_conn_get_dst(current_conn));
+	}
+
+	if (discovery_complete_cb && current_conn) {
+		discovery_complete_cb(current_conn);
+	}
 }
 
 /* Read pipeline: one entry per characteristic to read, in order.
@@ -673,32 +684,16 @@ static dis_read_step_t on_connection_read_steps[] = {
 				.process_fn = process_device_name,
 				.name = "Device Name",
 		},
+		{
+				.action_fn = dis_reads_complete,
+				.name = "DIS Reads Complete",
+		},
 };
-
-static void on_dis_reads_complete(void) {
-	LOG_INF("DIS read pipeline complete");
-	dis_ready = true;
-
-	if (current_conn) {
-		save_dis_info_to_settings(bt_conn_get_dst(current_conn));
-	}
-
-	if (discovery_complete_cb && current_conn) {
-		discovery_complete_cb(current_conn);
-	}
-}
 
 /* Advance the read pipeline starting from next_step.
  * Skips steps whose handle is zero (characteristic not found on remote).
- * Calls on_dis_reads_complete() when all steps are exhausted. */
+ * The last step in the array is always an action step that terminates the pipeline. */
 static void advance_read_pipeline(dis_read_step_t *step) {
-	dis_read_step_t *end = on_connection_read_steps + ARRAY_SIZE(on_connection_read_steps);
-
-	if (step >= end) {
-		on_dis_reads_complete();
-		return;
-	}
-
 	/* Action steps run a function instead of issuing a GATT read. */
 	if (step->action_fn) {
 		LOG_INF("Running action: %s", step->name);
@@ -810,7 +805,7 @@ static void dis_discovery_service_not_found_cb(struct bt_conn *conn, void *conte
 static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *context) {
 	LOG_ERR("Device Information Service discovery failed: %d", err);
 	current_conn = conn;
-	on_dis_reads_complete();
+	dis_reads_complete(NULL);
 }
 
 void ble_dis_set_discovery_complete_cb(ble_dis_discovery_complete_cb_t cb) {
