@@ -28,21 +28,34 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
  *			Enables correct multi-fragment accumulation for long characteristics. */
 typedef void (*dis_process_fn_t)(const void *data, uint16_t length, uint16_t offset);
 
+/* Forward declaration required by dis_step_action_fn_t. */
+typedef struct dis_read_step dis_read_step_t;
+
+/* Signature for an action step in the read pipeline.
+ * Called by advance_read_pipeline instead of issuing a GATT read.
+ * The function is responsible for either calling advance_read_pipeline(step + 1)
+ * to continue, or halting the pipeline (e.g. by disconnecting). */
+typedef void (*dis_step_action_fn_t)(dis_read_step_t *step);
+
 /* Read pipeline step.
  * params	 — fully pre-populated; .func is assigned to dis_read_generic_cb
  *				 at runtime, and .single.handle is refreshed from *handle_ptr
- *				 for handle-based steps.
+ *				 for handle-based steps. Unused for action steps.
  * handle_ptr — points to the discovered handle variable for handle-based steps,
  *				 NULL for by-UUID steps. A zero value at runtime causes the step
- *				 to be skipped.
+ *				 to be skipped. Unused for action steps.
  * process_fn — called with raw data when a fragment arrives; NULL is safe (no-op).
+ *				 Unused for action steps.
+ * action_fn  — if non-NULL, the step is an action step: advance_read_pipeline calls
+ *				 this function instead of issuing a GATT read.
  * name		 — human-readable label used in log messages. */
-typedef struct {
+struct dis_read_step {
 	struct bt_gatt_read_params params;
 	uint16_t *handle_ptr;
 	dis_process_fn_t process_fn;
+	dis_step_action_fn_t action_fn;
 	const char *name;
-} dis_read_step_t;
+};
 
 /* Device Information client state */
 static ble_dis_info_t device_info; /* Active device's DIS info */
@@ -566,6 +579,26 @@ static void process_device_name(const void *data, uint16_t length, uint16_t offs
 	device_info.has_device_name = true;
 }
 
+static void verify_device_identity(dis_read_step_t *step)
+{
+	bool mfr_ok = device_info.has_manufacturer_name &&
+				  strcmp(device_info.manufacturer_name, DIS_EXPECTED_MANUFACTURER_NAME) == 0;
+	bool model_ok = device_info.has_model_number &&
+					strcmp(device_info.model_number, DIS_EXPECTED_MODEL_NUMBER) == 0;
+
+	if (!mfr_ok || !model_ok) {
+		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting",
+				device_info.has_manufacturer_name ? device_info.manufacturer_name : "(none)",
+				device_info.has_model_number ? device_info.model_number : "(none)");
+		if (current_conn) {
+			bt_conn_disconnect(current_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		}
+		return;
+	}
+
+	advance_read_pipeline(step + 1);
+}
+
 static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
 								   struct bt_gatt_read_params *params,
 								   const void *data, uint16_t length) {
@@ -614,6 +647,10 @@ static dis_read_step_t on_connection_read_steps[] = {
 				.name = "Model Number",
 		},
 		{
+				.action_fn = verify_device_identity,
+				.name = "Device Identity Check",
+		},
+		{
 				.params = {.handle_count = 1,
 						.single = {.handle = 0, .offset = 0}},
 				.handle_ptr = &fw_rev_handle,
@@ -646,22 +683,6 @@ static void on_dis_reads_complete(void) {
 		save_dis_info_to_settings(bt_conn_get_dst(current_conn));
 	}
 
-	/* Validate device identity */
-	bool mfr_ok = device_info.has_manufacturer_name &&
-				  strcmp(device_info.manufacturer_name, DIS_EXPECTED_MANUFACTURER_NAME) == 0;
-	bool model_ok = device_info.has_model_number &&
-					strcmp(device_info.model_number, DIS_EXPECTED_MODEL_NUMBER) == 0;
-
-	if (!mfr_ok || !model_ok) {
-		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting",
-				device_info.has_manufacturer_name ? device_info.manufacturer_name : "(none)",
-				device_info.has_model_number ? device_info.model_number : "(none)");
-		if (current_conn) {
-			bt_conn_disconnect(current_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-		}
-		return;
-	}
-
 	if (discovery_complete_cb && current_conn) {
 		discovery_complete_cb(current_conn);
 	}
@@ -675,6 +696,13 @@ static void advance_read_pipeline(dis_read_step_t *step) {
 
 	if (step >= end) {
 		on_dis_reads_complete();
+		return;
+	}
+
+	/* Action steps run a function instead of issuing a GATT read. */
+	if (step->action_fn) {
+		LOG_INF("Running action: %s", step->name);
+		step->action_fn(step);
 		return;
 	}
 
