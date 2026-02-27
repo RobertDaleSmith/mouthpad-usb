@@ -21,17 +21,26 @@
 #define LOG_MODULE_NAME ble_dis
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
+/* Signature for per-characteristic data processing.
+ * Called by dis_read_generic_cb only when data != NULL and err == 0.
+ * offset — byte position of this fragment within the characteristic value
+ *          (0 for first fragment, accumulated for subsequent fragments).
+ *          Enables correct multi-fragment accumulation for long characteristics. */
+typedef void (*dis_process_fn_t)(const void *data, uint16_t length, uint16_t offset);
+
 /* Read pipeline step.
- * params      — fully pre-populated; .func is assigned from callback at runtime,
- *               and .single.handle is refreshed from *handle_ptr for handle-based steps.
+ * params      — fully pre-populated; .func is assigned to dis_read_generic_cb
+ *               at runtime, and .single.handle is refreshed from *handle_ptr
+ *               for handle-based steps.
  * handle_ptr  — points to the discovered handle variable for handle-based steps,
- *               NULL for by-UUID steps. A zero value at runtime causes the step to be skipped.
- * callback    — the bt_gatt_read_func_t for this step.
+ *               NULL for by-UUID steps. A zero value at runtime causes the step
+ *               to be skipped.
+ * process_fn  — called with raw data when a fragment arrives; NULL is safe (no-op).
  * name        — human-readable label used in log messages. */
 typedef struct {
     struct bt_gatt_read_params params;
     uint16_t *handle_ptr;
-    bt_gatt_read_func_t callback;
+    dis_process_fn_t process_fn;
     const char *name;
 } dis_read_step_t;
 
@@ -130,6 +139,10 @@ static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *co
 static void on_dis_reads_complete(void);
 
 static void advance_read_pipeline(dis_read_step_t *next_step);
+
+static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
+                                   struct bt_gatt_read_params *params,
+                                   const void *data, uint16_t length);
 
 /* GATT Discovery Manager callback structure */
 static struct bt_gatt_dm_cb dis_discovery_cb = {
@@ -484,151 +497,101 @@ bool ble_dis_has_cached_firmware(void) {
     return device_info.has_firmware_version && (device_info.firmware_version[0] != '\0');
 }
 
-/* GATT read callbacks for each characteristic */
-static uint8_t read_fw_rev_cb(struct bt_conn *conn, uint8_t err,
-                              struct bt_gatt_read_params *params,
-                              const void *data, uint16_t length) {
-    dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
-
-    if (err) {
-        LOG_ERR("Firmware Revision read failed: %d", err);
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
+/* Per-characteristic data processing functions.
+ * Each is called by dis_read_generic_cb for every received fragment. */
+static void process_mfr_name(const void *data, uint16_t length, uint16_t offset)
+{
+    if (offset >= BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1) {
+        return;
     }
-
-    if (!data) {
-        LOG_INF("Firmware Revision read complete");
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
-    }
-
-    /* Copy firmware revision string */
-    // TODO: This overwrites from offset 0 on each fragment rather than accumulating.
-    // We know values are short for now, but a proper long-read would need to track
-    // how much has been copied and append at the correct offset.
-    size_t copy_len = MIN(length, BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1);
-    memcpy(device_info.firmware_version, data, copy_len);
-    device_info.firmware_version[copy_len] = '\0';
-    device_info.has_firmware_version = true;
-
-    LOG_INF("Firmware Revision: %s", device_info.firmware_version);
-
-    return BT_GATT_ITER_CONTINUE;
+    size_t remaining = BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1 - offset;
+    size_t copy_len = MIN(length, remaining);
+    memcpy(device_info.manufacturer_name + offset, data, copy_len);
+    device_info.manufacturer_name[offset + copy_len] = '\0';
+    device_info.has_manufacturer_name = true;
 }
 
-static uint8_t read_pnp_id_cb(struct bt_conn *conn, uint8_t err,
-                              struct bt_gatt_read_params *params,
-                              const void *data, uint16_t length) {
-    dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
-
-    if (err) {
-        LOG_ERR("PnP ID read failed: %d", err);
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
+static void process_model_number(const void *data, uint16_t length, uint16_t offset)
+{
+    if (offset >= BLE_DIS_MODEL_NUMBER_MAX_LEN - 1) {
+        return;
     }
+    size_t remaining = BLE_DIS_MODEL_NUMBER_MAX_LEN - 1 - offset;
+    size_t copy_len = MIN(length, remaining);
+    memcpy(device_info.model_number + offset, data, copy_len);
+    device_info.model_number[offset + copy_len] = '\0';
+    device_info.has_model_number = true;
+}
 
-    if (!data) {
-        LOG_INF("PnP ID read complete");
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
+static void process_fw_rev(const void *data, uint16_t length, uint16_t offset)
+{
+    if (offset >= BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1) {
+        return;
     }
+    size_t remaining = BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1 - offset;
+    size_t copy_len = MIN(length, remaining);
+    memcpy(device_info.firmware_version + offset, data, copy_len);
+    device_info.firmware_version[offset + copy_len] = '\0';
+    device_info.has_firmware_version = true;
+}
 
+static void process_pnp_id(const void *data, uint16_t length, uint16_t offset)
+{
+    ARG_UNUSED(offset);
     /* Parse PnP ID: 7 bytes total
-     * Byte 0: Vendor ID Source (0x01=Bluetooth SIG, 0x02=USB Implementer's Forum)
+     * Byte 0: Vendor ID Source
      * Bytes 1-2: Vendor ID (little-endian)
      * Bytes 3-4: Product ID (little-endian)
      * Bytes 5-6: Product Version (little-endian) */
     if (length >= 7) {
-        const uint8_t *pnp_data = (const uint8_t *) data;
-        device_info.vendor_id = pnp_data[1] | (pnp_data[2] << 8);
+        const uint8_t *pnp_data = (const uint8_t *)data;
+        device_info.vendor_id  = pnp_data[1] | (pnp_data[2] << 8);
         device_info.product_id = pnp_data[3] | (pnp_data[4] << 8);
         device_info.has_pnp_id = true;
-        LOG_INF("PnP ID: VID=0x%04X, PID=0x%04X", device_info.vendor_id, device_info.product_id);
+        LOG_INF("PnP ID: VID=0x%04X, PID=0x%04X",
+                device_info.vendor_id, device_info.product_id);
     } else {
         LOG_WRN("PnP ID data too short: %d bytes", length);
     }
-
-    return BT_GATT_ITER_CONTINUE;
 }
 
-static uint8_t read_device_name_cb(struct bt_conn *conn, uint8_t err,
-                                   struct bt_gatt_read_params *params,
-                                   const void *data, uint16_t length) {
-    dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
-
-    if (err) {
-        LOG_ERR("Device Name read failed: %d", err);
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
+static void process_device_name(const void *data, uint16_t length, uint16_t offset)
+{
+    if (offset >= BLE_DIS_DEVICE_NAME_MAX_LEN - 1) {
+        return;
     }
-
-    if (!data) {
-        LOG_INF("Device Name read complete");
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
-    }
-
-    /* Copy device name string */
-    size_t copy_len = MIN(length, BLE_DIS_DEVICE_NAME_MAX_LEN - 1);
-    memcpy(device_info.device_name, data, copy_len);
-    device_info.device_name[copy_len] = '\0';
+    size_t remaining = BLE_DIS_DEVICE_NAME_MAX_LEN - 1 - offset;
+    size_t copy_len = MIN(length, remaining);
+    memcpy(device_info.device_name + offset, data, copy_len);
+    device_info.device_name[offset + copy_len] = '\0';
     device_info.has_device_name = true;
-
-    LOG_INF("Device Name: %s", device_info.device_name);
-
-    return BT_GATT_ITER_CONTINUE;
 }
 
-static uint8_t read_mfr_name_cb(struct bt_conn *conn, uint8_t err,
-                                struct bt_gatt_read_params *params,
-                                const void *data, uint16_t length) {
+static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
+                                   struct bt_gatt_read_params *params,
+                                   const void *data, uint16_t length)
+{
     dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
 
     if (err) {
-        LOG_ERR("Manufacturer Name read failed: %d", err);
+        LOG_ERR("%s read failed: %d", step->name, err);
         advance_read_pipeline(step + 1);
         return BT_GATT_ITER_STOP;
     }
 
     if (!data) {
-        LOG_INF("Manufacturer Name read complete");
+        LOG_INF("%s read complete", step->name);
         advance_read_pipeline(step + 1);
         return BT_GATT_ITER_STOP;
     }
 
-    size_t copy_len = MIN(length, BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1);
-    memcpy(device_info.manufacturer_name, data, copy_len);
-    device_info.manufacturer_name[copy_len] = '\0';
-    device_info.has_manufacturer_name = true;
-
-    LOG_INF("Manufacturer Name: %s", device_info.manufacturer_name);
-
-    return BT_GATT_ITER_CONTINUE;
-}
-
-static uint8_t read_model_number_cb(struct bt_conn *conn, uint8_t err,
-                                    struct bt_gatt_read_params *params,
-                                    const void *data, uint16_t length) {
-    dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
-
-    if (err) {
-        LOG_ERR("Model Number read failed: %d", err);
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
+    if (step->process_fn) {
+        /* For handle-based steps (handle_count == 1), params->single.offset holds
+         * the offset of the current fragment, updated by the GATT stack between
+         * fragments. For by-UUID steps, pass 0. */
+        uint16_t offset = (params->handle_count == 1) ? params->single.offset : 0;
+        step->process_fn(data, length, offset);
     }
-
-    if (!data) {
-        LOG_INF("Model Number read complete");
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
-    }
-
-    size_t copy_len = MIN(length, BLE_DIS_MODEL_NUMBER_MAX_LEN - 1);
-    memcpy(device_info.model_number, data, copy_len);
-    device_info.model_number[copy_len] = '\0';
-    device_info.has_model_number = true;
-
-    LOG_INF("Model Number: %s", device_info.model_number);
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -642,28 +605,28 @@ static dis_read_step_t on_connection_read_steps[] = {
                 .params     = {.handle_count = 1,
                         .single = {.handle = 0, .offset = 0}},
                 .handle_ptr = &mfr_name_handle,
-                .callback   = read_mfr_name_cb,
+                .process_fn = process_mfr_name,
                 .name       = "Manufacturer Name",
         },
         {
                 .params     = {.handle_count = 1,
                         .single = {.handle = 0, .offset = 0}},
                 .handle_ptr = &model_number_handle,
-                .callback   = read_model_number_cb,
+                .process_fn = process_model_number,
                 .name       = "Model Number",
         },
         {
                 .params     = {.handle_count = 1,
                         .single = {.handle = 0, .offset = 0}},
                 .handle_ptr = &fw_rev_handle,
-                .callback   = read_fw_rev_cb,
+                .process_fn = process_fw_rev,
                 .name       = "Firmware Revision",
         },
         {
                 .params     = {.handle_count = 1,
                         .single = {.handle = 0, .offset = 0}},
                 .handle_ptr = &pnp_id_handle,
-                .callback   = read_pnp_id_cb,
+                .process_fn = process_pnp_id,
                 .name       = "PnP ID",
         },
         {
@@ -672,7 +635,7 @@ static dis_read_step_t on_connection_read_steps[] = {
                                 .start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE,
                                 .end_handle   = BT_ATT_LAST_ATTRIBUTE_HANDLE}},
                 .handle_ptr = NULL,
-                .callback   = read_device_name_cb,
+                .process_fn = process_device_name,
                 .name       = "Device Name",
         },
 };
@@ -728,7 +691,7 @@ static void advance_read_pipeline(dis_read_step_t *step) {
         }
     }
 
-    step->params.func = step->callback;
+    step->params.func = dis_read_generic_cb;
 
     LOG_INF("Starting read: %s", step->name);
 
