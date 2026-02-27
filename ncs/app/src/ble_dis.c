@@ -119,6 +119,10 @@ static void clear_fw_cache_work_handler(struct k_work *work) {
 	LOG_INF("Cleared cached firmware for %d device(s) in flash", count);
 }
 
+/* Expected device identity strings */
+#define DIS_EXPECTED_MANUFACTURER_NAME "Augmental"
+#define DIS_EXPECTED_MODEL_NUMBER      "MouthPad^"
+
 /* Characteristic handles */
 static uint16_t fw_rev_handle = 0;
 static uint16_t hw_rev_handle = 0;
@@ -644,9 +648,9 @@ static void on_dis_reads_complete(void) {
 
 	/* Validate device identity */
 	bool mfr_ok = device_info.has_manufacturer_name &&
-				  strcmp(device_info.manufacturer_name, "Augmental") == 0;
+				  strcmp(device_info.manufacturer_name, DIS_EXPECTED_MANUFACTURER_NAME) == 0;
 	bool model_ok = device_info.has_model_number &&
-					strcmp(device_info.model_number, "MouthPad^") == 0;
+					strcmp(device_info.model_number, DIS_EXPECTED_MODEL_NUMBER) == 0;
 
 	if (!mfr_ok || !model_ok) {
 		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting",
