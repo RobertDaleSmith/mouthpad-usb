@@ -24,37 +24,37 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 /* Signature for per-characteristic data processing.
  * Called by dis_read_generic_cb only when data != NULL and err == 0.
  * offset — byte position of this fragment within the characteristic value
- *          (0 for first fragment, accumulated for subsequent fragments).
- *          Enables correct multi-fragment accumulation for long characteristics. */
+ *			(0 for first fragment, accumulated for subsequent fragments).
+ *			Enables correct multi-fragment accumulation for long characteristics. */
 typedef void (*dis_process_fn_t)(const void *data, uint16_t length, uint16_t offset);
 
 /* Read pipeline step.
- * params      — fully pre-populated; .func is assigned to dis_read_generic_cb
- *               at runtime, and .single.handle is refreshed from *handle_ptr
- *               for handle-based steps.
- * handle_ptr  — points to the discovered handle variable for handle-based steps,
- *               NULL for by-UUID steps. A zero value at runtime causes the step
- *               to be skipped.
- * process_fn  — called with raw data when a fragment arrives; NULL is safe (no-op).
- * name        — human-readable label used in log messages. */
+ * params	 — fully pre-populated; .func is assigned to dis_read_generic_cb
+ *				 at runtime, and .single.handle is refreshed from *handle_ptr
+ *				 for handle-based steps.
+ * handle_ptr — points to the discovered handle variable for handle-based steps,
+ *				 NULL for by-UUID steps. A zero value at runtime causes the step
+ *				 to be skipped.
+ * process_fn — called with raw data when a fragment arrives; NULL is safe (no-op).
+ * name		 — human-readable label used in log messages. */
 typedef struct {
-    struct bt_gatt_read_params params;
-    uint16_t *handle_ptr;
-    dis_process_fn_t process_fn;
-    const char *name;
+	struct bt_gatt_read_params params;
+	uint16_t *handle_ptr;
+	dis_process_fn_t process_fn;
+	const char *name;
 } dis_read_step_t;
 
 /* Device Information client state */
-static ble_dis_info_t device_info;  /* Active device's DIS info */
+static ble_dis_info_t device_info; /* Active device's DIS info */
 static bool dis_ready = false;
 static struct bt_conn *current_conn = NULL;
 
 /* In-memory cache for all bonded devices' DIS info (loaded from flash at boot) */
 #define MAX_DIS_CACHE_ENTRIES 4
 struct dis_cache_entry {
-    bt_addr_le_t addr;
-    ble_dis_info_t info;
-    bool valid;
+	bt_addr_le_t addr;
+	ble_dis_info_t info;
+	bool valid;
 };
 static struct dis_cache_entry dis_cache[MAX_DIS_CACHE_ENTRIES];
 
@@ -71,52 +71,52 @@ static struct k_work clear_fw_cache_work;
 static bool clear_fw_cache_pending = false;
 
 static void clear_fw_cache_work_handler(struct k_work *work) {
-    ARG_UNUSED(work);
+	ARG_UNUSED(work);
 
-    LOG_INF("Clearing cached firmware version for all bonded devices (deferred)");
+	LOG_INF("Clearing cached firmware version for all bonded devices (deferred)");
 
-    /* Get list of bonded devices from ble_central */
-    extern int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_count);
+	/* Get list of bonded devices from ble_central */
+	extern int ble_central_get_bonded_devices(struct bonded_device *out_list, size_t max_count);
 
-    struct bonded_device bonds[4];
-    int count = ble_central_get_bonded_devices(bonds, 4);
+	struct bonded_device bonds[4];
+	int count = ble_central_get_bonded_devices(bonds, 4);
 
-    if (count <= 0) {
-        LOG_INF("No bonded devices to clear firmware from");
-        clear_fw_cache_pending = false;
-        return;
-    }
+	if (count <= 0) {
+		LOG_INF("No bonded devices to clear firmware from");
+		clear_fw_cache_pending = false;
+		return;
+	}
 
-    /* Clear firmware version for each bonded device */
-    for (int i = 0; i < count; i++) {
-        if (bonds[i].is_valid) {
-            /* Load existing DIS info */
-            ble_dis_info_t dis_info;
-            int err = ble_dis_load_info_for_addr(&bonds[i].addr, &dis_info);
-            if (err != 0) {
-                continue;
-            }
+	/* Clear firmware version for each bonded device */
+	for (int i = 0; i < count; i++) {
+		if (bonds[i].is_valid) {
+			/* Load existing DIS info */
+			ble_dis_info_t dis_info;
+			int err = ble_dis_load_info_for_addr(&bonds[i].addr, &dis_info);
+			if (err != 0) {
+				continue;
+			}
 
-            /* Clear only the firmware version field */
-            dis_info.has_firmware_version = false;
-            dis_info.firmware_version[0] = '\0';
+			/* Clear only the firmware version field */
+			dis_info.has_firmware_version = false;
+			dis_info.firmware_version[0] = '\0';
 
-            /* Save back to flash storage */
-            char key[64];
-            build_dis_settings_key(&bonds[i].addr, key, sizeof(key));
-            err = settings_save_one(key, &dis_info, sizeof(ble_dis_info_t));
-            if (err) {
-                LOG_ERR("Failed to save DIS info after clearing firmware (err %d)", err);
-            } else {
-                char addr_str[BT_ADDR_LE_STR_LEN];
-                bt_addr_le_to_str(&bonds[i].addr, addr_str, sizeof(addr_str));
-                LOG_INF("Cleared cached firmware in flash for: %s", addr_str);
-            }
-        }
-    }
+			/* Save back to flash storage */
+			char key[64];
+			build_dis_settings_key(&bonds[i].addr, key, sizeof(key));
+			err = settings_save_one(key, &dis_info, sizeof(ble_dis_info_t));
+			if (err) {
+				LOG_ERR("Failed to save DIS info after clearing firmware (err %d)", err);
+			} else {
+				char addr_str[BT_ADDR_LE_STR_LEN];
+				bt_addr_le_to_str(&bonds[i].addr, addr_str, sizeof(addr_str));
+				LOG_INF("Cleared cached firmware in flash for: %s", addr_str);
+			}
+		}
+	}
 
-    clear_fw_cache_pending = false;
-    LOG_INF("Cleared cached firmware for %d device(s) in flash", count);
+	clear_fw_cache_pending = false;
+	LOG_INF("Cleared cached firmware for %d device(s) in flash", count);
 }
 
 /* Characteristic handles */
@@ -141,115 +141,115 @@ static void on_dis_reads_complete(void);
 static void advance_read_pipeline(dis_read_step_t *next_step);
 
 static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
-                                   struct bt_gatt_read_params *params,
-                                   const void *data, uint16_t length);
+								   struct bt_gatt_read_params *params,
+								   const void *data, uint16_t length);
 
 /* GATT Discovery Manager callback structure */
 static struct bt_gatt_dm_cb dis_discovery_cb = {
-        .completed = dis_discovery_completed_cb,
-        .service_not_found = dis_discovery_service_not_found_cb,
-        .error_found = dis_discovery_error_found_cb,
+		.completed = dis_discovery_completed_cb,
+		.service_not_found = dis_discovery_service_not_found_cb,
+		.error_found = dis_discovery_error_found_cb,
 };
 
 /* Settings storage for persistent DIS info across power cycles */
 /* Build settings key for a specific device address */
 static void build_dis_settings_key(const bt_addr_le_t *addr, char *key_buf, size_t buf_size) {
-    /* Create clean hex string from address bytes + type for settings key */
-    /* Format: "ble_dis/<6 hex bytes><type>/info" e.g., "ble_dis/F01A5F522A3E_1/info" */
-    snprintf(key_buf, buf_size, "ble_dis/%02X%02X%02X%02X%02X%02X_%d/info",
-             addr->a.val[5], addr->a.val[4], addr->a.val[3],
-             addr->a.val[2], addr->a.val[1], addr->a.val[0],
-             addr->type);
+	/* Create clean hex string from address bytes + type for settings key */
+	/* Format: "ble_dis/<6 hex bytes><type>/info" e.g., "ble_dis/F01A5F522A3E_1/info" */
+	snprintf(key_buf, buf_size, "ble_dis/%02X%02X%02X%02X%02X%02X_%d/info",
+			 addr->a.val[5], addr->a.val[4], addr->a.val[3],
+			 addr->a.val[2], addr->a.val[1], addr->a.val[0],
+			 addr->type);
 }
 
 static int save_dis_info_to_settings(const bt_addr_le_t *addr) {
-    if (!IS_ENABLED(CONFIG_SETTINGS)) {
-        return 0;
-    }
+	if (!IS_ENABLED(CONFIG_SETTINGS)) {
+		return 0;
+	}
 
-    if (!addr) {
-        LOG_ERR("Cannot save DIS info: no address provided");
-        return -EINVAL;
-    }
+	if (!addr) {
+		LOG_ERR("Cannot save DIS info: no address provided");
+		return -EINVAL;
+	}
 
-    char key[64];
-    build_dis_settings_key(addr, key, sizeof(key));
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
 
-    LOG_INF("Saving DIS info for device: has_fw=%d, fw='%s', has_name=%d, name='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
-            device_info.has_firmware_version, device_info.firmware_version,
-            device_info.has_device_name, device_info.device_name,
-            device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
+	LOG_INF("Saving DIS info for device: has_fw=%d, fw='%s', has_name=%d, name='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+			device_info.has_firmware_version, device_info.firmware_version,
+			device_info.has_device_name, device_info.device_name,
+			device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
 
-    int err = settings_save_one(key, &device_info, sizeof(ble_dis_info_t));
-    if (err) {
-        LOG_ERR("Failed to save DIS info to settings (err %d)", err);
-        return err;
-    }
+	int err = settings_save_one(key, &device_info, sizeof(ble_dis_info_t));
+	if (err) {
+		LOG_ERR("Failed to save DIS info to settings (err %d)", err);
+		return err;
+	}
 
-    LOG_INF("Saved DIS info to persistent storage: %s", key);
+	LOG_INF("Saved DIS info to persistent storage: %s", key);
 
-    /* Also update in-memory cache (protected by mutex) */
-    k_mutex_lock(&dis_cache_mutex, K_FOREVER);
-    bool found = false;
-    for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
-        if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
-            /* Update existing entry */
-            memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
-            LOG_INF("Updated in-memory cache entry %d", i);
-            found = true;
-            break;
-        }
-    }
+	/* Also update in-memory cache (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
+	bool found = false;
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
+			/* Update existing entry */
+			memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
+			LOG_INF("Updated in-memory cache entry %d", i);
+			found = true;
+			break;
+		}
+	}
 
-    /* If not found, add new entry */
-    if (!found) {
-        for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
-            if (!dis_cache[i].valid) {
-                memcpy(&dis_cache[i].addr, addr, sizeof(bt_addr_le_t));
-                memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
-                dis_cache[i].valid = true;
-                LOG_INF("Added new in-memory cache entry %d", i);
-                break;
-            }
-        }
-    }
-    k_mutex_unlock(&dis_cache_mutex);
+	/* If not found, add new entry */
+	if (!found) {
+		for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+			if (!dis_cache[i].valid) {
+				memcpy(&dis_cache[i].addr, addr, sizeof(bt_addr_le_t));
+				memcpy(&dis_cache[i].info, &device_info, sizeof(ble_dis_info_t));
+				dis_cache[i].valid = true;
+				LOG_INF("Added new in-memory cache entry %d", i);
+				break;
+			}
+		}
+	}
+	k_mutex_unlock(&dis_cache_mutex);
 
-    return 0;
+	return 0;
 }
 
 static int settings_set_cb(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg) {
-    LOG_INF("DIS settings_set_cb called: name='%s', len=%d", name, len);
+	LOG_INF("DIS settings_set_cb called: name='%s', len=%d", name, len);
 
-    /* Settings are per-device: ble_dis/<addr>/info */
-    /* Load all cached DIS info into memory at boot */
-    if (len == sizeof(ble_dis_info_t)) {
-        ble_dis_info_t temp_info;
-        ssize_t bytes_read = read_cb(cb_arg, &temp_info, sizeof(ble_dis_info_t));
-        if (bytes_read == sizeof(ble_dis_info_t)) {
-            /* Parse address from key format: "<addr>/info" */
-            bt_addr_le_t addr;
-            if (bt_addr_le_from_str(name, "RPA", &addr) == 0 ||
-                bt_addr_le_from_str(name, "random", &addr) == 0 ||
-                bt_addr_le_from_str(name, "public", &addr) == 0) {
-                /* Find empty slot in cache (protected by mutex) */
-                k_mutex_lock(&dis_cache_mutex, K_FOREVER);
-                for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
-                    if (!dis_cache[i].valid) {
-                        memcpy(&dis_cache[i].addr, &addr, sizeof(bt_addr_le_t));
-                        memcpy(&dis_cache[i].info, &temp_info, sizeof(ble_dis_info_t));
-                        dis_cache[i].valid = true;
-                        LOG_INF("Loaded DIS cache entry %d from flash: has_fw=%d", i, temp_info.has_firmware_version);
-                        break;
-                    }
-                }
-                k_mutex_unlock(&dis_cache_mutex);
-            }
-            return 0;
-        }
-    }
+	/* Settings are per-device: ble_dis/<addr>/info */
+	/* Load all cached DIS info into memory at boot */
+	if (len == sizeof(ble_dis_info_t)) {
+		ble_dis_info_t temp_info;
+		ssize_t bytes_read = read_cb(cb_arg, &temp_info, sizeof(ble_dis_info_t));
+		if (bytes_read == sizeof(ble_dis_info_t)) {
+			/* Parse address from key format: "<addr>/info" */
+			bt_addr_le_t addr;
+			if (bt_addr_le_from_str(name, "RPA", &addr) == 0 ||
+				bt_addr_le_from_str(name, "random", &addr) == 0 ||
+				bt_addr_le_from_str(name, "public", &addr) == 0) {
+				/* Find empty slot in cache (protected by mutex) */
+				k_mutex_lock(&dis_cache_mutex, K_FOREVER);
+				for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+					if (!dis_cache[i].valid) {
+						memcpy(&dis_cache[i].addr, &addr, sizeof(bt_addr_le_t));
+						memcpy(&dis_cache[i].info, &temp_info, sizeof(ble_dis_info_t));
+						dis_cache[i].valid = true;
+						LOG_INF("Loaded DIS cache entry %d from flash: has_fw=%d", i, temp_info.has_firmware_version);
+						break;
+					}
+				}
+				k_mutex_unlock(&dis_cache_mutex);
+			}
+			return 0;
+		}
+	}
 
-    return -ENOENT;
+	return -ENOENT;
 }
 
 SETTINGS_STATIC_HANDLER_DEFINE(ble_dis,
@@ -257,343 +257,337 @@ SETTINGS_STATIC_HANDLER_DEFINE(ble_dis,
 
 /* Public API implementations */
 int ble_dis_init(void) {
-    LOG_INF("Initializing Device Information Service client...");
-    /* Note: Don't clear device_info here - it may already be loaded from
-     * persistent storage via settings_set_cb() when settings subsystem initialized
-     */
-    dis_ready = false;
+	LOG_INF("Initializing Device Information Service client...");
+	/* Note: Don't clear device_info here - it may already be loaded from
+	 * persistent storage via settings_set_cb() when settings subsystem initialized
+	 */
+	dis_ready = false;
 
-    /* Initialize work queue for deferred flash writes */
-    k_work_init(&clear_fw_cache_work, clear_fw_cache_work_handler);
+	/* Initialize work queue for deferred flash writes */
+	k_work_init(&clear_fw_cache_work, clear_fw_cache_work_handler);
 
-    LOG_INF("DIS init - device_info state: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
-            device_info.has_firmware_version, device_info.firmware_version,
-            device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
+	LOG_INF("DIS init - device_info state: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+			device_info.has_firmware_version, device_info.firmware_version,
+			device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
 
-    LOG_INF("Device Information Service client initialized successfully");
-    return 0;
+	LOG_INF("Device Information Service client initialized successfully");
+	return 0;
 }
 
 int ble_dis_discover(struct bt_conn *conn) {
-    int err;
+	int err;
 
-    if (!conn || conn != ble_central_get_default_conn()) {
-        LOG_WRN("Invalid connection for Device Information Service discovery");
-        return -EINVAL;
-    }
+	if (!conn || conn != ble_central_get_default_conn()) {
+		LOG_WRN("Invalid connection for Device Information Service discovery");
+		return -EINVAL;
+	}
 
-    LOG_INF("Starting Device Information Service discovery");
-    current_conn = conn;
+	LOG_INF("Starting Device Information Service discovery");
+	current_conn = conn;
 
-    /* Start GATT discovery for DIS service */
-    err = bt_gatt_dm_start(conn, BT_UUID_DIS, &dis_discovery_cb, NULL);
-    if (err) {
-        LOG_ERR("Could not start DIS discovery: %d", err);
-        return err;
-    }
+	/* Start GATT discovery for DIS service */
+	err = bt_gatt_dm_start(conn, BT_UUID_DIS, &dis_discovery_cb, NULL);
+	if (err) {
+		LOG_ERR("Could not start DIS discovery: %d", err);
+		return err;
+	}
 
-    return 0;
+	return 0;
 }
 
 bool ble_dis_is_ready(void) {
-    return dis_ready;
+	return dis_ready;
 }
 
 void ble_dis_reset(void) {
-    /* Clear connection state and handles, but preserve cached device_info
-     * so it can be reported even when disconnected (matches ESP firmware behavior)
-     */
-    dis_ready = false;
-    current_conn = NULL;
-    fw_rev_handle = 0;
-    hw_rev_handle = 0;
-    mfr_name_handle = 0;
-    model_number_handle = 0;
-    pnp_id_handle = 0;
-    /* Note: device_info is NOT cleared - it persists across disconnections
-     * This allows the host to query bonded device info even when disconnected
-     */
-    LOG_INF("Device Information Service reset (device_info preserved)");
+	/* Clear connection state and handles, but preserve cached device_info
+	 * so it can be reported even when disconnected (matches ESP firmware behavior)
+	 */
+	dis_ready = false;
+	current_conn = NULL;
+	fw_rev_handle = 0;
+	hw_rev_handle = 0;
+	mfr_name_handle = 0;
+	model_number_handle = 0;
+	pnp_id_handle = 0;
+	/* Note: device_info is NOT cleared - it persists across disconnections
+	 * This allows the host to query bonded device info even when disconnected
+	 */
+	LOG_INF("Device Information Service reset (device_info preserved)");
 }
 
 const ble_dis_info_t *ble_dis_get_info(void) {
-    /* Return cached device_info even when disconnected (dis_ready == false)
-     * Check if any meaningful data is present before returning
-     */
-    if (device_info.has_firmware_version || device_info.has_pnp_id) {
-        LOG_INF("ble_dis_get_info returning data: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
-                device_info.has_firmware_version, device_info.firmware_version,
-                device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
-        return &device_info;
-    }
-    LOG_WRN("ble_dis_get_info returning NULL (no data available)");
-    return NULL;
+	/* Return cached device_info even when disconnected (dis_ready == false)
+	 * Check if any meaningful data is present before returning
+	 */
+	if (device_info.has_firmware_version || device_info.has_pnp_id) {
+		LOG_INF("ble_dis_get_info returning data: has_fw=%d, fw='%s', has_pnp=%d, vid=0x%04X, pid=0x%04X",
+				device_info.has_firmware_version, device_info.firmware_version,
+				device_info.has_pnp_id, device_info.vendor_id, device_info.product_id);
+		return &device_info;
+	}
+	LOG_WRN("ble_dis_get_info returning NULL (no data available)");
+	return NULL;
 }
 
 int ble_dis_load_info_for_addr(const bt_addr_le_t *addr, ble_dis_info_t *out_info) {
-    if (!addr || !out_info) {
-        return -EINVAL;
-    }
+	if (!addr || !out_info) {
+		return -EINVAL;
+	}
 
-    if (!IS_ENABLED(CONFIG_SETTINGS)) {
-        return -ENOTSUP;
-    }
+	if (!IS_ENABLED(CONFIG_SETTINGS)) {
+		return -ENOTSUP;
+	}
 
-    char key[64];
-    build_dis_settings_key(addr, key, sizeof(key));
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
 
-    /* Use settings_load_one to load the data directly */
-    ssize_t len = settings_load_one(key, out_info, sizeof(ble_dis_info_t));
-    if (len <= 0) {
-        LOG_INF("No DIS info found for device (key: %s, len: %d)", key, (int) len);
-        return -ENOENT;
-    }
+	/* Use settings_load_one to load the data directly */
+	ssize_t len = settings_load_one(key, out_info, sizeof(ble_dis_info_t));
+	if (len <= 0) {
+		LOG_INF("No DIS info found for device (key: %s, len: %d)", key, (int) len);
+		return -ENOENT;
+	}
 
-    if (out_info->has_device_name) {
-        LOG_INF("Loaded DIS info for device: name='%s'", out_info->device_name);
-    }
+	if (out_info->has_device_name) {
+		LOG_INF("Loaded DIS info for device: name='%s'", out_info->device_name);
+	}
 
-    return 0;
+	return 0;
 }
 
 void ble_dis_clear_saved_for_addr(const bt_addr_le_t *addr) {
-    if (!addr || !IS_ENABLED(CONFIG_SETTINGS)) {
-        return;
-    }
+	if (!addr || !IS_ENABLED(CONFIG_SETTINGS)) {
+		return;
+	}
 
-    char key[64];
-    build_dis_settings_key(addr, key, sizeof(key));
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
 
-    LOG_INF("Clearing DIS info for device: %s", key);
+	LOG_INF("Clearing DIS info for device: %s", key);
 
-    int err = settings_delete(key);
-    if (err && err != -ENOENT) {
-        LOG_ERR("Failed to delete DIS info (err %d)", err);
-    } else {
-        LOG_INF("Cleared DIS info from storage");
-    }
+	int err = settings_delete(key);
+	if (err && err != -ENOENT) {
+		LOG_ERR("Failed to delete DIS info (err %d)", err);
+	} else {
+		LOG_INF("Cleared DIS info from storage");
+	}
 }
 
 void ble_dis_clear_saved(void) {
-    LOG_INF("Clearing all saved DIS info");
+	LOG_INF("Clearing all saved DIS info");
 
-    /* Clear in-memory cache */
-    memset(&device_info, 0, sizeof(device_info));
+	/* Clear in-memory cache */
+	memset(&device_info, 0, sizeof(device_info));
 
-    /* Note: Per-device DIS info in settings will be cleaned up when bonds are cleared */
-    /* This function now just clears the global cache */
+	/* Note: Per-device DIS info in settings will be cleaned up when bonds are cleared */
+	/* This function now just clears the global cache */
 }
 
 void ble_dis_clear_cached_firmware_for_addr(const bt_addr_le_t *addr) {
-    if (!addr || !IS_ENABLED(CONFIG_SETTINGS)) {
-        return;
-    }
+	if (!addr || !IS_ENABLED(CONFIG_SETTINGS)) {
+		return;
+	}
 
-    /* Load existing DIS info */
-    ble_dis_info_t dis_info;
-    int err = ble_dis_load_info_for_addr(addr, &dis_info);
+	/* Load existing DIS info */
+	ble_dis_info_t dis_info;
+	int err = ble_dis_load_info_for_addr(addr, &dis_info);
 
-    if (err != 0) {
-        LOG_INF("No cached DIS info to clear firmware from");
-        return;
-    }
+	if (err != 0) {
+		LOG_INF("No cached DIS info to clear firmware from");
+		return;
+	}
 
-    /* Clear only the firmware version field */
-    dis_info.has_firmware_version = false;
-    dis_info.firmware_version[0] = '\0';
+	/* Clear only the firmware version field */
+	dis_info.has_firmware_version = false;
+	dis_info.firmware_version[0] = '\0';
 
-    /* Save back to flash storage */
-    char key[64];
-    build_dis_settings_key(addr, key, sizeof(key));
+	/* Save back to flash storage */
+	char key[64];
+	build_dis_settings_key(addr, key, sizeof(key));
 
-    err = settings_save_one(key, &dis_info, sizeof(ble_dis_info_t));
-    if (err) {
-        LOG_ERR("Failed to save DIS info after clearing firmware (err %d)", err);
-    } else {
-        char addr_str[BT_ADDR_LE_STR_LEN];
-        bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-        LOG_INF("Cleared cached firmware version in flash for device: %s", addr_str);
-    }
+	err = settings_save_one(key, &dis_info, sizeof(ble_dis_info_t));
+	if (err) {
+		LOG_ERR("Failed to save DIS info after clearing firmware (err %d)", err);
+	} else {
+		char addr_str[BT_ADDR_LE_STR_LEN];
+		bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+		LOG_INF("Cleared cached firmware version in flash for device: %s", addr_str);
+	}
 
-    /* Also clear from in-memory cache (protected by mutex) */
-    k_mutex_lock(&dis_cache_mutex, K_FOREVER);
-    for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
-        if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
-            dis_cache[i].info.has_firmware_version = false;
-            dis_cache[i].info.firmware_version[0] = '\0';
-            LOG_INF("Cleared cached firmware version in memory cache entry %d", i);
-            break;
-        }
-    }
-    k_mutex_unlock(&dis_cache_mutex);
+	/* Also clear from in-memory cache (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
+			dis_cache[i].info.has_firmware_version = false;
+			dis_cache[i].info.firmware_version[0] = '\0';
+			LOG_INF("Cleared cached firmware version in memory cache entry %d", i);
+			break;
+		}
+	}
+	k_mutex_unlock(&dis_cache_mutex);
 }
 
 void ble_dis_clear_all_cached_firmware(void) {
-    LOG_INF("Clearing cached firmware version for all devices");
+	LOG_INF("Clearing cached firmware version for all devices");
 
-    /* Clear all in-memory cache entries immediately (protected by mutex) */
-    k_mutex_lock(&dis_cache_mutex, K_FOREVER);
-    int cleared = 0;
-    for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
-        if (dis_cache[i].valid && dis_cache[i].info.has_firmware_version) {
-            dis_cache[i].info.has_firmware_version = false;
-            dis_cache[i].info.firmware_version[0] = '\0';
-            cleared++;
-        }
-    }
-    k_mutex_unlock(&dis_cache_mutex);
+	/* Clear all in-memory cache entries immediately (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
+	int cleared = 0;
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && dis_cache[i].info.has_firmware_version) {
+			dis_cache[i].info.has_firmware_version = false;
+			dis_cache[i].info.firmware_version[0] = '\0';
+			cleared++;
+		}
+	}
+	k_mutex_unlock(&dis_cache_mutex);
 
-    /* Also clear current device_info */
-    device_info.has_firmware_version = false;
-    device_info.firmware_version[0] = '\0';
+	/* Also clear current device_info */
+	device_info.has_firmware_version = false;
+	device_info.firmware_version[0] = '\0';
 
-    LOG_INF("Cleared firmware from %d in-memory cache entries", cleared);
+	LOG_INF("Cleared firmware from %d in-memory cache entries", cleared);
 
-    /* Submit work to clear flash asynchronously (non-blocking) */
-    if (!clear_fw_cache_pending) {
-        clear_fw_cache_pending = true;
-        k_work_submit(&clear_fw_cache_work);
-        LOG_INF("Submitted deferred flash clear work");
-    }
+	/* Submit work to clear flash asynchronously (non-blocking) */
+	if (!clear_fw_cache_pending) {
+		clear_fw_cache_pending = true;
+		k_work_submit(&clear_fw_cache_work);
+		LOG_INF("Submitted deferred flash clear work");
+	}
 }
 
 /* Load cached DIS from in-memory cache into device_info for the connected device */
 static void load_cache_for_addr(const bt_addr_le_t *addr) {
-    if (!addr) {
-        /* No address - clear device_info */
-        memset(&device_info, 0, sizeof(device_info));
-        return;
-    }
+	if (!addr) {
+		/* No address - clear device_info */
+		memset(&device_info, 0, sizeof(device_info));
+		return;
+	}
 
-    /* Search for this address in the cache (protected by mutex) */
-    k_mutex_lock(&dis_cache_mutex, K_FOREVER);
-    bool found = false;
-    for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
-        if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
-            /* Found cached info for this device */
-            memcpy(&device_info, &dis_cache[i].info, sizeof(ble_dis_info_t));
-            found = true;
-            break;
-        }
-    }
-    k_mutex_unlock(&dis_cache_mutex);
+	/* Search for this address in the cache (protected by mutex) */
+	k_mutex_lock(&dis_cache_mutex, K_FOREVER);
+	bool found = false;
+	for (int i = 0; i < MAX_DIS_CACHE_ENTRIES; i++) {
+		if (dis_cache[i].valid && bt_addr_le_cmp(&dis_cache[i].addr, addr) == 0) {
+			/* Found cached info for this device */
+			memcpy(&device_info, &dis_cache[i].info, sizeof(ble_dis_info_t));
+			found = true;
+			break;
+		}
+	}
+	k_mutex_unlock(&dis_cache_mutex);
 
-    if (found) {
-        LOG_INF("Loaded cached DIS from memory: has_fw=%d, fw='%s'",
-                device_info.has_firmware_version, device_info.firmware_version);
-    } else {
-        /* No cache found - clear device_info */
-        memset(&device_info, 0, sizeof(device_info));
-        LOG_INF("No cached DIS found in memory for this device");
-    }
+	if (found) {
+		LOG_INF("Loaded cached DIS from memory: has_fw=%d, fw='%s'",
+				device_info.has_firmware_version, device_info.firmware_version);
+	} else {
+		/* No cache found - clear device_info */
+		memset(&device_info, 0, sizeof(device_info));
+		LOG_INF("No cached DIS found in memory for this device");
+	}
 }
 
 void ble_dis_load_cache_for_connected_device(const bt_addr_le_t *addr) {
-    load_cache_for_addr(addr);
+	load_cache_for_addr(addr);
 }
 
 bool ble_dis_has_cached_firmware(void) {
-    /* Check if device_info has valid firmware version */
-    return device_info.has_firmware_version && (device_info.firmware_version[0] != '\0');
+	/* Check if device_info has valid firmware version */
+	return device_info.has_firmware_version && (device_info.firmware_version[0] != '\0');
 }
 
 /* Per-characteristic data processing functions.
  * Each is called by dis_read_generic_cb for every received fragment. */
-static void process_mfr_name(const void *data, uint16_t length, uint16_t offset)
-{
-    if (offset >= BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1) {
-        return;
-    }
-    size_t remaining = BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1 - offset;
-    size_t copy_len = MIN(length, remaining);
-    memcpy(device_info.manufacturer_name + offset, data, copy_len);
-    device_info.manufacturer_name[offset + copy_len] = '\0';
-    device_info.has_manufacturer_name = true;
+static void process_mfr_name(const void *data, uint16_t length, uint16_t offset) {
+	if (offset >= BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1) {
+		return;
+	}
+	size_t remaining = BLE_DIS_MANUFACTURER_NAME_MAX_LEN - 1 - offset;
+	size_t copy_len = MIN(length, remaining);
+	memcpy(device_info.manufacturer_name + offset, data, copy_len);
+	device_info.manufacturer_name[offset + copy_len] = '\0';
+	device_info.has_manufacturer_name = true;
 }
 
-static void process_model_number(const void *data, uint16_t length, uint16_t offset)
-{
-    if (offset >= BLE_DIS_MODEL_NUMBER_MAX_LEN - 1) {
-        return;
-    }
-    size_t remaining = BLE_DIS_MODEL_NUMBER_MAX_LEN - 1 - offset;
-    size_t copy_len = MIN(length, remaining);
-    memcpy(device_info.model_number + offset, data, copy_len);
-    device_info.model_number[offset + copy_len] = '\0';
-    device_info.has_model_number = true;
+static void process_model_number(const void *data, uint16_t length, uint16_t offset) {
+	if (offset >= BLE_DIS_MODEL_NUMBER_MAX_LEN - 1) {
+		return;
+	}
+	size_t remaining = BLE_DIS_MODEL_NUMBER_MAX_LEN - 1 - offset;
+	size_t copy_len = MIN(length, remaining);
+	memcpy(device_info.model_number + offset, data, copy_len);
+	device_info.model_number[offset + copy_len] = '\0';
+	device_info.has_model_number = true;
 }
 
-static void process_fw_rev(const void *data, uint16_t length, uint16_t offset)
-{
-    if (offset >= BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1) {
-        return;
-    }
-    size_t remaining = BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1 - offset;
-    size_t copy_len = MIN(length, remaining);
-    memcpy(device_info.firmware_version + offset, data, copy_len);
-    device_info.firmware_version[offset + copy_len] = '\0';
-    device_info.has_firmware_version = true;
+static void process_fw_rev(const void *data, uint16_t length, uint16_t offset) {
+	if (offset >= BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1) {
+		return;
+	}
+	size_t remaining = BLE_DIS_FIRMWARE_VERSION_MAX_LEN - 1 - offset;
+	size_t copy_len = MIN(length, remaining);
+	memcpy(device_info.firmware_version + offset, data, copy_len);
+	device_info.firmware_version[offset + copy_len] = '\0';
+	device_info.has_firmware_version = true;
 }
 
-static void process_pnp_id(const void *data, uint16_t length, uint16_t offset)
-{
-    ARG_UNUSED(offset);
-    /* Parse PnP ID: 7 bytes total
-     * Byte 0: Vendor ID Source
-     * Bytes 1-2: Vendor ID (little-endian)
-     * Bytes 3-4: Product ID (little-endian)
-     * Bytes 5-6: Product Version (little-endian) */
-    if (length >= 7) {
-        const uint8_t *pnp_data = (const uint8_t *)data;
-        device_info.vendor_id  = pnp_data[1] | (pnp_data[2] << 8);
-        device_info.product_id = pnp_data[3] | (pnp_data[4] << 8);
-        device_info.has_pnp_id = true;
-        LOG_INF("PnP ID: VID=0x%04X, PID=0x%04X",
-                device_info.vendor_id, device_info.product_id);
-    } else {
-        LOG_WRN("PnP ID data too short: %d bytes", length);
-    }
+static void process_pnp_id(const void *data, uint16_t length, uint16_t offset) {
+	ARG_UNUSED(offset);
+	/* Parse PnP ID: 7 bytes total
+	 * Byte 0: Vendor ID Source
+	 * Bytes 1-2: Vendor ID (little-endian)
+	 * Bytes 3-4: Product ID (little-endian)
+	 * Bytes 5-6: Product Version (little-endian) */
+	if (length >= 7) {
+		const uint8_t *pnp_data = (const uint8_t *) data;
+		device_info.vendor_id = pnp_data[1] | (pnp_data[2] << 8);
+		device_info.product_id = pnp_data[3] | (pnp_data[4] << 8);
+		device_info.has_pnp_id = true;
+		LOG_INF("PnP ID: VID=0x%04X, PID=0x%04X",
+				device_info.vendor_id, device_info.product_id);
+	} else {
+		LOG_WRN("PnP ID data too short: %d bytes", length);
+	}
 }
 
-static void process_device_name(const void *data, uint16_t length, uint16_t offset)
-{
-    if (offset >= BLE_DIS_DEVICE_NAME_MAX_LEN - 1) {
-        return;
-    }
-    size_t remaining = BLE_DIS_DEVICE_NAME_MAX_LEN - 1 - offset;
-    size_t copy_len = MIN(length, remaining);
-    memcpy(device_info.device_name + offset, data, copy_len);
-    device_info.device_name[offset + copy_len] = '\0';
-    device_info.has_device_name = true;
+static void process_device_name(const void *data, uint16_t length, uint16_t offset) {
+	if (offset >= BLE_DIS_DEVICE_NAME_MAX_LEN - 1) {
+		return;
+	}
+	size_t remaining = BLE_DIS_DEVICE_NAME_MAX_LEN - 1 - offset;
+	size_t copy_len = MIN(length, remaining);
+	memcpy(device_info.device_name + offset, data, copy_len);
+	device_info.device_name[offset + copy_len] = '\0';
+	device_info.has_device_name = true;
 }
 
 static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
-                                   struct bt_gatt_read_params *params,
-                                   const void *data, uint16_t length)
-{
-    dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
+								   struct bt_gatt_read_params *params,
+								   const void *data, uint16_t length) {
+	dis_read_step_t *step = CONTAINER_OF(params, dis_read_step_t, params);
 
-    if (err) {
-        LOG_ERR("%s read failed: %d", step->name, err);
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
-    }
+	if (err) {
+		LOG_ERR("%s read failed: %d", step->name, err);
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
+	}
 
-    if (!data) {
-        LOG_INF("%s read complete", step->name);
-        advance_read_pipeline(step + 1);
-        return BT_GATT_ITER_STOP;
-    }
+	if (!data) {
+		LOG_INF("%s read complete", step->name);
+		advance_read_pipeline(step + 1);
+		return BT_GATT_ITER_STOP;
+	}
 
-    if (step->process_fn) {
-        /* For handle-based steps (handle_count == 1), params->single.offset holds
-         * the offset of the current fragment, updated by the GATT stack between
-         * fragments. For by-UUID steps, pass 0. */
-        uint16_t offset = (params->handle_count == 1) ? params->single.offset : 0;
-        step->process_fn(data, length, offset);
-    }
+	if (step->process_fn) {
+		/* For handle-based steps (handle_count == 1), params->single.offset holds
+		 * the offset of the current fragment, updated by the GATT stack between
+		 * fragments. For by-UUID steps, pass 0. */
+		uint16_t offset = (params->handle_count == 1) ? params->single.offset : 0;
+		step->process_fn(data, length, offset);
+	}
 
-    return BT_GATT_ITER_CONTINUE;
+	return BT_GATT_ITER_CONTINUE;
 }
 
 /* Read pipeline: one entry per characteristic to read, in order.
@@ -601,192 +595,192 @@ static uint8_t dis_read_generic_cb(struct bt_conn *conn, uint8_t err,
  * the discovered handle variables; a value of 0 causes the step to be skipped.
  * For by-UUID steps, params.by_uuid is used as-is. */
 static dis_read_step_t on_connection_read_steps[] = {
-        {
-                .params     = {.handle_count = 1,
-                        .single = {.handle = 0, .offset = 0}},
-                .handle_ptr = &mfr_name_handle,
-                .process_fn = process_mfr_name,
-                .name       = "Manufacturer Name",
-        },
-        {
-                .params     = {.handle_count = 1,
-                        .single = {.handle = 0, .offset = 0}},
-                .handle_ptr = &model_number_handle,
-                .process_fn = process_model_number,
-                .name       = "Model Number",
-        },
-        {
-                .params     = {.handle_count = 1,
-                        .single = {.handle = 0, .offset = 0}},
-                .handle_ptr = &fw_rev_handle,
-                .process_fn = process_fw_rev,
-                .name       = "Firmware Revision",
-        },
-        {
-                .params     = {.handle_count = 1,
-                        .single = {.handle = 0, .offset = 0}},
-                .handle_ptr = &pnp_id_handle,
-                .process_fn = process_pnp_id,
-                .name       = "PnP ID",
-        },
-        {
-                .params     = {.handle_count = 0,
-                        .by_uuid = {.uuid         = BT_UUID_GAP_DEVICE_NAME,
-                                .start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE,
-                                .end_handle   = BT_ATT_LAST_ATTRIBUTE_HANDLE}},
-                .handle_ptr = NULL,
-                .process_fn = process_device_name,
-                .name       = "Device Name",
-        },
+		{
+				.params = {.handle_count = 1,
+						.single = {.handle = 0, .offset = 0}},
+				.handle_ptr = &mfr_name_handle,
+				.process_fn = process_mfr_name,
+				.name = "Manufacturer Name",
+		},
+		{
+				.params = {.handle_count = 1,
+						.single = {.handle = 0, .offset = 0}},
+				.handle_ptr = &model_number_handle,
+				.process_fn = process_model_number,
+				.name = "Model Number",
+		},
+		{
+				.params = {.handle_count = 1,
+						.single = {.handle = 0, .offset = 0}},
+				.handle_ptr = &fw_rev_handle,
+				.process_fn = process_fw_rev,
+				.name = "Firmware Revision",
+		},
+		{
+				.params = {.handle_count = 1,
+						.single = {.handle = 0, .offset = 0}},
+				.handle_ptr = &pnp_id_handle,
+				.process_fn = process_pnp_id,
+				.name = "PnP ID",
+		},
+		{
+				.params = {.handle_count = 0,
+						.by_uuid = {.uuid = BT_UUID_GAP_DEVICE_NAME,
+								.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE,
+								.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE}},
+				.handle_ptr = NULL,
+				.process_fn = process_device_name,
+				.name = "Device Name",
+		},
 };
 
 static void on_dis_reads_complete(void) {
-    LOG_INF("DIS read pipeline complete");
-    dis_ready = true;
+	LOG_INF("DIS read pipeline complete");
+	dis_ready = true;
 
-    if (current_conn) {
-        save_dis_info_to_settings(bt_conn_get_dst(current_conn));
-    }
+	if (current_conn) {
+		save_dis_info_to_settings(bt_conn_get_dst(current_conn));
+	}
 
-    /* Validate device identity */
-    bool mfr_ok = device_info.has_manufacturer_name &&
-                  strcmp(device_info.manufacturer_name, "Augmental") == 0;
-    bool model_ok = device_info.has_model_number &&
-                    strcmp(device_info.model_number, "MouthPad^") == 0;
+	/* Validate device identity */
+	bool mfr_ok = device_info.has_manufacturer_name &&
+				  strcmp(device_info.manufacturer_name, "Augmental") == 0;
+	bool model_ok = device_info.has_model_number &&
+					strcmp(device_info.model_number, "MouthPad^") == 0;
 
-    if (!mfr_ok || !model_ok) {
-        LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting",
-                device_info.has_manufacturer_name ? device_info.manufacturer_name : "(none)",
-                device_info.has_model_number ? device_info.model_number : "(none)");
-        if (current_conn) {
-            bt_conn_disconnect(current_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-        }
-        return;
-    }
+	if (!mfr_ok || !model_ok) {
+		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting",
+				device_info.has_manufacturer_name ? device_info.manufacturer_name : "(none)",
+				device_info.has_model_number ? device_info.model_number : "(none)");
+		if (current_conn) {
+			bt_conn_disconnect(current_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		}
+		return;
+	}
 
-    if (discovery_complete_cb && current_conn) {
-        discovery_complete_cb(current_conn);
-    }
+	if (discovery_complete_cb && current_conn) {
+		discovery_complete_cb(current_conn);
+	}
 }
 
 /* Advance the read pipeline starting from next_step.
  * Skips steps whose handle is zero (characteristic not found on remote).
  * Calls on_dis_reads_complete() when all steps are exhausted. */
 static void advance_read_pipeline(dis_read_step_t *step) {
-    dis_read_step_t *end = on_connection_read_steps + ARRAY_SIZE(on_connection_read_steps);
+	dis_read_step_t *end = on_connection_read_steps + ARRAY_SIZE(on_connection_read_steps);
 
-    if (step >= end) {
-        on_dis_reads_complete();
-        return;
-    }
+	if (step >= end) {
+		on_dis_reads_complete();
+		return;
+	}
 
-    /* For handle-based steps, refresh the handle and skip if not discovered. */
-    if (step->handle_ptr != NULL) {
-        step->params.single.handle = *step->handle_ptr;
+	/* For handle-based steps, refresh the handle and skip if not discovered. */
+	if (step->handle_ptr != NULL) {
+		step->params.single.handle = *step->handle_ptr;
 
-        if (step->params.single.handle == 0) {
-            LOG_INF("Skipping step '%s' (handle not found)", step->name);
-            advance_read_pipeline(step + 1);
-            return;
-        }
-    }
+		if (step->params.single.handle == 0) {
+			LOG_INF("Skipping step '%s' (handle not found)", step->name);
+			advance_read_pipeline(step + 1);
+			return;
+		}
+	}
 
-    step->params.func = dis_read_generic_cb;
+	step->params.func = dis_read_generic_cb;
 
-    LOG_INF("Starting read: %s", step->name);
+	LOG_INF("Starting read: %s", step->name);
 
-    int err = bt_gatt_read(current_conn, &step->params);
-    if (err) {
-        LOG_ERR("Failed to start read for '%s': %d", step->name, err);
-        advance_read_pipeline(step + 1);
-        return;
-    }
+	int err = bt_gatt_read(current_conn, &step->params);
+	if (err) {
+		LOG_ERR("Failed to start read for '%s': %d", step->name, err);
+		advance_read_pipeline(step + 1);
+		return;
+	}
 }
 
 /* DIS Discovery callbacks */
 static void dis_discovery_completed_cb(struct bt_gatt_dm *dm, void *context) {
-    int err;
-    const struct bt_gatt_dm_attr *gatt_chrc;
-    const struct bt_gatt_dm_attr *gatt_desc;
+	int err;
+	const struct bt_gatt_dm_attr *gatt_chrc;
+	const struct bt_gatt_dm_attr *gatt_desc;
 
-    LOG_INF("Device Information Service discovery completed");
-    bt_gatt_dm_data_print(dm);
+	LOG_INF("Device Information Service discovery completed");
+	bt_gatt_dm_data_print(dm);
 
-    /* Find Firmware Revision characteristic */
-    gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_FIRMWARE_REVISION);
-    if (gatt_chrc) {
-        gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_FIRMWARE_REVISION);
-        if (gatt_desc) {
-            fw_rev_handle = gatt_desc->handle;
-            LOG_INF("Found Firmware Revision characteristic (handle: %d)", fw_rev_handle);
-        }
-    }
+	/* Find Firmware Revision characteristic */
+	gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_FIRMWARE_REVISION);
+	if (gatt_chrc) {
+		gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_FIRMWARE_REVISION);
+		if (gatt_desc) {
+			fw_rev_handle = gatt_desc->handle;
+			LOG_INF("Found Firmware Revision characteristic (handle: %d)", fw_rev_handle);
+		}
+	}
 
-    /* Find Hardware Revision characteristic */
-    gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_HARDWARE_REVISION);
-    if (gatt_chrc) {
-        gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_HARDWARE_REVISION);
-        if (gatt_desc) {
-            hw_rev_handle = gatt_desc->handle;
-            LOG_INF("Found Hardware Revision characteristic (handle: %d)", hw_rev_handle);
-        }
-    }
+	/* Find Hardware Revision characteristic */
+	gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_HARDWARE_REVISION);
+	if (gatt_chrc) {
+		gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_HARDWARE_REVISION);
+		if (gatt_desc) {
+			hw_rev_handle = gatt_desc->handle;
+			LOG_INF("Found Hardware Revision characteristic (handle: %d)", hw_rev_handle);
+		}
+	}
 
-    /* Find Manufacturer Name characteristic */
-    gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_MANUFACTURER_NAME);
-    if (gatt_chrc) {
-        gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_MANUFACTURER_NAME);
-        if (gatt_desc) {
-            mfr_name_handle = gatt_desc->handle;
-            LOG_INF("Found Manufacturer Name characteristic (handle: %d)", mfr_name_handle);
-        }
-    }
+	/* Find Manufacturer Name characteristic */
+	gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_MANUFACTURER_NAME);
+	if (gatt_chrc) {
+		gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_MANUFACTURER_NAME);
+		if (gatt_desc) {
+			mfr_name_handle = gatt_desc->handle;
+			LOG_INF("Found Manufacturer Name characteristic (handle: %d)", mfr_name_handle);
+		}
+	}
 
-    /* Find Model Number characteristic */
-    gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_MODEL_NUMBER);
-    if (gatt_chrc) {
-        gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_MODEL_NUMBER);
-        if (gatt_desc) {
-            model_number_handle = gatt_desc->handle;
-            LOG_INF("Found Model Number characteristic (handle: %d)", model_number_handle);
-        }
-    }
+	/* Find Model Number characteristic */
+	gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_MODEL_NUMBER);
+	if (gatt_chrc) {
+		gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_MODEL_NUMBER);
+		if (gatt_desc) {
+			model_number_handle = gatt_desc->handle;
+			LOG_INF("Found Model Number characteristic (handle: %d)", model_number_handle);
+		}
+	}
 
-    /* Find PnP ID characteristic */
-    gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_PNP_ID);
-    if (gatt_chrc) {
-        gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_PNP_ID);
-        if (gatt_desc) {
-            pnp_id_handle = gatt_desc->handle;
-            LOG_INF("Found PnP ID characteristic (handle: %d)", pnp_id_handle);
-        }
-    }
+	/* Find PnP ID characteristic */
+	gatt_chrc = bt_gatt_dm_char_by_uuid(dm, BT_UUID_DIS_PNP_ID);
+	if (gatt_chrc) {
+		gatt_desc = bt_gatt_dm_desc_by_uuid(dm, gatt_chrc, BT_UUID_DIS_PNP_ID);
+		if (gatt_desc) {
+			pnp_id_handle = gatt_desc->handle;
+			LOG_INF("Found PnP ID characteristic (handle: %d)", pnp_id_handle);
+		}
+	}
 
-    /* Release discovery data */
-    err = bt_gatt_dm_data_release(dm);
-    if (err) {
-        LOG_ERR("Could not release DIS discovery data: %d", err);
-    }
+	/* Release discovery data */
+	err = bt_gatt_dm_data_release(dm);
+	if (err) {
+		LOG_ERR("Could not release DIS discovery data: %d", err);
+	}
 
-    /* Start the read pipeline from the first step */
-    advance_read_pipeline(&on_connection_read_steps[0]);
+	/* Start the read pipeline from the first step */
+	advance_read_pipeline(&on_connection_read_steps[0]);
 }
 
 static void dis_discovery_service_not_found_cb(struct bt_conn *conn, void *context) {
-    LOG_INF("Device Information Service not found during discovery");
-    current_conn = conn;
+	LOG_INF("Device Information Service not found during discovery");
+	current_conn = conn;
 
-    /* Start from the beginning — handle-based steps will be skipped naturally
-     * since no handles were discovered. The device name step will still run. */
-    advance_read_pipeline(&on_connection_read_steps[0]);
+	/* Start from the beginning — handle-based steps will be skipped naturally
+	 * since no handles were discovered. The device name step will still run. */
+	advance_read_pipeline(&on_connection_read_steps[0]);
 }
 
 static void dis_discovery_error_found_cb(struct bt_conn *conn, int err, void *context) {
-    LOG_ERR("Device Information Service discovery failed: %d", err);
-    current_conn = conn;
-    on_dis_reads_complete();
+	LOG_ERR("Device Information Service discovery failed: %d", err);
+	current_conn = conn;
+	on_dis_reads_complete();
 }
 
 void ble_dis_set_discovery_complete_cb(ble_dis_discovery_complete_cb_t cb) {
-    discovery_complete_cb = cb;
+	discovery_complete_cb = cb;
 }
