@@ -267,8 +267,7 @@ static int settings_set_cb(const char *name, size_t len, settings_read_cb read_c
 	return -ENOENT;
 }
 
-SETTINGS_STATIC_HANDLER_DEFINE(ble_dis,
-"ble_dis", NULL, settings_set_cb, NULL, NULL);
+SETTINGS_STATIC_HANDLER_DEFINE(ble_dis, "ble_dis", NULL, settings_set_cb, NULL, NULL);
 
 /* Public API implementations */
 int ble_dis_init(void) {
@@ -585,7 +584,7 @@ static void verify_device_identity(dis_read_step_t *step) {
 
 	if (!mfr_ok || !model_ok) {
 		bool got_reads = device_info.has_manufacturer_name || device_info.has_model_number;
-		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting%s",
+		LOG_WRN("Device identity mismatch - mfr='%s' model='%s'; disconnecting%s",
 				device_info.has_manufacturer_name ? device_info.manufacturer_name : "(none)",
 				device_info.has_model_number ? device_info.model_number : "(none)",
 				got_reads ? " and unpairing" : " (read error, not unpairing)");

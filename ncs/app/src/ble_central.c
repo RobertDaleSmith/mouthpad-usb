@@ -342,7 +342,6 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 			bonded_device_seen_advertising = true;
 			LOG_DBG("NORMAL scan: Found bonded device: %s", addr);
 		} else if (bonded_device_count > 0) {
-			// TODO is this why the dongle sometimes grabs new devices even though it should stick to a bonded Mouthpad?
 			/* We have bonds but this device isn't bonded */
 			if (bonded_device_seen_advertising) {
 				/* We've seen bonded devices advertising - skip unbonded */
