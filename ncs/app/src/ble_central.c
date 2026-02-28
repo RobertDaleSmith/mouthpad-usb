@@ -23,7 +23,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
 
-LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_INF);
 
 /* BLE Central connection state */
 enum ble_central_state {
@@ -857,8 +857,6 @@ static bool mfr_data_search_cb(struct bt_data *data, void *user_data)
 	bool *found = (bool *)user_data;
 
 	if (data->type == BT_DATA_MANUFACTURER_DATA) {
-		LOG_DBG("Manufacturer data company id: 0x%04X", sys_get_le16(data->data));
-		LOG_DBG("Manufacturer data model number: %s", data->data + 2);
 		if (data->data_len >= 2 + sizeof(MOUTHPAD_MFR_DATA_PAYLOAD) - 1 &&
 		    sys_get_le16(data->data) == MOUTHPAD_COMPANY_ID &&
 		    memcmp(data->data + 2, MOUTHPAD_MFR_DATA_PAYLOAD,
