@@ -23,7 +23,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
 
-LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(ble_central, LOG_LEVEL_DBG);
 
 /* BLE Central connection state */
 enum ble_central_state {
@@ -315,6 +315,11 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 			      struct bt_scan_filter_match *filter_match,
 			      bool connectable)
 {
+	/* Ignore callbacks if we are no longer actively scanning */
+	if (connection_state != BLE_CENTRAL_STATE_SCANNING) {
+		return;
+	}
+
 	char addr[BT_ADDR_LE_STR_LEN];
 
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
@@ -375,7 +380,7 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		return;
 	}
 
-	if (!dev_state->has_mfr_data) {
+	if (!is_bonded && !dev_state->has_mfr_data) {
 		LOG_DBG("Skipping device %s: missing expected manufacturer data", addr);
 		return;
 	}
@@ -852,13 +857,17 @@ static bool mfr_data_search_cb(struct bt_data *data, void *user_data)
 	bool *found = (bool *)user_data;
 
 	if (data->type == BT_DATA_MANUFACTURER_DATA) {
+		LOG_DBG("Manufacturer data company id: 0x%04X", sys_get_le16(data->data));
+		LOG_DBG("Manufacturer data model number: %s", data->data + 2);
 		if (data->data_len >= 2 + sizeof(MOUTHPAD_MFR_DATA_PAYLOAD) - 1 &&
 		    sys_get_le16(data->data) == MOUTHPAD_COMPANY_ID &&
 		    memcmp(data->data + 2, MOUTHPAD_MFR_DATA_PAYLOAD,
 			   sizeof(MOUTHPAD_MFR_DATA_PAYLOAD) - 1) == 0) {
+			LOG_INF("Manufacturer data matches");
 			*found = true;
 			return false; /* stop parsing */
 		}
+		LOG_INF("Manufacturer data does not match expected values");
 	}
 
 	return true; /* continue parsing */

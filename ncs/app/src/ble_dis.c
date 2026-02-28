@@ -584,10 +584,15 @@ static void verify_device_identity(dis_read_step_t *step) {
 					strcmp(device_info.model_number, DIS_EXPECTED_MODEL_NUMBER) == 0;
 
 	if (!mfr_ok || !model_ok) {
-		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting",
+		bool got_reads = device_info.has_manufacturer_name || device_info.has_model_number;
+		LOG_WRN("Device identity mismatch — mfr='%s' model='%s'; disconnecting%s",
 				device_info.has_manufacturer_name ? device_info.manufacturer_name : "(none)",
-				device_info.has_model_number ? device_info.model_number : "(none)");
+				device_info.has_model_number ? device_info.model_number : "(none)",
+				got_reads ? " and unpairing" : " (read error, not unpairing)");
 		if (current_conn) {
+			if (got_reads) {
+				bt_unpair(BT_ID_DEFAULT, bt_conn_get_dst(current_conn));
+			}
 			bt_conn_disconnect(current_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 		}
 		return;
