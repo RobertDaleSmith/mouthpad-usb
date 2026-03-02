@@ -336,20 +336,13 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		}
 		LOG_INF("ADDITIONAL scan: Found NEW device: %s", addr);
 	} else {
-		/* NORMAL mode: Always prefer bonded, but accept unbonded if no bonded devices advertising */
 		if (is_bonded) {
 			/* Mark that we've seen a bonded device advertising */
 			bonded_device_seen_advertising = true;
 			LOG_DBG("NORMAL scan: Found bonded device: %s", addr);
 		} else if (bonded_device_count > 0) {
-			/* We have bonds but this device isn't bonded */
-			if (bonded_device_seen_advertising) {
-				/* We've seen bonded devices advertising - skip unbonded */
-				LOG_DBG("NORMAL scan: Skipping non-bonded device (bonded devices available): %s", addr);
-				return;
-			}
-			/* No bonded devices seen advertising - accept unbonded as fallback */
-			LOG_INF("NORMAL scan: No bonded devices found - accepting unbonded device: %s", addr);
+			LOG_DBG("NORMAL scan: Skipping non-bonded device (already bonded to a device")
+			return;
 		}
 	}
 
