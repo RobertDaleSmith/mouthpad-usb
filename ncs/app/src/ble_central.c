@@ -52,9 +52,6 @@ static int64_t additional_scan_start_time = 0;
 #define MOUTHPAD_COMPANY_ID        0x4147
 #define MOUTHPAD_MFR_DATA_PAYLOAD  "MP1"
 
-/* Track if any bonded devices are advertising in current scan session */
-static bool bonded_device_seen_advertising = false;
-
 /* Multi-bond device tracking */
 /* MAX_BONDED_DEVICES and struct bonded_device are defined in ble_central.h */
 
@@ -331,8 +328,6 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		LOG_INF("ADDITIONAL scan: Found NEW device: %s", addr);
 	} else {
 		if (is_bonded) {
-			/* Mark that we've seen a bonded device advertising */
-			bonded_device_seen_advertising = true;
 			LOG_DBG("NORMAL scan: Found bonded device: %s", addr);
 		} else if (bonded_device_count > 0) {
 			LOG_DBG("NORMAL scan: Skipping non-bonded device %s (already bonded to a device)", addr);
@@ -981,8 +976,6 @@ int ble_central_start_scan(void)
 		LOG_INF("Enabling HID+NUS UUID filter in ADDITIONAL scan mode (%d bonded, looking for NEW device)",
 			bonded_device_count);
 	} else if (bonded_device_count > 0) {
-		/* Reset bonded device advertising flag for new scan session */
-		bonded_device_seen_advertising = false;
 		LOG_INF("Enabling HID+NUS UUID filter in NORMAL scan mode (%d bonded devices, bonded devices only)",
 			bonded_device_count);
 	} else {
