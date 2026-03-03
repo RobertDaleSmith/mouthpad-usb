@@ -335,7 +335,7 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 			bonded_device_seen_advertising = true;
 			LOG_DBG("NORMAL scan: Found bonded device: %s", addr);
 		} else if (bonded_device_count > 0) {
-			LOG_DBG("NORMAL scan: Skipping non-bonded device (already bonded to a device");
+			LOG_DBG("NORMAL scan: Skipping non-bonded device %s (already bonded to a device)", addr);
 			return;
 		}
 	}
