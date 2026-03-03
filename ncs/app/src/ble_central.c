@@ -264,7 +264,7 @@ static void scan_indicator_handler(struct k_work *work)
 			LOG_INF("Scanning for ADDITIONAL MouthPad (%ds remaining, %d bonded)...",
 				remaining, bonded_device_count);
 		} else if (bonded_device_count > 0) {
-			LOG_INF("Scanning for bonded MouthPad (%d bonded)...");
+			LOG_INF("Scanning for bonded MouthPad (%d bonded)...", bonded_device_count);
 		} else {
 			LOG_INF("Scanning for MouthPad...");
 		}
