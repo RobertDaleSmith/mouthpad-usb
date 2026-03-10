@@ -50,7 +50,7 @@ static int64_t additional_scan_start_time = 0;
 #define ADDITIONAL_SCAN_TIMEOUT_MS 10000  /* 10 second timeout for additional scan */
 
 #define MOUTHPAD_COMPANY_ID        0x4147
-#define MOUTHPAD_MFR_DATA_PAYLOAD  "MouthPad^"
+#define MOUTHPAD_MFR_DATA_PAYLOAD  "MP1"
 
 /* Track if any bonded devices are advertising in current scan session */
 static bool bonded_device_seen_advertising = false;
