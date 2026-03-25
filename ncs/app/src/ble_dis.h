@@ -21,6 +21,7 @@ extern "C" {
 #define BLE_DIS_DEVICE_NAME_MAX_LEN 64
 #define BLE_DIS_HARDWARE_REVISION_MAX_LEN 64
 #define BLE_DIS_MANUFACTURER_NAME_MAX_LEN 64
+#define BLE_DIS_MODEL_NUMBER_MAX_LEN 64
 
 /**
  * @brief Device Information structure
@@ -30,12 +31,14 @@ typedef struct {
 	char device_name[BLE_DIS_DEVICE_NAME_MAX_LEN];
 	char hardware_revision[BLE_DIS_HARDWARE_REVISION_MAX_LEN];
 	char manufacturer_name[BLE_DIS_MANUFACTURER_NAME_MAX_LEN];
+	char model_number[BLE_DIS_MODEL_NUMBER_MAX_LEN];
 	uint16_t vendor_id;
 	uint16_t product_id;
 	bool has_firmware_version;
 	bool has_device_name;
 	bool has_hardware_revision;
 	bool has_manufacturer_name;
+	bool has_model_number;
 	bool has_pnp_id;
 } ble_dis_info_t;
 
