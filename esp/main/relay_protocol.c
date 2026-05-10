@@ -29,6 +29,7 @@ static int32_t s_last_rssi = 0;
 static esp_err_t handle_ble_connection_status_read(void);
 static esp_err_t handle_device_info_read(void);
 static esp_err_t handle_clear_bonds_write(void);
+static esp_err_t handle_clear_firmware_cache_write(void);
 static esp_err_t handle_dfu_write(void);
 static esp_err_t handle_pass_through_to_mouthpad(const uint8_t *data, size_t len);
 
@@ -85,6 +86,11 @@ esp_err_t relay_protocol_handle_usb_data(const uint8_t *data, uint16_t len) {
         case mouthware_message_AppToRelayMessage_clear_bonds_write_tag:
             ESP_LOGD(TAG, "Handling ClearBondsWrite");
             ret = handle_clear_bonds_write();
+            break;
+
+        case mouthware_message_AppToRelayMessage_clear_firmware_cache_write_tag:
+            ESP_LOGD(TAG, "Handling ClearFirmwareCacheWrite");
+            ret = handle_clear_firmware_cache_write();
             break;
 
         case mouthware_message_AppToRelayMessage_dfu_write_tag:
@@ -311,6 +317,18 @@ static esp_err_t handle_clear_bonds_write(void) {
     // Perform bond reset (disconnect device + clear all bonds)
     esp_err_t ret = perform_bond_reset();
     relay_msg.message_body.clear_bonds_response.success = (ret == ESP_OK);
+
+    return relay_protocol_send_response(&relay_msg);
+}
+
+static esp_err_t handle_clear_firmware_cache_write(void) {
+    ESP_LOGI(TAG, "=== CLEAR FIRMWARE CACHE REQUEST (via protobuf) ===");
+
+    mouthware_message_RelayToAppMessage relay_msg = mouthware_message_RelayToAppMessage_init_zero;
+    relay_msg.which_message_body = mouthware_message_RelayToAppMessage_clear_firmware_cache_response_tag;
+
+    esp_err_t ret = ble_device_info_clear_saved();
+    relay_msg.message_body.clear_firmware_cache_response.success = (ret == ESP_OK);
 
     return relay_protocol_send_response(&relay_msg);
 }
